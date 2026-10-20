@@ -82,16 +82,16 @@ def infer(request: dict) -> dict:
             {"facet": group["facet"], "top_matches": ranked, "margin": margin, "ambiguous": margin < 0.02}
         )
         cursor += length
-    summary = "；".join(
-        f"{facet['facet']}倾向{facet['top_matches'][0]['label']}"
-        + ("（匹配接近）" if facet["ambiguous"] else "")
+    summary = "; ".join(
+        f"{facet['facet']}: {facet['top_matches'][0]['label']}"
+        + (" (close matches)" if facet["ambiguous"] else "")
         for facet in facets
     )
     target_scores = [
         {"text": text, "cosine_similarity": float(scores[cursor + i])} for i, text in enumerate(targets)
     ]
     return {
-        "description": summary + "。",
+        "description": summary + ".",
         "method": "CLAP audio/text descriptor retrieval",
         "model_id": request["model_id"],
         "device": device,

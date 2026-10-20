@@ -127,7 +127,60 @@ class FalconBridge:
         self.lock = asyncio.Lock()
         self.uncertain_request: str | None = None
         self._token: str | None = None
+        self.bound_instance: str | None = None
+        self.bound_programs: list[dict[str, str]] = []
+        self.last_observed_instance: str | None = None
         self.audit = audit or AuditLog(config.log_root)
+
+    async def bind_instance(self, instance: str, programs: list[dict[str, str]]) -> dict:
+        """Bind this MCP process only after a fresh, unguarded identity check."""
+        async with self.lock, mailbox_lock(self.config.runtime, self.config.bridge_timeout):
+            engine = await self._request_locked("ping", None, False, self._read_token(), use_binding=False)
+            if engine.get("instance") != instance:
+                raise BridgeError("Instance changed before binding; inspect falcon_status and select the intended instance")
+            if engine.get("instanceGuard") is not True:
+                raise BridgeError("This runtime lacks instance guards; deploy the matching bridge while idle")
+            if self._programs_changed(engine, programs):
+                raise BridgeError("Program target changed before binding; inspect the current tree and names")
+            self.bound_instance = instance
+            self.bound_programs = [dict(p) for p in programs]
+            result = {"instance": instance, "programs": self.bound_programs, "scope": "This MCP server process"}
+            self.audit.event("bridge_bound", **result)
+            return result
+
+    def connection_status(self, engine: dict | None, error: str | None = None) -> dict:
+        instance = (engine or {}).get("instance")
+        previous = self.last_observed_instance
+        changed = bool(instance and previous and instance != previous)
+        if instance:
+            self.last_observed_instance = instance
+        reason = "connected"
+        if error:
+            reason = "no_authenticated_response"
+        elif self.bound_instance and instance != self.bound_instance:
+            reason = "bound_instance_changed"
+        elif self.bound_programs and self._programs_changed(engine or {}):
+            reason = "bound_program_changed"
+        elif changed:
+            reason = "instance_changed"
+        return {
+            "reason": reason, "current_instance": instance, "previous_instance": previous,
+            "changed_since_last_status": changed, "bound_instance": self.bound_instance,
+            "bound_programs": self.bound_programs, "runtime_home": str(self.config.runtime.parent),
+            "possible_causes": [
+                "Falcon closed or audio engine/plugin sleeping", "Master launcher removed by a Multi change",
+                "Different runtime home or credential", "Multiple launchers sharing one mailbox",
+            ] if error else [],
+            "note": "A response identifies the answering runtime, not the foreground window. Use a separate home per instance.",
+        }
+
+    def _programs_changed(self, engine: dict, programs: list[dict[str, str]] | None = None) -> bool:
+        targets = {p.get("selector"): p for p in engine.get("targets", [])}
+        return any(
+            targets.get(p["selector"], {}).get("name") != p["name"]
+            or ("display_name" in p and targets.get(p["selector"], {}).get("displayName") != p["display_name"])
+            for p in (self.bound_programs if programs is None else programs)
+        )
 
     def prepare(self, *, probe: bool = False) -> dict:
         root = self.config.runtime
@@ -210,14 +263,18 @@ class FalconBridge:
             self._token = json.loads(path.read_text(encoding="utf8"))["token"]
         return self._token
 
-    async def request(self, op: str, args: dict | None = None, *, mutation: bool = False) -> dict:
+    async def request(
+        self, op: str, args: dict | None = None, *, mutation: bool = False, use_binding: bool = True
+    ) -> dict:
+        if not use_binding and (op != "ping" or mutation):
+            raise ValueError("Only diagnostic ping may bypass instance binding")
         self.audit.event("bridge_request", op=op, args=args or {}, mutation=mutation)
         started = time.monotonic()
         try:
             async with self.lock:
                 token = self._read_token()
                 async with mailbox_lock(self.config.runtime, self.config.bridge_timeout):
-                    result = await self._request_locked(op, args, mutation, token)
+                    result = await self._request_locked(op, args, mutation, token, use_binding=use_binding)
             self.audit.event(
                 "bridge_result", op=op, result=result, duration_ms=(time.monotonic() - started) * 1000
             )
@@ -227,7 +284,8 @@ class FalconBridge:
             raise
 
     async def _request_locked(
-        self, op: str, args: dict | None, mutation: bool, token: str, *, timeout: float | None = None
+        self, op: str, args: dict | None, mutation: bool, token: str, *, timeout: float | None = None,
+        use_binding: bool = True,
     ) -> dict:
         uncertain_file = self.config.runtime / "uncertain.json"
         if uncertain_file.exists():
@@ -241,6 +299,11 @@ class FalconBridge:
             )
         identifier = uuid.uuid4().hex
         request = {"protocol": 1, "token": token, "id": identifier, "op": op, "args": args or {}}
+        expected_instance = self.bound_instance if use_binding else None
+        if expected_instance:
+            request["expectedInstance"] = expected_instance
+            if mutation:
+                request["expectedPrograms"] = self.bound_programs
         if mutation:
             # A read-only handshake precedes EVERY write. After reload, a stale
             # command cannot initialize a new session or replay a previous edit.
@@ -253,6 +316,8 @@ class FalconBridge:
                 ) from exc
             if engine.get("sessionRequired"):
                 request["session"] = engine["instance"]
+            if expected_instance and engine.get("instance") != expected_instance:
+                raise BridgeError("Bound instance changed; mutation was NOT dispatched. Inspect status and rebind explicitly")
         if len(json.dumps(request, ensure_ascii=False, allow_nan=False).encode("utf8")) > 65536:
             raise ValueError("Bridge request exceeds 64 KiB; split the parameter batch")
         self.audit.event("bridge_dispatch", request_id=identifier, op=op, mutation=mutation)
@@ -269,6 +334,10 @@ class FalconBridge:
                 if not isinstance(response, dict):
                     response = {}
                 if response.get("id") == identifier and response.get("token") == token:
+                    if expected_instance and response.get("instance") != expected_instance:
+                        # Another responder may overwrite the intended engine's receipt.
+                        # Never clear a pending write on the strength of that response.
+                        raise BridgeError("Response came from a different instance; inspect status and mailbox ownership before rebinding")
                     if mutation:
                         uncertain_file.unlink(missing_ok=True)
                     if not response.get("ok"):

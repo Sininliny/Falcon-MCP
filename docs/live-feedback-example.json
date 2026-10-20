@@ -57,26 +57,26 @@
       "scope": "Downstream of this Script Processor; use a Part/Program bridge for audition"
     },
     "feedback": {
-      "description": "亮度倾向温暖圆润；起音与延音倾向短促弹拨；质感倾向锯齿蜂鸣；动态变化倾向稳定；空间感倾向干燥贴近。",
+      "description": "Brightness: Warm and round; Attack and sustain: Short pluck; Texture: Buzzy sawtooth; Movement: Stable; Space: Dry and close.",
       "method": "CLAP audio/text descriptor retrieval",
       "model_id": "laion/clap-htsat-unfused",
       "device": "cuda",
       "facets": [
         {
-          "facet": "亮度",
+          "facet": "Brightness",
           "top_matches": [
             {
-              "label": "温暖圆润",
+              "label": "Warm and round",
               "text": "A warm, round and mellow synthesizer tone.",
               "cosine_similarity": 0.5456932187080383
             },
             {
-              "label": "低暗柔和",
+              "label": "Dark and soft",
               "text": "A dark, soft and low-pass filtered synthesizer tone.",
               "cosine_similarity": 0.2062452882528305
             },
             {
-              "label": "明亮锐利",
+              "label": "Bright and sharp",
               "text": "A bright, sharp synthesizer tone with strong high frequency harmonics.",
               "cosine_similarity": 0.16048482060432434
             }
@@ -85,20 +85,20 @@
           "ambiguous": false
         },
         {
-          "facet": "起音与延音",
+          "facet": "Attack and sustain",
           "top_matches": [
             {
-              "label": "短促弹拨",
+              "label": "Short pluck",
               "text": "A short plucked synthesizer note with a sharp attack and quick decay.",
               "cosine_similarity": 0.42403852939605713
             },
             {
-              "label": "缓慢铺开",
+              "label": "Slow swell",
               "text": "A soft synthesizer pad that swells in slowly and fades out gradually.",
               "cosine_similarity": 0.29599729180336
             },
             {
-              "label": "平稳持续",
+              "label": "Steady sustain",
               "text": "A steady sustained synthesizer note with a constant volume.",
               "cosine_similarity": 0.17580121755599976
             }
@@ -107,20 +107,20 @@
           "ambiguous": false
         },
         {
-          "facet": "质感",
+          "facet": "Texture",
           "top_matches": [
             {
-              "label": "锯齿蜂鸣",
+              "label": "Buzzy sawtooth",
               "text": "A buzzy sawtooth synthesizer sound with rich harmonics.",
               "cosine_similarity": 0.3068827688694
             },
             {
-              "label": "金属钟鸣",
+              "label": "Metallic bell",
               "text": "A metallic bell-like synthesizer sound with ringing inharmonic overtones.",
               "cosine_similarity": 0.26380783319473267
             },
             {
-              "label": "纯净平滑",
+              "label": "Clean and smooth",
               "text": "A clean smooth pure sine-like musical tone with few harmonics.",
               "cosine_similarity": 0.23615284264087677
             }
@@ -129,20 +129,20 @@
           "ambiguous": false
         },
         {
-          "facet": "动态变化",
+          "facet": "Movement",
           "top_matches": [
             {
-              "label": "稳定",
+              "label": "Stable",
               "text": "A stable musical note without vibrato, tremolo or rhythmic modulation.",
               "cosine_similarity": 0.3389854431152344
             },
             {
-              "label": "节奏脉冲",
+              "label": "Rhythmic pulse",
               "text": "A pulsing synthesizer sound with rhythmic volume modulation.",
               "cosine_similarity": 0.2437041997909546
             },
             {
-              "label": "颤音摇摆",
+              "label": "Pitch vibrato",
               "text": "A musical note with clear pitch vibrato wobbling up and down.",
               "cosine_similarity": 0.2421838343143463
             }
@@ -151,20 +151,20 @@
           "ambiguous": false
         },
         {
-          "facet": "空间感",
+          "facet": "Space",
           "top_matches": [
             {
-              "label": "干燥贴近",
+              "label": "Dry and close",
               "text": "A dry close musical sound without reverb or echo.",
               "cosine_similarity": 0.4900260865688324
             },
             {
-              "label": "延迟回声",
+              "label": "Delay echoes",
               "text": "A musical note with distinct repeating delay echoes.",
               "cosine_similarity": 0.39918845891952515
             },
             {
-              "label": "宽广合唱",
+              "label": "Wide chorus",
               "text": "A wide lush layered synthesizer with detuned chorus and stereo movement.",
               "cosine_similarity": 0.3982217609882355
             }

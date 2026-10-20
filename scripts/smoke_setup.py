@@ -1,4 +1,4 @@
-"""Read-only real Falcon/stdio installation diagnosis. Does not move the mouse or replace a program."""
+"""Real Falcon/stdio diagnosis. Server startup may deploy a runtime; run idle. No Program replacement."""
 
 import asyncio
 import json
@@ -19,7 +19,7 @@ async def run():
     async with stdio_client(parameters) as (reader, writer), ClientSession(reader, writer) as client:
         await client.initialize()
         names = {tool.name for tool in (await client.list_tools()).tools}
-        assert "falcon_setup" in names and len(names) == 43
+        assert {"falcon_setup", "falcon_bind_instance", "falcon_capture_status"} <= names and len(names) == 45
         response = await client.call_tool("falcon_status", {})
         assert not response.isError
         status = response.structuredContent

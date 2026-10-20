@@ -26,10 +26,16 @@ async def test_real_stdio_initialize_tools_resource_and_validation(config):
             "falcon_api_coverage",
             "falcon_voice_control",
             "falcon_setup",
+            "falcon_bind_instance",
+            "falcon_capture_status",
         } <= names
-        assert len(names) == 43
+        assert len(names) == 45
         assert (config.runtime / "falcon_bridge.lua").is_file()
         assert all(t.outputSchema is not None for t in tools.tools)
+        capture = await client.call_tool("falcon_capture_status", {})
+        assert not capture.isError and capture.structuredContent["state"] == "idle"
+        invalid_binding = await client.call_tool("falcon_bind_instance", {"instance": ""})
+        assert invalid_binding.isError
         result = await client.call_tool("falcon_search_catalog", {"query": "Analog"})
         assert not result.isError and result.structuredContent["total_count"] > 0
         result = await client.call_tool(

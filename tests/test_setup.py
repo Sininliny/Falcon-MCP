@@ -38,6 +38,7 @@ async def watcher(bridge, *, watch=True, master=True):
             "instance": instance,
             "scope": {"type": "Synth" if master else "Program"},
             "sessionRequired": True,
+            "instanceGuard": True,
             "sequence": {"playing": False},
             "trackedVoices": 0,
             "bootstrap": {"version": 1, "automaticReload": True, "error": ""},
@@ -48,9 +49,27 @@ async def watcher(bridge, *, watch=True, master=True):
                 "token": req["token"],
                 "id": req["id"],
                 "ok": True,
+                "instance": instance,
                 "result": result,
             },
         )
+
+
+async def test_bound_deployment_verifies_new_build_without_silently_rebinding(config):
+    bridge = FalconBridge(replace(config, bridge_timeout=0.5))
+    bridge.prepare()
+    worker = asyncio.create_task(watcher(bridge))
+    try:
+        await bridge.bind_instance("first-instance", [])
+        result = await setup_bridge(bridge, verify_watch=True)
+        assert result["applied"] and result["binding_refresh_required"]
+        assert bridge.bound_instance == "first-instance"
+        with pytest.raises(BridgeError, match="different instance"):
+            await bridge.request("play", mutation=True)
+    finally:
+        worker.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await worker
 
 
 def test_prepare_is_idempotent_and_build_includes_extension(config):

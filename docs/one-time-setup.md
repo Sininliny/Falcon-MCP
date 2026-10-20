@@ -1,6 +1,6 @@
 # Installation and operating precautions
 
-Applies to Falcon MCP 0.2.3. Verified on Windows with Falcon standalone 27.0.2. VST/DAW combinations and other Falcon versions require separate validation.
+Applies to Falcon MCP 0.2.4. Persistent startup was verified with 0.2.3 on Windows Falcon standalone 27.0.2; the 0.2.4 guards/readiness additions have automated coverage and require native acceptance. VST/DAW combinations and other Falcon versions require separate validation.
 
 ## 1. Install the server
 
@@ -77,6 +77,8 @@ Add `FALCON_AUDIO_PYTHON` only when using a separate feedback interpreter. Keep 
 4. Call `falcon_status` with no arguments. Require `connected=true`, `installation.master_scope=true`, `installation.persistent_bootstrap=true`, `installation.current_build_loaded=true`, and `installation.ready_without_gui=true`. If initialization is still pending, let the idle engine process and check again. For deployment acceptance, use the verification procedure below.
 
 Automatic initialization does not start the Falcon application, insert a Script Processor, or save a default Multi. Those steps require the one-time installation above. It does not load the feedback model; weights load only during a feedback call.
+
+Before editing, confirm `engine.targets` and call `falcon_bind_instance` with the inspected `engine.instance` and optional Program selector/name pairs. Binding belongs to one MCP process. Runtime deployment/restart changes identity; inspect status, refresh targets and bind again. A Program replacement may change names without restarting the Master bridge. Status reports the answering instance, not the foreground window; never share one runtime home across instances.
 
 ### Manual initialization
 
@@ -157,6 +159,9 @@ Update the package in the configured Python environment, reconnect MCP, then ver
 | Connected, wrong scope/build | Inspect `falcon_status.installation`; restore the Master launcher or publish/verify the current runtime. |
 | Duplicate or inconsistent responses | Keep one launcher per instance; never share its mailbox between Falcon instances. |
 | Old/missing Codex tools | Reconnect the MCP service. Reinstalling a package does not refresh a running server. |
+| Bound instance/Program changed | Inspect `falcon_status.connection` and `engine.targets`; confirm the intended session, refresh selectors and bind explicitly. Do not silently adopt another responder. |
+| Capture ready but silent | Buffer arrival does not prove Falcon signal. Check endpoint/routing/ASIO or exclusive output, then inspect signal measurements. |
+| Recording misses notes/tails | Use `falcon_record_test`; inspect timing and `complete`. Increase duration if scheduling consumed the tail window. |
 | Extension update rejected | Inspect `installation.bootstrap_error` and `bridge/bootstrap-status.json`; correct source and republish. Syntax errors retain the previous runtime. |
 | Pending unknown mutation | Call `falcon_reconcile`, inspect affected state, and acknowledge an unknown result only after checking it. Do not retry blindly or reload to clear the guard. |
 | No captured audio | Install the capture extra and select a WASAPI output-loopback device receiving Falcon's signal. The server does not fall back to a microphone. |

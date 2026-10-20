@@ -11,7 +11,14 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, Stri
 
 from . import __version__
 from .async_utils import join_cleanup
-from .audio import FeedbackRunner, capture_loopback, list_loopback_devices, measurements, read_audio
+from .audio import (
+    CaptureMonitor,
+    FeedbackRunner,
+    capture_loopback,
+    list_loopback_devices,
+    measurements,
+    read_audio,
+)
 from .audit import AuditLog, trace_id
 from .bridge import FalconBridge
 from .catalog import search_catalog
@@ -51,6 +58,13 @@ class Note(BaseModel):
     delay_ms: int = Field(default=0, ge=0, le=10000, description="Delay after previous note-on")
 
 
+class ProgramTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    selector: Selector
+    name: Name
+    display_name: Name | None = Field(default=None, description="Also guard engine.targets[].displayName when available")
+
+
 def create_server(config: Config | None = None) -> FastMCP:
     cfg = config or Config.from_env()
     audit = AuditLog(cfg.log_root)
@@ -62,10 +76,13 @@ def create_server(config: Config | None = None) -> FastMCP:
     except RuntimeError as exc:
         audit.error("bridge_prepare_deferred", exc)
     capture_lock = asyncio.Lock()
+    capture_monitor = CaptureMonitor(audit)
     mcp = FastMCP(
         "falcon_mcp",
         instructions=(
-            "Local Falcon 2027 control. Call falcon_status first. Use selectors and live parameter definitions, "
+            "Local Falcon 2027 control. Call falcon_status first, confirm target names, then falcon_bind_instance "
+            "before editing. Binding is per MCP process; repeat after runtime/Multi changes. "
+            "Use selectors and live parameter definitions, "
             "never invent parameter names or use UI units as engine units. Query before mutating. "
             "Runtime cannot create layers/keygroups/oscillators/modulators or save/load Programs. "
             "Timbre feedback is LOCAL CLAP descriptor matching with optional target text; it is subjective, "
@@ -85,7 +102,7 @@ def create_server(config: Config | None = None) -> FastMCP:
             "audio_root": str(cfg.audio_root),
         }
         try:
-            status["engine"] = await bridge.request("ping")
+            status["engine"] = await bridge.request("ping", use_binding=False)
             status["connected"] = True
             status["bridge_update_required"] = status["engine"].get("bridgeVersion") != __version__
             if status["bridge_update_required"]:
@@ -96,7 +113,33 @@ def create_server(config: Config | None = None) -> FastMCP:
             status.update(connected=False, error=str(exc))
         status["uncertain_request"] = bridge.uncertain_request
         status["installation"] = installation_status(bridge, status.get("engine"))
+        status["connection"] = bridge.connection_status(status.get("engine"), status.get("error"))
+        status["capture"] = capture_monitor.snapshot()
         return status
+
+    @mcp.tool(annotations=READ)
+    async def falcon_bind_instance(
+        instance: Annotated[str, Field(min_length=1, max_length=256)],
+        programs: Annotated[list[ProgramTarget], Field(max_length=128)] | None = None,
+    ) -> dict[str, Any]:
+        """Pin this MCP process to the inspected runtime and optional Program selector/name pairs.
+
+        Read falcon_status first; use engine.instance and engine.targets, never guess an identity.
+        Bound requests reject other responders; writes also verify Program names inside Falcon.
+        Deployment/restart changes identity: inspect status, refresh targets and bind explicitly again.
+        Separate runtime homes remain required for separate instances. Names are not content hashes.
+        """
+        return await bridge.bind_instance(instance, [p.model_dump(exclude_none=True) for p in programs or []])
+
+    @mcp.tool(annotations=READ)
+    def falcon_capture_status() -> dict[str, Any]:
+        """Observe this server's last/current capture: starting, recording, completed, failed or cancelled.
+
+        ready is true only during capture after the first buffer, not proof Falcon is audible.
+        buffer_received retains that history after completion. Use record_test to wait internally
+        before scheduling notes; a completed recording still needs signal/routing checks.
+        """
+        return capture_monitor.snapshot()
 
     @mcp.tool(annotations=WRITE)
     async def falcon_setup(verify_watch: bool = False) -> dict[str, Any]:
@@ -365,7 +408,7 @@ def create_server(config: Config | None = None) -> FastMCP:
     ) -> dict[str, Any]:
         """Describe <=30 s audio using local open-source CLAP; load ONLY for this call, then release.
 
-        Returns Chinese facet descriptions, relative similarities, ambiguity, and measurements.
+        Returns English facet descriptions, relative similarities, ambiguity, and measurements.
         targets may contain English desired-sound descriptions for A/B comparisons. No cloud inference.
         First download weights using 'falcon-mcp download-model'; inference is offline by default.
         """
@@ -422,6 +465,7 @@ def create_server(config: Config | None = None) -> FastMCP:
         Captures the entire endpoint, including other apps. Select an isolated Falcon output;
         never records a microphone. Unique WAV is written under FALCON_AUDIO_ROOT.
         describe=true additionally starts/releases the local timbre model.
+        complete estimates note/tail coverage only; inspect signal measurements and listen.
         """
         onset, end = 0, 0
         for n in notes:
@@ -434,12 +478,18 @@ def create_server(config: Config | None = None) -> FastMCP:
             path = cfg.audio_path(f"test-{uuid.uuid4().hex}.wav", must_exist=False)
             loop, ready = asyncio.get_running_loop(), asyncio.Event()
             stop = threading.Event()
+            capture_monitor.begin(path, seconds, device_index)
+
+            def on_ready():
+                capture_monitor.ready()
+                ready.set()
+
             capture = asyncio.create_task(
                 asyncio.to_thread(
                     capture_loopback,
                     path,
                     seconds,
-                    lambda: loop.call_soon_threadsafe(ready.set),
+                    lambda: loop.call_soon_threadsafe(on_ready),
                     device_index,
                     stop,
                 )
@@ -455,14 +505,31 @@ def create_server(config: Config | None = None) -> FastMCP:
                     await capture  # propagate capture/device errors before sending notes
                     raise RuntimeError("Recording ended before note scheduling")
                 receipt = await play(notes, channel, None)
+                capture_monitor.scheduled()
                 recorded = await asyncio.shield(capture)
-                result = {"capture": recorded, "notes": receipt}
+                capture_monitor.complete(recorded)
+                # Scheduling/handshake latency consumes the requested recording window.
+                available = recorded.get("actual_duration_seconds", seconds)
+                latency = (capture_monitor.data["notes_after_ms"] - capture_monitor.data["ready_after_ms"]) / 1000
+                priming = recorded.get("ready_frame", 0) / recorded.get("sample_rate", 48000)
+                tail = available - priming - latency - end / 1000
+                result = {
+                    "capture": recorded, "notes": receipt, "recording": capture_monitor.snapshot(),
+                    "timing": {"scheduling_seconds": latency, "estimated_tail_seconds": tail},
+                    "complete": tail >= 0.5,
+                    "warnings": [] if tail >= 0.5 else [
+                        "Capture may truncate notes/tail after scheduling latency; increase seconds and retest."
+                    ],
+                }
                 if describe:
                     result["feedback"] = await feedback.analyze(path)
                 else:
                     audio, rate = await asyncio.to_thread(read_audio, path)
                     result["measurements"] = await asyncio.to_thread(measurements, audio, rate)
                 return result
+            except BaseException as exc:
+                capture_monitor.fail(exc)
+                raise
             finally:
                 readiness.cancel()
                 stop.set()
@@ -485,6 +552,16 @@ def create_server(config: Config | None = None) -> FastMCP:
             "logs": "Full MCP/bridge JSONL audit, engine print ring and native Falcon log",
             "program_save_load": False,
             "create_synthesis_nodes": False,
+            "workflow_support": {
+                "runtime_control": {"status": "implemented", "validation": "See docs/validation.md; not every module was hardware-tested"},
+                "instance_binding": {"status": "implemented", "validation": "Automated protocol/Lua tests; per-server opt-in guard"},
+                "capture_readiness": {"status": "implemented", "validation": "Automated buffer/ordering tests; endpoint must be tested locally"},
+                "program_multi_save_load": {"status": "public_api_gap", "alternative": "Use Falcon's native save/load UI"},
+                "synthesis_node_creation": {"status": "public_api_gap", "alternative": "Native editing or separately validated offline authoring"},
+                "offline_preset_authoring": {"status": "not_implemented", "validation": "User-reported workflow; not a server-supported file writer"},
+                "ufs_index_native_preview": {"status": "not_implemented", "validation": "No reliable native association workflow established"},
+                "continuous_model_listening": {"status": "not_implemented", "alternative": "One capture and one analysis per call"},
+            },
             "model": feedback.status(),
             "manual": "https://manual.uvi.net/falcon/en/",
             "api": "https://lua.uvi.net/",
@@ -495,7 +572,8 @@ def create_server(config: Config | None = None) -> FastMCP:
     def refine_timbre(target: str) -> str:
         """Guide a measurable, reversible Falcon sound refinement workflow."""
         return (
-            f"Target timbre: {target}\nCall falcon_status; browse the selected Program and live parameters. "
+            f"Target timbre: {target}\nCall falcon_status; confirm runtime and target names, then falcon_bind_instance. "
+            "Browse the selected Program and live parameters. "
             "Record an identical test phrase and use falcon_describe_timbre with an English target. "
             "Read existing values, change one or two parameters with expected old values, verify readback, "
             "record again, and compare recordings. Report measured and subjective changes separately. "
@@ -505,7 +583,7 @@ def create_server(config: Config | None = None) -> FastMCP:
 
     from .advanced import register_advanced
 
-    register_advanced(mcp, cfg, bridge, audit, capture_lock)
+    register_advanced(mcp, cfg, bridge, audit, capture_lock, capture_monitor)
     # Audit at the protocol boundary, so rejected input/unknown tools are logged too.
     for request_type, original in list(mcp._mcp_server.request_handlers.items()):
 

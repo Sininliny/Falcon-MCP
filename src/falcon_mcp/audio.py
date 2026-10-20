@@ -6,7 +6,10 @@ import math
 import os
 import sys
 import threading
+import time
+import uuid
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +18,55 @@ import soundfile as sf
 from .async_utils import join_cleanup
 from .audit import AuditLog
 from .config import Config
+
+
+class CaptureMonitor:
+    """Observable capture lifecycle; updated on the server event loop."""
+
+    def __init__(self, audit: AuditLog):
+        self.audit = audit
+        self.data: dict = {"state": "idle", "capture_id": None}
+        self.started = 0.0
+
+    def begin(self, path: Path, seconds: float, device_index: int | None):
+        self.started = time.monotonic()
+        self.data = {
+            "state": "starting", "capture_id": uuid.uuid4().hex, "path": str(path),
+            "requested_seconds": seconds, "device_index": device_index,
+            "started_utc": datetime.now(UTC).isoformat(),
+            "ready": False, "buffer_received": False, "notes_scheduled": False,
+        }
+        self.audit.event("capture_started", **self.data)
+
+    def ready(self):
+        if self.data["state"] != "starting":
+            return  # A delayed thread callback must not revive a cancelled/failed capture.
+        self.data.update(state="recording", ready=True, buffer_received=True, ready_after_ms=self.elapsed_ms())
+        self.audit.event("capture_ready", **self.data)
+
+    def scheduled(self):
+        self.data.update(notes_scheduled=True, notes_after_ms=self.elapsed_ms())
+        self.audit.event("capture_notes_scheduled", **self.data)
+
+    def complete(self, recorded: dict):
+        self.data.update(state="completed", ready=False, elapsed_ms=self.elapsed_ms(), device=recorded.get("device"))
+        self.audit.event("capture_completed", **self.data)
+
+    def fail(self, exc: BaseException):
+        if self.data["state"] == "completed":
+            self.audit.error("capture_postprocessing_failed", exc, capture_id=self.data["capture_id"])
+            return
+        self.data.update(
+            state="cancelled" if isinstance(exc, asyncio.CancelledError) else "failed",
+            ready=False, error=str(exc) or type(exc).__name__, elapsed_ms=self.elapsed_ms(),
+        )
+        self.audit.event("capture_failed", **self.data)
+
+    def elapsed_ms(self):
+        return (time.monotonic() - self.started) * 1000
+
+    def snapshot(self):
+        return dict(self.data)
 
 
 def read_audio(path: Path, max_seconds: float = 30) -> tuple[np.ndarray, int]:
@@ -94,7 +146,7 @@ class FeedbackRunner:
         measured = await asyncio.to_thread(measurements, audio, rate)
         if measured["silent"]:
             return {
-                "description": "静音，无法可靠判断音色。",
+                "description": "Silent audio; timbre cannot be assessed reliably.",
                 "measurements": measured,
                 "model_used": False,
                 "model_released": True,
@@ -258,17 +310,23 @@ def capture_loopback(
             input_device_index=int(info["index"]),
             frames_per_buffer=1024,
         ) as stream:
-            ready()
             remaining, chunks = int(seconds * rate), []
             while remaining and not (stop and stop.is_set()):
                 count = min(1024, remaining)
                 chunks.append(stream.read(count, exception_on_overflow=True))
                 remaining -= count
+                if len(chunks) == 1:
+                    ready()  # Stream open alone does not prove that buffers are arriving.
         data = np.frombuffer(b"".join(chunks), dtype=np.float32).reshape(-1, channels)
         sf.write(path, data, rate, subtype="FLOAT")
     return {
         "path": str(path),
         "device": info["name"],
         "duration_seconds": seconds,
+        "actual_duration_seconds": len(data) / rate,
+        "sample_rate": rate,
+        "channels": channels,
+        "device_index": int(info["index"]),
+        "ready_frame": min(1024, len(data)),
         "scope": "Entire selected output endpoint, including other apps; use an isolated Falcon output",
     }

@@ -1,7 +1,7 @@
 -- UVI Falcon 2027 / UVIScript Lua 5.1. BRIDGE_ROOT and TOKEN are generated.
 -- Use documented asynchronous file I/O only. Never load/execute mailbox code.
 local json = require("uvi.json")
-local BRIDGE_VERSION="0.2.3"
+local BRIDGE_VERSION="0.2.4"
 local lastId = ""
 local lastMutation = {}
 local voices = {}
@@ -126,7 +126,17 @@ end
 
 local handlers = {}
 function handlers.ping(a)
+    local targets={}
+    for i,part in ipairs(Synth.parts or {}) do
+        local program=safeProperty(part,"program")
+        if program then
+            local item=summary(program,"Synth.parts["..i.."].program")
+            item.partName=safeProperty(part,"name")
+            targets[#targets+1]=item
+        end
+    end
     return {protocol=1, bridgeVersion=BRIDGE_VERSION, buildId=BUILD_ID, sessionRequired=true,
+        instanceGuard=true,targets=targets,
         instance=bridgeInstance, sampleRate=getSamplingRate(), trackedVoices=#voices,
         bootstrap=FALCON_BOOTSTRAP and {version=FALCON_BOOTSTRAP.version,
             automaticReload=FALCON_BOOTSTRAP.automaticReload,error=FALCON_BOOTSTRAP.error} or nil,
@@ -367,9 +377,19 @@ local function process(req)
     check(req.protocol == 1 and req.token == TOKEN and type(req.id) == "string", "Invalid request")
     local handler = handlers[req.op]
     check(handler ~= nil, "Unsupported operation")
+    if req.expectedInstance then
+        check(bridgeInstance~=nil and req.expectedInstance==bridgeInstance,
+            "Bound instance changed; inspect status and bind the intended instance")
+    end
     if isMutation(req) then
         check(bridgeInstance~=nil and req.session==bridgeInstance,
             "Bridge session changed; inspect state and reconnect before editing")
+        for _,target in ipairs(req.expectedPrograms or {}) do
+            local node=resolve(target.selector)
+            check(safeProperty(node,"name")==target.name and
+                (target.display_name==nil or safeProperty(node,"displayName")==target.display_name),
+                "Bound Program target changed; refresh selectors and bind the intended Program")
+        end
     elseif not bridgeInstance then
         bridgeInstance=FALCON_BOOTSTRAP and (FALCON_BOOTSTRAP.instanceNonce..":"..req.id) or req.id
     end
@@ -400,7 +420,7 @@ function onInit()
                     ok=pending.ok
                     if ok then result=pending.result else result=pending.error end
                 end
-                local response = {id=req.id, token=TOKEN, ok=ok, protocol=1}
+                local response = {id=req.id, token=TOKEN, ok=ok, protocol=1,instance=bridgeInstance}
                 if ok then response.result=result else response.error=tostring(result) end
                 if isMutation(req) then
                     lastMutation={id=req.id, op=req.op, ok=ok, result=response.result,error=response.error}

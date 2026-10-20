@@ -67,7 +67,7 @@ async def wait_for_build(bridge: FalconBridge, prepared: dict, token: str) -> di
     while time.monotonic() < deadline:
         try:
             engine = await bridge._request_locked(
-                "ping", None, False, token, timeout=min(0.6, deadline - time.monotonic())
+                "ping", None, False, token, timeout=min(0.6, deadline - time.monotonic()), use_binding=False
             )
             if engine.get("buildId") == prepared["build_id"] and isinstance(engine.get("instance"), str):
                 atomic_json(
@@ -82,6 +82,9 @@ async def wait_for_build(bridge: FalconBridge, prepared: dict, token: str) -> di
                     "requires_reload": False,
                     "engine": engine,
                     "installation": installation_status(bridge, engine),
+                    "binding_refresh_required": bool(
+                        bridge.bound_instance and bridge.bound_instance != engine.get("instance")
+                    ),
                 }
             error = "Falcon is still running a different script build"
         except (TimeoutError, BridgeError, OSError, ValueError) as exc:

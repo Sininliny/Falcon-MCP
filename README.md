@@ -1,8 +1,8 @@
-# Falcon MCP 0.2.3
+# Falcon MCP 0.2.4
 
 Local MCP control for UVI Falcon 2027: inspect the engine, edit parameters, audition and capture audio, diagnose signals, export project graphs, and compare timbres with an optional local model.
 
-Tested on Windows with Falcon standalone **27.0.2**. The server uses stdio and opens no network listener. VST/DAW combinations require separate validation.
+Native acceptance through 0.2.3 used Windows with Falcon standalone **27.0.2**. Version 0.2.4 adds instance guards and capture observability with automated coverage; native acceptance of those additions remains pending. The server uses stdio and opens no network listener. VST/DAW combinations require separate validation.
 
 ## Installation
 
@@ -34,8 +34,10 @@ Optional extras: `[capture]` for Windows WASAPI loopback; `[feedback]` for PyTor
 | Project analysis | Public nodes, parameters, modulation, routes, and sample metadata; JSON snapshots and paginated queries. |
 | UML | PlantUML/Mermaid source and local SVG/PNG rendering; composition, modulation, routing, subtree focus. |
 | Audio diagnostics | FFT/PSD, spectrogram, waveform, envelope, LUFS, estimated true peak, DC/clipping, stereo/mono checks, single-tone harmonics/THD. |
-| Timbre feedback | Local CLAP descriptor matching, Chinese timbre labels, optional target-text matching, and A/B comparison. |
+| Timbre feedback | Local CLAP descriptor matching, English timbre labels, optional target-text matching, and A/B comparison. |
 | Logs | Requests/results, exceptions, timing, worker output/lifecycle, bridge print ring, and Falcon native log access. |
+| Session safety | Explicit instance/Program-name binding, target summaries, observed lifecycle changes and possible disconnect causes. |
+| Capture state | First-buffer readiness, current/last capture status, endpoint metadata and possible tail-truncation warnings. |
 
 UVIScript does **not** expose creation/deletion of layers, keygroups, oscillators, modulators, or modulation connections, nor Program/Multi loading and saving. Prepare those structures in Falcon. Effect-chain editing is supported. Protected or otherwise hidden state remains outside public project snapshots.
 
@@ -43,11 +45,12 @@ The offline index contains 182 module classes, 3,066 parameter definitions, and 
 
 ## MCP tools
 
-The server exposes **43 tools**, structured schemas, the `falcon://capabilities` resource, and the `refine_timbre` prompt. Use tool discovery for full arguments and constraints.
+The server exposes **45 tools**, structured schemas, the `falcon://capabilities` resource, and the `refine_timbre` prompt. Use tool discovery for full arguments and constraints. The resource's `workflow_support` distinguishes implemented paths, public API gaps and unsupported workflows.
 
 | Tools | Purpose |
 |---|---|
 | `falcon_status`, `falcon_setup`, `falcon_reconcile` | Connection, persistent deployment, uncertain-write recovery. |
+| `falcon_bind_instance`, `falcon_capture_status` | Pin inspected runtime/Program targets; observe recording readiness and completion. |
 | `falcon_search_catalog`, `falcon_api_coverage` | Offline parameter/API indexes and runtime function probes. |
 | `falcon_list_children`, `falcon_list_parameters`, `falcon_get_parameters`, `falcon_set_parameters` | Browse and edit public state. |
 | `falcon_get_connections`, `falcon_set_connection_parameters`, `falcon_set_output` | Existing modulation and routing. |
@@ -63,7 +66,8 @@ The server exposes **43 tools**, structured schemas, the `falcon://capabilities`
 
 ## Operating rules
 
-- Call `falcon_status` first. Read live definitions before writing; use internal names/units rather than UI labels.
+- Call `falcon_status` first; confirm `engine.instance`, `engine.targets`, and the runtime home. Use `falcon_bind_instance` to pin the inspected identity and optional Program selector/name pairs before editing. Binding is opt-in, per server process; inspect and bind again after deployment/restart. Status remains available for diagnosis without silently rebinding. Separate homes per instance are still required.
+- Read live definitions before writing; use internal names/units rather than UI labels. Program-name guards are not content hashes; refresh selectors after structural edits.
 - Gain is commonly linear and Pan commonly spans -1..1; live definitions take precedence. A numeric definition with `min > max` denotes an unbounded range.
 - Prefer selectors rooted at `Synth`, for example `Synth.parts[1].program.layers[1].keygroups[1].oscillators[1]`. Indexes start at 1; `.program` is singular. `Program`/`Part`/`Layer` aliases depend on processor placement.
 - Supply `expected` when stale values would matter. Batch preflight is not an engine transaction or Undo group; execution can partially succeed.
@@ -85,11 +89,13 @@ Native extensions run inside Falcon's Lua sandbox. The stable launcher reads tru
 
 ## Audio feedback and diagnostics
 
-CLAP matches audio against text descriptors; it is not a generative audio-question-answering model or an objective quality score. Compare identical notes, velocities, gains, targets, and capture conditions. Feedback does not infer Falcon parameter values or change patches automatically.
+CLAP matches audio against English text descriptors; it is not a generative audio-question-answering model or an objective quality score. Compare identical notes, velocities, gains, targets, and capture conditions. Feedback does not infer Falcon parameter values or change patches automatically.
 
 The server does not import the model runtime during startup/control. Each non-silent feedback call starts a worker, loads weights, returns results, and exits; timeout/cancellation terminates and reaps it. RAM/VRAM is released; cached weights remain on disk. The default model is Apache-2.0-licensed `laion/clap-htsat-unfused`; inference defaults to offline CPU execution.
 
 Capture accepts Windows WASAPI output loopback, never a microphone fallback. For file analysis, place WAV/FLAC/AIFF/OGG files under `FALCON_AUDIO_ROOT` (default: `<home>/audio`).
+
+Use `falcon_record_test` to wait for the first buffer before triggering notes. `falcon_capture_status` and `falcon_status.capture` report this server's capture lifecycle, readiness, timing and errors. A ready endpoint may still capture silence or other applications. Recording `complete` checks estimated note/tail coverage, not sound quality; inspect measurements and listen. Keep raw capture separate from processed previews.
 
 Diagnostics and UML rendering run locally without loading CLAP. True peak uses 4× oversampling and is an estimate, not a certified meter. LUFS requires sufficient mono/stereo audio; THD requires a suitable steady single tone. Reports mark unavailable or incomplete results explicitly.
 
@@ -101,6 +107,12 @@ Project scans are non-atomic public-state snapshots. `complete=false` identifies
 
 Audit JSONL records include UTC timestamps, trace/session IDs, arguments/results, errors, timings, and worker lifecycle; credential fields are redacted. Engine print access is a 256-entry ring. Native logs contain only what Falcon writes. Historical audit files are not automatically deleted.
 
-Release 0.2.3 passed **80 automated tests**, real stdio tool discovery, a standalone restart/deployment test with no subsequent GUI input, extension callback/error-recovery tests, and project/UML/diagnostic/voice/MIDI checks. See [installation evidence and limitations](docs/one-time-setup.md#verified-installation-lessons).
+Release 0.2.4 passes **91 automated tests**, including real stdio discovery of 45 tools. See [changes and validation limits](docs/changes-0.2.4.md). Historical 0.2.3 native acceptance covered restart/deployment without subsequent GUI input, extension recovery, project/UML/diagnostic/voice/MIDI checks; see [installation evidence](docs/one-time-setup.md#verified-installation-lessons).
 
 License: [Apache-2.0](LICENSE).
+
+## Agent skill and repository language
+
+[Falcon instrument workflow](skills/falcon-instrument-workflow/SKILL.md) covers session guards, routing, instrument identity, macros, capture/model interpretation, Program/Multi saving and portable releases. Copy its whole folder into your agent's skills directory when installing it; supporting production guidance stays with the skill.
+
+Repository-owned source, comments, descriptors and documentation use English. CI runs `python scripts/check_english.py` to catch untranslated East Asian text; review other languages manually. Runtime parameter names, user targets and logs may contain user-provided Unicode. Historical model-example labels were translated without changing their measured scores.

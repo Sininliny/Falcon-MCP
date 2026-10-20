@@ -1,42 +1,50 @@
-# 官方 API 覆盖与解析范围
+# API coverage and project analysis
 
-依据 2026-10-20 获取的 [UVI UVIScript 官方参考](https://lua.uvi.net/) 和 [Falcon 官方手册](https://manual.uvi.net/falcon/en/)。本机引擎为 Falcon 27.0.2。
+The index was retrieved on 2026-10-20 from the [UVIScript reference](https://lua.uvi.net/) and [Falcon manual](https://manual.uvi.net/falcon/en/). Historical hardware checks used Windows Falcon standalone 27.0.2.
 
-仓库 `src/falcon_mcp/data/api_coverage.json` 提供 **1489 条**类成员/函数签名/属性/常量记录，其中 **431 条**映射到直接工具，其余映射到原生 Lua 扩展。这里包含继承成员和不同类上的同名属性，不是 1489 个独立操作或 1489 项通过的硬件测试。`falcon_api_coverage(query,offset,limit)` 可以逐项查询原始签名、归属类、官方来源和对应工具。
+`src/falcon_mcp/data/api_coverage.json` contains 1,489 member/function/property/constant records, including inherited and duplicate members; 431 map to direct tools. Other records identify native-extension paths. These are signature mappings, not 1,489 implemented or hardware-tested operations. Query individual sources and signatures with `falcon_api_coverage`.
 
-## 可调用路径
+## Invocation paths
 
-| API 类型 | 入口 | 运行条件 |
+Tool names below omit the `falcon_` prefix.
+
+| API area | Entry point | Conditions |
 |---|---|---|
-| Element 与引擎子树、参数和已有连接 | 查询/调参工具；`falcon_scan_project` | 已载入 0.2 桥 |
-| 效果链、采样、播放范围、IR、MultiSample mapping/zone purge | `edit_effect`、`load_sample`、`set_playback`、`load_impulse`、`mapping` | 对应现有节点和有效文件；等待官方异步回调 |
-| 音符、VoiceId、渐变、表达、Script Modulation | `start_voice`、`voice_control`、`play_notes` | 句柄保留原生 userdata 身份；同回调的 sample offset 由 start_voice 应用 |
-| 原生事件与 MIDI | `post_event`、`post_midi`、`send_midi`、`poly_aftertouch` | 使用各 API 自己的通道编号与时间单位 |
-| MIDI sequence/event API | `midi_file` | 句柄仅属于当前 Lua 实例；资产位于 `<home>/assets` |
-| ScriptProcessor saveState/loadState | `script_state` | 仅脚本状态，不是 Program/Multi 文件 |
-| 时间、音乐上下文、按键、CC、位置、单位转换 | `query_api` | 音频线程回调内执行 |
-| UI 类、事件回调、线程、一般文件/异步操作、其他 Lua API | `write_extension` | 发布可信本地 Lua；持久启动器自动载入并验证构建 |
+| Public hierarchy, parameters, existing connections | Browse/edit tools; `scan_project` | Matching bridge loaded; refresh selectors after structural changes. |
+| Effects, samples, playback, IR, mapping, zone purge | `edit_effect`, `load_sample`, `set_playback`, `load_impulse`, `mapping` | Existing supported nodes and valid files; wait for native callbacks. |
+| Notes, voices, fades, expression, script modulation | `start_voice`, `voice_control`, `play_notes` | Native userdata stays inside Falcon; sample offset is applied at voice start. |
+| MIDI and native events | `post_event`, `post_midi`, `send_midi`, `poly_aftertouch` | Use each interface's channel numbering and timing units. |
+| MIDI sequence/event API | `midi_file` | Instance-specific handles; files under `<home>/assets`. |
+| ScriptProcessor state | `script_state` | Script state only; not Program/Multi serialization. |
+| Musical context, keys, CC, timing conversion | `query_api` | Executes in the appropriate audio callback. |
+| UI, callbacks, general Lua/async APIs | `write_extension` | Trusted local source, native sandbox and public API constraints. |
 
-工具表中的名字省略了 `falcon_` 前缀。`api_coverage(probe_runtime=true)` 探测当前引擎中 44 个包装函数是否存在，**不会**逐一执行有副作用的函数。
+`api_coverage(probe_runtime=true)` checks the existence of 44 wrapped functions. It does not execute every function or prove that all argument combinations work.
 
-原生扩展与桥合并为可信本地运行时文件；稳定启动器负责非实时编译和委托 `onInit`、MIDI、`onTransport`、`onSave`、`onLoad`。不执行邮箱里的代码。首次将 Master 启动器保存到默认 Multi / 宿主模板后，普通核心和扩展更新均自动载入并验证构建，**不依赖无法持久化的 Watch 开关**。写入空字符串可清除扩展。写入前保留版本备份；语法错误保留前一运行时，状态报告 `bootstrap_error`。控件复用、`onUnload` 和后台循环停止约定见 [一次设置与自动连接](one-time-setup.md)。原生扩展中的无限循环仍可能阻塞音频线程。
+The persistent Master launcher compiles trusted deployment files in non-real-time `onLoad`, delegates callbacks, and preserves the previous runtime on syntax failure. It never executes mailbox source. Ordinary runtime/extension updates do not require Watch. See [installation and lifecycle rules](one-time-setup.md).
 
-## 官方没有提供的能力
+## Workflow support and evidence
 
-- 合成结构中 Layer、Keygroup、Oscillator、Modulator 和调制连接的创建/删除；效果链 API 是例外。
-- Program/Multi 加载保存、宿主/音频驱动配置、ScriptProcessor 源码读取、创建处理器及设置其文件监视/重载的脚本 API。运行时更新通过持久启动器实现；创建处理器和保存默认 Multi 仍属首次安装步骤。
-- 受保护银行内部数据、完整内部 MultiSample zone 列表，以及冻结整个引擎的原子快照。
+Read `falcon://capabilities.workflow_support` for machine-readable distinctions between implemented tools, public API gaps, and workflows not implemented by this server. Automated validation, native acceptance, and user-reported production experience are separate evidence sources.
 
-需要这些操作时，先由用户或 GUI 工作流准备，再通过实时桥读取和修改官方暴露的状态。加载/保存 Program 按用户要求不列为交付前提。
+| Workflow | Current boundary |
+|---|---|
+| Instance binding | `bind_instance` pins one MCP process to a runtime and optional Program names; automated protocol/Lua tests. It cannot identify the foreground window. |
+| Capture readiness | First successful buffer, lifecycle status and timing checks are implemented; the real endpoint must still be validated locally. |
+| Native Program/Multi saving and loading | No corresponding public runtime API in this implementation; use Falcon's UI. |
+| Layer/keygroup/oscillator/modulator/connection creation or deletion | Public runtime API gap; effect-chain editing is an exception. |
+| Offline preset construction | Reported successful by the user, but no supported file builder is included here. XML parsing does not establish native compatibility. |
+| UFS packaging, indexing, native browser preview association | No reliable server workflow established; a same-name OGG is not acceptance evidence. |
+| Continuous model feedback | Not implemented; feedback is one capture/file and one worker invocation. |
 
-## 工程解析的完整性
+Other exclusions include host/driver configuration, ScriptProcessor source inspection and processor insertion, protected-bank internals, complete internal MultiSample zone enumeration, and an atomic engine freeze. Public API availability may change by Falcon version; these are current implementation boundaries.
 
-扫描从 Synth 或所选根开始，合并 parts/program/layers/keygroups/oscillators/inserts/auxs/sends/mods/eventProcessors/children，按真实引擎路径去重，读取每个参数的定义和值，以及每条调制连接的全部参数。长字符串分块取回，切片分页；采样、LoopLab、purge、映射加载状态和 zone 数量在可用时附带。
+## Snapshot completeness
 
-调制源按绝对路径、`$Keygroup/...` 等作用域路径和 `@MIDI` / `@VoiceParam` 的最近祖先作用域解析；BusRouter 目的地解析为路由边。原始 Source/Destination 与连接设置保留，不会把无法解析的边伪装成成功。
+Scans traverse public parts/program/layers/keygroups/oscillators/inserts/auxs/sends/mods/eventProcessors/children and deduplicate by engine path. They read parameter definitions, values and connection parameters; long strings are chunked and collections paginated. Sample, LoopLab, purge and mapping metadata are included when exposed.
 
-`complete=true` 表示本次公开扫描没有读取错误、截断或检测到的结构变化；不是插件文件的二进制逆向结果，也不是自动化期间参数的原子冻结。报告包含 `atomic=false`、`structure_verified`、错误及限制。UML 包含组成、调制和路由，可输出源码并本地绘制；裁剪会明确返回省略边数。
+Modulation sources are resolved from absolute paths and scoped references such as `$Keygroup/...`, `@MIDI` and `@VoiceParam`. BusRouter destinations form routing edges. Raw connection settings and unresolved relations remain visible.
 
-## 实机与测试覆盖
+`complete=true` means no read errors, truncation or structural changes were detected during this public scan. It does not mean that private state was recovered or parameter values were frozen. Reports include `atomic=false`, `structure_verified`, errors and limits. UML exports include composition, modulation and routing; cropped exports report omitted edges.
 
-当前官方 Analog Poly 模板实测：42 个节点、372 个参数、11 条调制连接、12 条路由，所有关系解析成功；原生 VoiceId 跨 MCP 的控制/释放、MIDI 创建/插入/读取/保存、三种日志入口均通过。全部模块和所有签名尚未逐一实机验收，特别是不同采样器、IR、映射文件、UI 控件及 VST 宿主组合，不能用覆盖索引替代这些测试。详细记录见 [validation.md](validation.md)。
+Historical Analog Poly acceptance resolved 42 nodes, 372 parameters, 11 modulation connections and 12 routes. Voice handles, MIDI files and log access also passed. Individual sampler types, IR/mapping files, UI controls and VST/DAW combinations remain incompletely tested. See [validation records](validation.md).

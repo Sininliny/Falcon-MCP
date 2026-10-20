@@ -14,7 +14,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from .async_utils import join_cleanup
-from .audio import capture_loopback, read_audio
+from .audio import CaptureMonitor, capture_loopback, read_audio
 from .audit import AuditLog
 from .bridge import FalconBridge
 from .config import Config
@@ -44,7 +44,10 @@ class MidiEventInput(BaseModel):
     byte2: int = Field(default=0, ge=0, le=127)
 
 
-def register_advanced(mcp, config: Config, bridge: FalconBridge, audit: AuditLog, capture_lock: asyncio.Lock):
+def register_advanced(
+    mcp, config: Config, bridge: FalconBridge, audit: AuditLog,
+    capture_lock: asyncio.Lock, capture_monitor: CaptureMonitor,
+):
     project = ProjectInspector(config, bridge)
     scan_lock = asyncio.Lock()
 
@@ -63,14 +66,24 @@ def register_advanced(mcp, config: Config, bridge: FalconBridge, audit: AuditLog
             config.audio_root.mkdir(parents=True, exist_ok=True)
             path = config.audio_path("live-" + uuid.uuid4().hex + ".wav", must_exist=False)
             stop = threading.Event()
+            loop = asyncio.get_running_loop()
+            capture_monitor.begin(path, seconds, device_index)
             task = asyncio.create_task(
-                asyncio.to_thread(capture_loopback, path, seconds, lambda: None, device_index, stop)
+                asyncio.to_thread(
+                    capture_loopback, path, seconds,
+                    lambda: loop.call_soon_threadsafe(capture_monitor.ready), device_index, stop,
+                )
             )
             try:
                 result = {"capture": await asyncio.shield(task)}
+                capture_monitor.complete(result["capture"])
+                result["recording"] = capture_monitor.snapshot()
                 if diagnose:
                     result["diagnostics"] = await asyncio.to_thread(create_diagnostics, config, path)
                 return result
+            except BaseException as exc:
+                capture_monitor.fail(exc)
+                raise
             finally:
                 stop.set()
                 if not task.done():
