@@ -8,7 +8,7 @@ Tested on Windows with Falcon standalone **27.0.2**. The server uses stdio and o
 
 Use the [installation procedure and precautions](docs/one-time-setup.md) for dependencies, Codex configuration, migration, restart verification, updates, and recovery.
 
-Follow [manual initialization](docs/one-time-setup.md#manual-initialization) for first installation or recovery. After saving the Master launcher and configuring Codex, [automatic initialization](docs/one-time-setup.md#automatic-initialization) handles normal startup and runtime deployment.
+Follow [manual initialization](docs/one-time-setup.md#manual-initialization) to load and start `falcon_bridge.lua` inside Falcon's Master Script Processor. After saving the Master launcher and configuring Codex, [automatic initialization](docs/one-time-setup.md#automatic-initialization) handles normal startup and runtime deployment.
 
 From the repository root:
 

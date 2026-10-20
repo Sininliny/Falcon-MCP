@@ -67,7 +67,7 @@ Add `FALCON_AUDIO_PYTHON` only when using a separate feedback interpreter. Keep 
 | Mode | Use |
 |---|---|
 | Automatic | Normal startup after the Master launcher, default Multi/host template, and Codex configuration have been installed once. |
-| Manual | First installation, a missing launcher, a changed runtime-home path, or a launcher-protocol upgrade. |
+| Manual | Load and start the bridge inside Falcon for the current Multi; also use for first installation or recovery. |
 
 ### Automatic initialization
 
@@ -80,7 +80,7 @@ Automatic initialization does not start the Falcon application, insert a Script 
 
 ### Manual initialization
 
-For a new installation, complete sections 1–3 first. For recovery, use the existing checkout and the **same absolute home configured in Codex**. Example:
+Manual initialization includes **starting the bridge script inside Falcon**, not just running CLI commands. It works with a Multi that has no saved launcher. For a new installation, install the server (section 1) and configure Codex (section 3). Use the **same absolute home configured in Codex**. Example:
 
 ```powershell
 Set-Location 'C:\Tools\Falcon-MCP'
@@ -88,9 +88,15 @@ $env:FALCON_MCP_HOME = 'C:\Tools\Falcon-MCP\.runtime'
 .venv\Scripts\python.exe -m falcon_mcp prepare
 ```
 
-Start Falcon and keep it processing audio. If the Master launcher is absent, its embedded home has changed, or its protocol requires an upgrade, load the printed `falcon_bridge.lua` path using section 2, then resave the recovery Multi and default Multi/host template. An already-installed compatible launcher needs no GUI reload.
+Start the bridge manually in Falcon:
 
-Stop notes and sequences, then initialize and verify the connection:
+1. Open Falcon standalone or its plugin window. Back up the current Multi, stop notes and sequences, and keep audio processing enabled.
+2. Select **Master → EVENTS**. Select the existing bridge Script Processor, or add one with **+ → Script Processor → Default**. Remove any old Program/Part bridge; keep exactly one bridge per instance.
+3. In that processor, use the script-file loading control to open the absolute `falcon_bridge.lua` path printed by `prepare`, normally `<FALCON_MCP_HOME>/bridge/falcon_bridge.lua`. Select the file and confirm opening it. Do not load `falcon_runtime.lua` or run the Lua file in PowerShell.
+4. Loading the script initializes the Master launcher inside Falcon. With audio processing active, it reads `deployment.json`, loads the runtime, and starts servicing bridge requests. `prepare` and `serve` alone cannot perform this in-Falcon step.
+5. Verify the connection below. To retain automatic startup, save a recovery Multi and the default Multi/DAW template as described in section 2. Saving a default is optional for manual use; repeat the loading steps whenever the current Multi lacks the launcher.
+
+If a compatible Master launcher is already running with the correct runtime home, skip reloading it and verify directly. Otherwise, after loading the script, run while idle:
 
 ```powershell
 .venv\Scripts\python.exe -m falcon_mcp setup --verify-reload
