@@ -151,6 +151,7 @@ class FalconBridge:
         request = {"protocol": 1, "token": token, "id": identifier, "op": op, "args": args or {}}
         if len(json.dumps(request, ensure_ascii=False, allow_nan=False).encode("utf8")) > 65536:
             raise ValueError("Bridge request exceeds 64 KiB; split the parameter batch")
+        self.audit.event("bridge_dispatch", request_id=identifier, op=op, mutation=mutation)
         if mutation:
             atomic_json(uncertain_file, {"id": identifier, "op": op})
         atomic_json(self.config.runtime / "request.json", request)
@@ -187,14 +188,45 @@ class FalconBridge:
                 atomic_json(uncertain_file, {"id": identifier, "op": op})
             raise
 
-    async def reconcile(self) -> dict:
+    async def reconcile(self, acknowledge_unknown: bool = False) -> dict:
         # Script dispatch is serial, including completion of async effect/sample tasks.
         # A successful ping therefore acts as a barrier for a previous timed-out command.
-        async with self.lock:
-            token = self._read_token()
-            async with mailbox_lock(self.config.runtime, self.config.bridge_timeout):
-                result = await self._request_locked("ping", None, False, token)
-                result["uncertain_request"] = self.uncertain_request
-                self.uncertain_request = None
-                (self.config.runtime / "uncertain.json").unlink(missing_ok=True)
-                return result
+        self.audit.event("bridge_reconcile", acknowledge_unknown=acknowledge_unknown)
+        try:
+            async with self.lock:
+                token = self._read_token()
+                async with mailbox_lock(self.config.runtime, self.config.bridge_timeout):
+                    result = await self._request_locked("ping", None, False, token)
+                    identifier = self.uncertain_request
+                    receipt = result.get("lastMutation")
+                    matched = (
+                        isinstance(receipt, dict)
+                        and receipt.get("id") == identifier
+                        and isinstance(receipt.get("ok"), bool)
+                    )
+                    resolved = identifier is None or matched
+                    acknowledged = bool(identifier and not resolved and acknowledge_unknown)
+                    if identifier is None:
+                        outcome = "no_pending_mutation"
+                    elif matched:
+                        outcome = "completed" if receipt["ok"] else "engine_error"
+                    else:
+                        outcome = "unknown"
+                    result.update(
+                        uncertain_request=identifier,
+                        resolved=resolved,
+                        acknowledged_unknown=acknowledged,
+                        outcome=outcome,
+                    )
+                    if resolved or acknowledged:
+                        self.uncertain_request = None
+                        (self.config.runtime / "uncertain.json").unlink(missing_ok=True)
+                    else:
+                        result["next_step"] = (
+                            "Receipt unavailable (possibly after script reload). Inspect affected state; only then call reconcile(acknowledge_unknown=true). Never blindly retry the mutation."
+                        )
+            self.audit.event("bridge_reconciled", result=result)
+            return result
+        except BaseException as exc:
+            self.audit.error("bridge_reconcile_error", exc)
+            raise

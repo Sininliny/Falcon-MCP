@@ -178,7 +178,7 @@ function handlers.api_info(a)
         "programChange","postMidiEvent","loadImpulse","loadMidi","createMidiFile","saveMidi","saveState","loadState"}) do
         available[name]=type(_G[name])=="function"
     end
-    return {functions=available,version="0.2.0",extension="Native Lua extension supported at next script reload"}
+    return {functions=available,version=BRIDGE_VERSION,extension="Native Lua extension supported at next script reload"}
 end
 
 function handlers.query_api(a)
@@ -191,7 +191,7 @@ end
 -- in this Lua instance and expose an opaque, non-reusable handle instead.
 local voiceHandles = {}
 local nextVoiceHandle = 0
-local voicePrefix=nil -- getTime requires Falcon's audio thread; initialize on first request
+local voicePrefix=nil -- initialize after process assigns the instance's host nonce
 local function forgetVoice(handle)
     local entry=voiceHandles[handle]
     if not entry then return end
@@ -209,7 +209,7 @@ local function reserveVoice()
 end
 local function storeVoice(id,duration)
     if id==nil then return nil end
-    if not voicePrefix then voicePrefix="voice-"..(bridgeInstance.."-"..getTime()):gsub("[^%w%-]", "").."-" end
+    if not voicePrefix then voicePrefix="voice-"..bridgeInstance.."-" end
     nextVoiceHandle=nextVoiceHandle+1
     local handle=voicePrefix..nextVoiceHandle
     voiceHandles[handle]={id=id,expires=duration and getTime()+duration+60000 or nil}
@@ -230,9 +230,17 @@ end
 function handlers.voice_start(a)
     reserveVoice()
     local id=playNote(a.note,a.velocity,a.duration_ms,a.layer,a.channel,a.input,a.volume,a.pan,a.tune,a.slice,a.osc_index,a.dim1,a.dim2)
+    local handle=storeVoice(id,a.duration_ms)
     -- UVI reads the start offset exactly once, before this callback returns.
-    if id~=nil and a.sample_offset_ms~=nil then setSampleOffset(id,a.sample_offset_ms) end
-    return {voice_id=storeVoice(id,a.duration_ms),started=id~=nil,voice_id_type="opaque handle"}
+    if id~=nil and a.sample_offset_ms~=nil then
+        local ok,failure=pcall(function() setSampleOffset(id,a.sample_offset_ms) end)
+        if not ok then
+            local released=pcall(function() releaseVoice(id) end)
+            if released then forgetVoice(handle) end
+            error(failure)
+        end
+    end
+    return {voice_id=handle,started=id~=nil,voice_id_type="opaque handle"}
 end
 mutations.voice_start=true
 function handlers.voice_api(a)
@@ -251,8 +259,9 @@ end
 mutations.voice_api=true
 
 function handlers.post_event(a)
-    reserveVoice()
     local existing=a.event.id
+    -- Capacity must never prevent releasing existing notes or posting controllers.
+    if not existing and a.event.type==144 then reserveVoice() end
     if existing~=nil then a.event.id=nativeVoice(existing) end
     local id=postEvent(a.event,a.delta)
     if existing~=nil then return {posted=true,voice_id=existing} end
@@ -276,7 +285,8 @@ function handlers.midi_file(a)
         nextMidiId=nextMidiId+1
         local count=0;for _ in pairs(midiObjects) do count=count+1 end
         check(count<16,"Release a MIDI handle before loading another file")
-        local id=tostring(nextMidiId);midiObjects[id]=sequence
+        local id="midi-"..bridgeInstance.."-"..nextMidiId
+        midiObjects[id]=sequence
         return {handle=id,numTracks=sequence.numTracks,division=sequence.division,ppq=sequence.ppq,format=sequence.format}
     end
     if a.action=="load" or a.action=="create" then
@@ -292,6 +302,8 @@ function handlers.midi_file(a)
     if a.action=="save" then
         return startTask(function(cb) return saveMidi(sequence,a.path,cb) end,function() return {saved=true} end)
     end
+    check(type(a.track)=="number" and a.track==math.floor(a.track) and a.track>=1 and a.track<=sequence.numTracks,
+        "MIDI track index out of range for this sequence")
     if a.action=="insert" then
         local e=a.event
         sequence:insertEvent(a.track,uvi.MidiEvent(e.timestamp,e.channel,e.status,e.byte1,e.byte2))

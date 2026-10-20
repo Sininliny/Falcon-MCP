@@ -13,6 +13,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .async_utils import join_cleanup
 from .audio import capture_loopback, read_audio
 from .audit import AuditLog
 from .bridge import FalconBridge
@@ -73,7 +74,7 @@ def register_advanced(mcp, config: Config, bridge: FalconBridge, audit: AuditLog
             finally:
                 stop.set()
                 if not task.done():
-                    await asyncio.shield(task)
+                    await join_cleanup(task)
 
     @mcp.tool(annotations=READ)
     async def falcon_scan_project(

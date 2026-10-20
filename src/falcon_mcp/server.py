@@ -9,6 +9,8 @@ from typing import Annotated, Any, Literal
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr
 
+from . import __version__
+from .async_utils import join_cleanup
 from .audio import FeedbackRunner, capture_loopback, list_loopback_devices, measurements, read_audio
 from .audit import AuditLog, trace_id
 from .bridge import FalconBridge
@@ -35,7 +37,9 @@ class Change(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     name: Name
     value: Value
-    expected: Value | None = Field(default=None, description="Optional exact old value; reject stale edits")
+    expected: Value | None = Field(
+        default=None, description="Optional old value; float comparisons allow only JSON rounding tolerance"
+    )
 
 
 class Note(BaseModel):
@@ -69,19 +73,29 @@ def create_server(config: Config | None = None) -> FastMCP:
         status = {
             "feedback": feedback.status(),
             "audio_root": str(cfg.audio_root),
-            "uncertain_request": bridge.uncertain_request,
         }
         try:
             status["engine"] = await bridge.request("ping")
             status["connected"] = True
+            status["bridge_update_required"] = status["engine"].get("bridgeVersion") != __version__
+            if status["bridge_update_required"]:
+                status["update_instructions"] = (
+                    "Run falcon-mcp prepare and reload the generated Lua in Falcon"
+                )
         except (RuntimeError, TimeoutError, OSError, ValueError) as exc:
             status.update(connected=False, error=str(exc))
+        status["uncertain_request"] = bridge.uncertain_request
         return status
 
-    @mcp.tool(annotations=READ)
-    async def falcon_reconcile() -> dict[str, Any]:
-        """Wait for a serial engine barrier after a timed-out mutation; return last mutation receipt."""
-        return await bridge.reconcile()
+    @mcp.tool(annotations=WRITE)
+    async def falcon_reconcile(acknowledge_unknown: bool = False) -> dict[str, Any]:
+        """Wait for an engine barrier and match the timed-out mutation's receipt before unblocking writes.
+
+        Missing receipts (e.g. after script reload) keep writes blocked with outcome=unknown.
+        Inspect affected state, then explicitly acknowledge_unknown=true to clear that unresolved block.
+        Acknowledgement does not claim success and never retries the original mutation.
+        """
+        return await bridge.reconcile(acknowledge_unknown)
 
     @mcp.tool(annotations=READ)
     def falcon_search_catalog(
@@ -431,7 +445,7 @@ def create_server(config: Config | None = None) -> FastMCP:
                 stop.set()
                 # A running audio thread cannot be killed. Bound it by seconds, then join.
                 if not capture.done():
-                    await asyncio.shield(capture)
+                    await join_cleanup(capture)
 
     @mcp.resource("falcon://capabilities")
     def capabilities() -> dict[str, Any]:
@@ -439,7 +453,7 @@ def create_server(config: Config | None = None) -> FastMCP:
             "engine": "UVI Falcon 2027 / UVIScript",
             "documented_modules": 182,
             "documented_parameters": 3066,
-            "version": "0.2.0",
+            "version": __version__,
             "api_coverage": "falcon_api_coverage: direct JSON tools + native Lua extension (reload required)",
             "project_parser": "All public nodes, parameters, connections, routes and sample metadata; completeness is reported",
             "project_formats": ["JSON", "PlantUML", "Mermaid", "SVG", "PNG"],
@@ -504,5 +518,5 @@ def create_server(config: Config | None = None) -> FastMCP:
             return wrapped
 
         mcp._mcp_server.request_handlers[request_type] = traced(original, request_type.__name__)
-    audit.event("server_created", version="0.2.0", model_loaded=False)
+    audit.event("server_created", version=__version__, model_loaded=False)
     return mcp
