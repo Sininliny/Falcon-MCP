@@ -1,0 +1,28 @@
+[
+  {"facet":"亮度","items":[
+    {"label":"明亮锐利","text":"A bright, sharp synthesizer tone with strong high frequency harmonics."},
+    {"label":"温暖圆润","text":"A warm, round and mellow synthesizer tone."},
+    {"label":"低暗柔和","text":"A dark, soft and low-pass filtered synthesizer tone."}]},
+  {"facet":"起音与延音","items":[
+    {"label":"短促弹拨","text":"A short plucked synthesizer note with a sharp attack and quick decay."},
+    {"label":"打击敲击","text":"A percussive musical sound with a hard transient attack."},
+    {"label":"平稳持续","text":"A steady sustained synthesizer note with a constant volume."},
+    {"label":"缓慢铺开","text":"A soft synthesizer pad that swells in slowly and fades out gradually."}]},
+  {"facet":"质感","items":[
+    {"label":"纯净平滑","text":"A clean smooth pure sine-like musical tone with few harmonics."},
+    {"label":"锯齿蜂鸣","text":"A buzzy sawtooth synthesizer sound with rich harmonics."},
+    {"label":"金属钟鸣","text":"A metallic bell-like synthesizer sound with ringing inharmonic overtones."},
+    {"label":"粗糙失真","text":"A harsh gritty distorted synthesizer sound."},
+    {"label":"气声噪声","text":"An airy breathy noise-like synthesizer texture."},
+    {"label":"空心木质","text":"A hollow woody resonant musical sound."}]},
+  {"facet":"动态变化","items":[
+    {"label":"稳定","text":"A stable musical note without vibrato, tremolo or rhythmic modulation."},
+    {"label":"颤音摇摆","text":"A musical note with clear pitch vibrato wobbling up and down."},
+    {"label":"节奏脉冲","text":"A pulsing synthesizer sound with rhythmic volume modulation."},
+    {"label":"滤波扫动","text":"An evolving synthesizer sound with a resonant filter sweeping open and closed."}]},
+  {"facet":"空间感","items":[
+    {"label":"干燥贴近","text":"A dry close musical sound without reverb or echo."},
+    {"label":"混响延伸","text":"A spacious musical sound with a long reverberating tail."},
+    {"label":"延迟回声","text":"A musical note with distinct repeating delay echoes."},
+    {"label":"宽广合唱","text":"A wide lush layered synthesizer with detuned chorus and stereo movement."}]}
+]
