@@ -164,21 +164,39 @@ class FalconBridge:
         prefix = f"local BRIDGE_ROOT = {json.dumps(root.as_posix(), ensure_ascii=False)}\nlocal TOKEN = {json.dumps(self._token)}\n"
         build_id = hashlib.sha256((prefix + source + nonce).encode("utf8")).hexdigest()
         prefix += f"local BUILD_ID = {json.dumps(build_id)}\n"
+        if len((prefix + source).encode("utf8")) > 262144:
+            raise ValueError("Generated runtime exceeds 256 KiB; shorten the native extension")
         target = root / "falcon_bridge.lua"
+        runtime_target = root / "falcon_runtime.lua"
+        bootstrap = f"local BRIDGE_ROOT = {json.dumps(root.as_posix(), ensure_ascii=False)}\n"
+        bootstrap += files("falcon_mcp").joinpath("lua/bootstrap.lua").read_text(encoding="utf8")
         if (root / "uncertain.json").exists() and (
-            not target.exists() or target.read_text(encoding="utf8") != prefix + source
+            not runtime_target.exists()
+            or runtime_target.read_text(encoding="utf8") != prefix + source
+            or not target.exists()
+            or target.read_text(encoding="utf8") != bootstrap
         ):
             raise BridgeError("Reconcile the previous uncertain mutation before updating the watched bridge")
-        changed = atomic_text(target, prefix + source)
+        changed = atomic_text(runtime_target, prefix + source)
+        loader_changed = atomic_text(target, bootstrap)
+        atomic_text(
+            root / "bootstrap-trigger.uvs",
+            '<?xml version="1.0"?><UVI4>'
+            '<ScriptProcessor API_version="23"><ScriptData/><state>'
+            '{"_falconBootstrapControl":1}</state></ScriptProcessor></UVI4>',
+        )
         result = {
             "script": str(target),
+            "runtime_script": str(runtime_target),
             "runtime": str(root),
             "protocol": 1,
             "build_id": build_id,
             "changed": changed,
+            "loader_changed": loader_changed,
             "instructions": "One-time setup: load falcon_bridge.lua in ONE Master (Synth) Script Processor; "
-            "enable WATCH FOR SCRIPT CHANGES; save as default Multi and in your DAW template. "
-            "Run falcon-mcp setup --verify-watch to verify automatic reload. Keep the audio engine running.",
+            "save as default Multi and in your DAW template. The persistent bootstrap loads runtime updates "
+            "without WATCH FOR SCRIPT CHANGES. Run falcon-mcp setup --verify-reload to verify deployment. "
+            "Keep the audio engine running.",
         }
         atomic_json(root / "deployment.json", {k: v for k, v in result.items() if k != "changed"})
         self.audit.event("bridge_prepared", **result)

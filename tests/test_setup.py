@@ -14,7 +14,7 @@ async def watcher(bridge, *, watch=True, master=True):
     """Simulate Falcon's actual mailbox + source file watcher, including loaded build identity."""
 
     def source_build():
-        source = (bridge.config.runtime / "falcon_bridge.lua").read_text(encoding="utf8")
+        source = (bridge.config.runtime / "falcon_runtime.lua").read_text(encoding="utf8")
         return re.search(r'local BUILD_ID = "([a-f0-9]{64})"', source)[1]
 
     build = source_build()
@@ -40,6 +40,7 @@ async def watcher(bridge, *, watch=True, master=True):
             "sessionRequired": True,
             "sequence": {"playing": False},
             "trackedVoices": 0,
+            "bootstrap": {"version": 1, "automaticReload": True, "error": ""},
         }
         atomic_json(
             bridge.config.runtime / "response.json",
@@ -153,3 +154,14 @@ async def test_broken_extension_can_be_repaired_without_an_engine_response(confi
         worker.cancel()
         with pytest.raises(asyncio.CancelledError):
             await worker
+
+
+def test_oversized_utf8_runtime_is_rejected_before_publication(config):
+    bridge = FalconBridge(config)
+    prepared = bridge.prepare()
+    path = Path(prepared["runtime_script"])
+    previous = path.read_bytes()
+    (config.runtime / "extension.lua").write_text("--" + "\U0001f600" * 65530, encoding="utf8")
+    with pytest.raises(ValueError, match="256 KiB"):
+        bridge.prepare()
+    assert path.read_bytes() == previous

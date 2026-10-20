@@ -26,6 +26,9 @@ def installation_status(bridge: FalconBridge, engine: dict | None = None) -> dic
     engine = engine or {}
     current = bool(engine.get("buildId") and engine["buildId"] == deployment.get("build_id"))
     master = engine.get("scope", {}).get("type") == "Synth"
+    bootstrap = engine.get("bootstrap") or {}
+    bootstrap_status = read_object(root / "bootstrap-status.json")
+    persistent = bootstrap.get("version") == 1 and bootstrap.get("automaticReload") is True
     watched = bool(
         current
         and verified.get("instance") == engine.get("instance")
@@ -38,16 +41,19 @@ def installation_status(bridge: FalconBridge, engine: dict | None = None) -> dic
         "current_build_loaded": current,
         "master_scope": master,
         "watch_verified_this_instance": watched,
-        "ready_without_gui": current and master and watched,
+        "deployment_verified_this_instance": watched,
+        "persistent_bootstrap": persistent,
+        "reload_mechanism": "persistent_bootstrap" if persistent else "legacy_script",
+        "bootstrap_error": bootstrap.get("error", bootstrap_status.get("error", "")),
+        "ready_without_gui": current and master and persistent and not bootstrap.get("error"),
         # Neither the default Multi nor the DAW's project serialization is exposed by UVIScript.
         "startup_persistence": "unverified_by_api",
         "one_time_steps": [
             "Load the script in ONE Master (Synth) Script Processor; remove the old Program bridge.",
-            "Enable WATCH FOR SCRIPT CHANGES in that Script Processor.",
-            "Save as default Multi; save your DAW template/project with the Master bridge.",
-            "Run falcon-mcp setup --verify-watch with no active notes to verify automatic reload.",
+            "Save as default Multi; save your DAW template/project with the Master bootstrap.",
+            "Run falcon-mcp setup --verify-reload with no active notes to verify automatic deployment.",
         ],
-        "persistence_check": "Restart Falcon/reopen the DAW template, then run setup --verify-watch again.",
+        "persistence_check": "Restart Falcon/reopen the DAW template, then run setup --verify-reload again.",
         "recovery": "If a Multi replaces/removes the Master bridge, restore your saved bridge Multi/template once. "
         "Do not repeatedly drive the user's mouse. Audio engine sleep must be disabled in the host.",
     }
@@ -57,6 +63,7 @@ async def wait_for_build(bridge: FalconBridge, prepared: dict, token: str) -> di
     """Caller owns the mailbox. Poll only read-only pings; never retry an engine mutation."""
     deadline = time.monotonic() + bridge.config.bridge_timeout
     error = "No bridge response"
+    engine = {}
     while time.monotonic() < deadline:
         try:
             engine = await bridge._request_locked(
@@ -84,8 +91,9 @@ async def wait_for_build(bridge: FalconBridge, prepared: dict, token: str) -> di
         "applied": False,
         "requires_reload": True,
         "error": error,
+        "installation": installation_status(bridge, engine),
         "next_step": "Check Falcon ScriptProcessor.log for compile/runtime errors. If no error, "
-        "complete the one-time Master / WATCH FOR SCRIPT CHANGES setup; do not use a mouse loop.",
+        "complete the one-time persistent Master bootstrap setup; do not use a mouse loop.",
     }
 
 
@@ -164,7 +172,12 @@ async def deploy_extension(bridge: FalconBridge, source: str) -> dict:
             applied = {"applied": True, "requires_reload": False, "engine": engine}
         else:
             applied = await wait_for_build(bridge, prepared, token)
-        result = {**prepared, **applied, "extension": str(target), "runtime_eval": False}
+        result = {
+            **prepared,
+            **applied,
+            "extension": str(target),
+            "runtime_eval": "trusted_deployment_file_only",
+        }
         if connection_error:
             result["pre_deployment_connection_error"] = connection_error
             result["idle_verified"] = False

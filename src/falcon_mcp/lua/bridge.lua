@@ -1,7 +1,7 @@
 -- UVI Falcon 2027 / UVIScript Lua 5.1. BRIDGE_ROOT and TOKEN are generated.
 -- Use documented asynchronous file I/O only. Never load/execute mailbox code.
 local json = require("uvi.json")
-local BRIDGE_VERSION="0.2.2"
+local BRIDGE_VERSION="0.2.3"
 local lastId = ""
 local lastMutation = {}
 local voices = {}
@@ -128,6 +128,8 @@ local handlers = {}
 function handlers.ping(a)
     return {protocol=1, bridgeVersion=BRIDGE_VERSION, buildId=BUILD_ID, sessionRequired=true,
         instance=bridgeInstance, sampleRate=getSamplingRate(), trackedVoices=#voices,
+        bootstrap=FALCON_BOOTSTRAP and {version=FALCON_BOOTSTRAP.version,
+            automaticReload=FALCON_BOOTSTRAP.automaticReload,error=FALCON_BOOTSTRAP.error} or nil,
         tempo=getTempo(), time=getTime(), lastMutation=lastMutation,
         sequence={playing=playing,generation=sequenceGeneration,error=sequenceError},
         scope=summary(this.parent, ""),
@@ -368,15 +370,22 @@ local function process(req)
     if isMutation(req) then
         check(bridgeInstance~=nil and req.session==bridgeInstance,
             "Bridge session changed; inspect state and reconnect before editing")
-    elseif not bridgeInstance then bridgeInstance=req.id end
+    elseif not bridgeInstance then
+        bridgeInstance=FALCON_BOOTSTRAP and (FALCON_BOOTSTRAP.instanceNonce..":"..req.id) or req.id
+    end
     return handler(req.args or {})
+end
+
+function falcon_can_reload()
+    return not playing and #voices==0
 end
 
 function onInit()
     print("Falcon MCP bridge ready: " .. BRIDGE_ROOT)
-    while true do
+    while not FALCON_BOOTSTRAP or FALCON_BOOTSTRAP.active do
         local task = loadTextData(BRIDGE_ROOT .. "/request.json")
         while not task.finished do wait(20) end
+        if FALCON_BOOTSTRAP and not FALCON_BOOTSTRAP.active then return end
         if type(task.data) == "string" and #task.data <= 65536 then
             local decoded, req = pcall(json.decode, task.data)
             -- Fresh reads work on the very first poll. Mutations require a

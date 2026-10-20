@@ -109,3 +109,14 @@ $env:FALCON_MODEL_DEVICE = "cuda"  # 无 GPU 时设 cpu
 - 真实 `scripts/smoke_setup.py` 通过 MCP stdio 读取本机 Falcon，确认 43 个工具、模型未加载、GUI 操作 0 次，报告存于 `.runtime/acceptance-setup.json`。
 - 本机现有 Falcon 仍运行 Program 下的 0.2.1 桥。新版诊断正确返回 `current_build_loaded=false,master_scope=false,watch_verified_this_instance=false,ready_without_gui=false`。没有替换工程或用鼠标重载；不能把软件测试通过当成 Master/默认 Multi 的自动启动实机验收。
 - 完成 [一次迁移](one-time-setup.md) 后，需真实执行 `falcon_setup(verify_watch=true)`，再重开 Falcon/DAW 模板重复验收，才能确认本机安装持续可用。
+
+## 0.2.3 持久启动器与本机迁移（2026-10-20）
+
+- 完整回归 **80 passed**，Ruff 与 wheel 包内容核对通过；本机 Python 环境已安装 0.2.3。
+- 实机发现 0.2.2 的 Watch 开关在重开默认 Multi 后关闭。已改为稳定 Master 启动器、可信本地运行时和 manifest；不依赖 Watch。
+- 编译在官方非实时 `onLoad` 回调中执行，使用本机确认存在的 `loadstring` / `setfenv`；未将编译放到音频回调。新增环境隔离、旧桥循环退出、MIDI 默认转发/回调委托、语法错误保留旧运行时、空闲部署及跨重启实例计数测试。
+- 用户授权界面安装后，已备份原 Multi/设置，迁移为一个 Master 桥，另存 `.runtime/templates/Falcon MCP Persistent.uvim`，并设置 `Documents/UVI/Falcon/Default Multi.uvim`。原 Program/Layer/Keygroup 保留。
+- Watch 关闭时部署成功；退出并重启 Falcon 后，**没有任何后续界面输入**即完成 Master 连接、实例计数 1→2 和新构建部署，`ready_without_gui=true`。记录 `.runtime/acceptance-bootstrap-after-restart.json`。
+- `scripts/smoke_bootstrap.py` 经真实 stdio 验证原生扩展发布、onSave/onLoad 委托、错误源码保留前一运行时、正常读取及修复恢复；finally 还原原扩展，模型未加载。记录 `.runtime/acceptance-bootstrap-extension.json`。
+- `scripts/smoke_v2.py` 在新启动器下通过：当前迁移工程 **33 节点、269 参数、6 调制连接**，扫描完整且无结构变化；UML、音频诊断、VoiceId 控制/释放、MIDI 创建/编辑/保存、三类日志均正常。这里的当前工程与先前 Analog Poly 验收工程不同。
+- 原生状态文件格式/API_version=23 已在本机 Falcon 27.0.2 验证。VST/各 DAW 及其他 Falcon 版本尚未完成这套启动器的实机验收。

@@ -15,16 +15,16 @@
 | MIDI sequence/event API | `midi_file` | 句柄仅属于当前 Lua 实例；资产位于 `<home>/assets` |
 | ScriptProcessor saveState/loadState | `script_state` | 仅脚本状态，不是 Program/Multi 文件 |
 | 时间、音乐上下文、按键、CC、位置、单位转换 | `query_api` | 音频线程回调内执行 |
-| UI 类、事件回调、线程、一般文件/异步操作、其他 Lua API | `write_extension` | 写入原生 Lua；一次开启文件监视后自动重载并验证构建 |
+| UI 类、事件回调、线程、一般文件/异步操作、其他 Lua API | `write_extension` | 发布可信本地 Lua；持久启动器自动载入并验证构建 |
 
 工具表中的名字省略了 `falcon_` 前缀。`api_coverage(probe_runtime=true)` 探测当前引擎中 44 个包装函数是否存在，**不会**逐一执行有副作用的函数。
 
-原生扩展与桥合并为一个 Lua 文件。自定义 `onInit` 与桥初始化协同运行，`onNote`、`onSave`、`onLoad`、UI 控件等在官方上下文中工作。接口不执行邮箱里的任意 Lua。首次在 Master 开启官方 **WATCH FOR SCRIPT CHANGES** 并保存到默认 Multi / 宿主模板后，扩展更新自动重载，工具等待构建 ID 验收；无需逐次点击 reload。写入空字符串可清除扩展。写入前保留旧扩展备份；语法错误或无限循环仍会影响这个 ScriptProcessor，需修正源码并检查原生日志。见 [一次设置与自动连接](one-time-setup.md)。
+原生扩展与桥合并为可信本地运行时文件；稳定启动器负责非实时编译和委托 `onInit`、MIDI、`onTransport`、`onSave`、`onLoad`。不执行邮箱里的代码。首次将 Master 启动器保存到默认 Multi / 宿主模板后，普通核心和扩展更新均自动载入并验证构建，**不依赖无法持久化的 Watch 开关**。写入空字符串可清除扩展。写入前保留版本备份；语法错误保留前一运行时，状态报告 `bootstrap_error`。控件复用、`onUnload` 和后台循环停止约定见 [一次设置与自动连接](one-time-setup.md)。原生扩展中的无限循环仍可能阻塞音频线程。
 
 ## 官方没有提供的能力
 
 - 合成结构中 Layer、Keygroup、Oscillator、Modulator 和调制连接的创建/删除；效果链 API 是例外。
-- Program/Multi 加载保存、宿主/音频驱动配置、ScriptProcessor 源码读取、创建处理器及设置其文件监视/重载的脚本 API。界面提供文件监视自动重载，需要一次开启。
+- Program/Multi 加载保存、宿主/音频驱动配置、ScriptProcessor 源码读取、创建处理器及设置其文件监视/重载的脚本 API。运行时更新通过持久启动器实现；创建处理器和保存默认 Multi 仍属首次安装步骤。
 - 受保护银行内部数据、完整内部 MultiSample zone 列表，以及冻结整个引擎的原子快照。
 
 需要这些操作时，先由用户或 GUI 工作流准备，再通过实时桥读取和修改官方暴露的状态。加载/保存 Program 按用户要求不列为交付前提。
