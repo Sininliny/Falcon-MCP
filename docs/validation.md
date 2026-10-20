@@ -2,6 +2,12 @@
 
 Current 0.3.0: 112 automated tests pass, with 52-tool MCP discovery and native VST3 file/render/reference acceptance on Yingg. See [current workflow, evidence and limits](native-and-reference.md). Older results below retain their original scope.
 
+## 0.3.0 installation verification
+
+On Yingg, 2026-10-21, the installed 0.3.0 runtime replaced the running 0.2.4 Master bridge through the persistent bootstrap, with no desktop input. `setup --verify-reload` returned `connected=true`, `applied=true`, `requires_reload=false`, matching build IDs, and `ready_without_gui=true`. The Program target remained `Dusk Window Strings`; the bridge reported no active sequence or tracked voices.
+
+The installed package includes the optional native-host dependency, and the English agent skill is installed locally. Existing MCP clients must reconnect to refresh cached imports and discover all 52 tools. This live deployment check does not repeat the historical standalone restart test or prove that every saved DAW template contains the launcher. Local evidence: `.runtime/deployment-030-final.json`.
+
 Historical hardware environment: 2026-10-20, Windows, Falcon standalone 27.0.2, Python 3.12.9, MCP Python SDK 1.30.0, RTX 3070 Ti Laptop 8 GB. Versioned results below describe their original releases; they do not imply native acceptance of later changes.
 
 ## 0.2.0 automated checks
