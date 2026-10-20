@@ -32,7 +32,7 @@ async def respond(bridge, replies=1, result_extra=None):
 async def test_roundtrip_and_serial_concurrency(config):
     bridge = FalconBridge(config)
     prepared = bridge.prepare()
-    assert "TOKEN" in Path(prepared["script"]).read_text(encoding="utf8")
+    assert "TOKEN" in Path(prepared["runtime_script"]).read_text(encoding="utf8")
     worker = asyncio.create_task(respond(bridge, 2))
     a, b = await asyncio.gather(bridge.request("ping"), bridge.request("parameters"))
     await worker
@@ -129,12 +129,12 @@ async def test_reconcile_keeps_block_when_engine_receipt_was_lost(config):
     assert not (config.runtime / "uncertain.json").exists()
 
 
-def test_extension_preserves_core_init_and_is_not_runtime_eval(config):
+def test_extension_preserves_core_init_and_uses_a_local_deployment_file(config):
     bridge = FalconBridge(config)
     bridge.prepare()
     (config.runtime / "extension.lua").write_text('function onInit() print("extension") end', encoding="utf8")
     result = bridge.prepare()
-    text = Path(result["script"]).read_text(encoding="utf8")
+    text = Path(result["runtime_script"]).read_text(encoding="utf8")
     assert "spawn(_coreInit)" in text and "_userInit()" in text
     from lupa.lua51 import LuaRuntime
 

@@ -450,9 +450,11 @@ def register_advanced(mcp, config: Config, bridge: FalconBridge, audit: AuditLog
     async def falcon_write_extension(source: Annotated[str, Field(max_length=65536)]) -> dict[str, Any]:
         """Install native UVIScript source to access EVERY documented Lua API including UI and event callbacks.
 
-        Writes a versioned backup and verifies automatic reload through WATCH FOR SCRIPT CHANGES.
-        Requires one-time Master/watch/default-Multi setup. Returns applied=false if not loaded.
-        Use when idle: reload resets script widgets and voice/MIDI handles; fix compile errors via native logs.
+        Writes a versioned backup and verifies automatic deployment through the persistent bootstrap.
+        Requires one-time Master/default-Multi setup; no file-watch checkbox. Returns applied=false if not loaded.
+        Use when idle: deployment invalidates voice/MIDI handles. Reuse widgets via FALCON_BOOTSTRAP.shared;
+        release extension resources in onUnload and stop loops when FALCON_BOOTSTRAP.active becomes false.
+        Syntax errors keep the previous runtime; inspect falcon_status installation.bootstrap_error.
         Runs inside Falcon's Lua sandbox; do not write unbounded loops. Supports onInit/onNote/onSave/onLoad and UI widgets.
         Bridge onInit is preserved. This deliberately enables native scripting beyond the JSON wrappers.
         """
@@ -476,8 +478,9 @@ def register_advanced(mcp, config: Config, bridge: FalconBridge, audit: AuditLog
             "has_more": offset + limit < len(matches),
             "next_offset": min(len(matches), offset + limit),
             "source": data["source"],
-            "native_extension_reload_required": True,
-            "native_extension_reload": "Automatic with one-time WATCH FOR SCRIPT CHANGES setup; exact build verified",
+            "native_extension_reload_required": False,
+            "native_extension_runtime_reload_required": True,
+            "native_extension_reload": "Persistent bootstrap: non-real-time compilation; exact build verified",
         }
         if probe_runtime:
             result["runtime"] = await bridge.request("api_info")

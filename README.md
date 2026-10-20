@@ -25,7 +25,7 @@
 
 **公开 API 的边界：**UVIScript 无法创建/删除 Layer、Keygroup、Oscillator、Modulator 和调制连线，也没有 Program 加载/保存接口。先在 Falcon 中准备结构，再由 GAI 调整已有节点；效果链编辑是例外。本项目不会声称实现不存在的接口，也不绕过音色保护。
 
-常用引擎功能可以直接通过 MCP 调用。UI 控件、事件回调、线程/异步任务等必须在 Falcon Lua 上下文运行的 API，可用 `falcon_write_extension` 写入原生脚本，首次设置文件监视后由 Falcon 自动重载。**API 可达不代表每个接口都已逐项实机验收，也不代表全部接口都能在一次即时 JSON 调用中运行。**详细映射和边界见 [API 覆盖说明](docs/api-coverage.md)。
+常用引擎功能可以直接通过 MCP 调用。UI 控件、事件回调、线程/异步任务等必须在 Falcon Lua 上下文运行的 API，可用 `falcon_write_extension` 发布到持久启动器，自动载入新版运行时。**API 可达不代表每个接口都已逐项实机验收，也不代表全部接口都能在一次即时 JSON 调用中运行。**详细映射和边界见 [API 覆盖说明](docs/api-coverage.md)。
 
 Standalone 和 VST 内可使用同一 Lua 桥。本机验证使用 standalone；VST 宿主组合尚未逐一实测。宿主必须持续处理音频，休眠会使桥轮询暂停。
 
@@ -45,16 +45,17 @@ $env:FALCON_MCP_HOME = "$PWD\.runtime"
 
 首次在 Falcon 的 **Master → EVENTS → + → Script Processor → Default** 添加一个处理器，使用文件夹按钮载入 `prepare` 输出的 `falcon_bridge.lua`。然后只做一次：
 
-1. 在该处理器开启 **WATCH FOR SCRIPT CHANGES**。
-2. 从主菜单 **Save as default Multi** 保存；使用 DAW 时也保存到宿主模板/工程。默认 Multi 会在新启动的 standalone/plugin 实例载入。
-3. 删除旧的 Program 桥，整个实例只保留一个桥。在空闲、没有持续音符时运行下面的验收命令。
+1. 从主菜单 **Save as default Multi** 保存；使用 DAW 时也保存到宿主模板/工程。默认 Multi 会在新启动的 standalone/plugin 实例载入。
+2. 删除旧的 Program 桥，整个实例只保留一个桥。在空闲、没有持续音符时运行下面的验收命令。
+
+0.2.3 使用稳定启动器加可更新运行时，**无需开启 WATCH FOR SCRIPT CHANGES**。实机发现该开关不随默认 Multi 持久化，因此不再依赖它。
 
 ```powershell
 $env:FALCON_MCP_HOME = "$PWD\.runtime"
-.venv\Scripts\python.exe -m falcon_mcp setup --verify-watch
+.venv\Scripts\python.exe -m falcon_mcp setup --verify-reload
 ```
 
-只有读到对应构建且自动重载探测成功，才返回 `installation.ready_without_gui=true`。重启 Falcon / 重开宿主模板后再执行一次，确认宿主确实保存了安装；公开 API 无法直接读取默认 Multi/宿主模板配置。详细操作和恢复边界见 [一次设置与自动连接](docs/one-time-setup.md)。
+只有持久启动器在 Master 运行且读到对应构建，才返回 `installation.ready_without_gui=true`；部署测试成功另返回 `deployment_verified_this_instance=true`。重启 Falcon / 重开宿主模板后再执行一次，确认实际持久性；公开 API 无法直接读取默认 Multi/宿主模板配置。本机已完成默认模板和重启后的无界面输入验收。详细操作和恢复边界见 [一次设置与自动连接](docs/one-time-setup.md)。
 
 Master 桥不会随着替换 Program 消失。生成的事件经过下游 MIDI 路由；跨 Part 使用 `Synth.parts[1].program...`，`Program` 等快捷根取决于脚本上下文。Program/Part 桥仍可用于临时隔离试听，但不视为持久安装。
 
@@ -83,7 +84,7 @@ Master 桥不会随着替换 Program 消失。生成的事件经过下游 MIDI �
 
 本机开发时将模型依赖独立在 `.audio-venv` 中，复用已有 CUDA PyTorch。使用该环境时，配置再加入 `"FALCON_AUDIO_PYTHON": "F:/source/code/Falcon-MCP/.audio-venv/Scripts/python.exe"`。独立环境可选，普通全新安装默认使用服务器自己的 Python。
 
-MCP 启动会自动准备桥文件，相同内容不改写文件。启用监视后，源码更新和 `falcon_write_extension` 由 Falcon 自动重载；扩展调用等待精确构建 ID 回执，`applied=true` 才表示已生效。更新后可调用 `falcon_setup(verify_watch=true)` 验证。禁止用反复 computer use / 鼠标操作维持连接。重载会重置脚本控件与 voice/MIDI 句柄，应在空闲时执行；新桥通过握手会话拒绝重放残留写入。
+MCP 启动会自动准备运行时，相同内容不改写文件。持久启动器用异步文件读取和非实时 `onLoad` 编译载入更新；扩展调用等待精确构建 ID 回执，`applied=true` 才表示已生效。`falcon_setup(verify_watch=true)` / `--verify-watch` 保留为兼容名称，实际验证启动器部署。禁止用反复 computer use / 鼠标操作维持连接。更新会使 voice/MIDI 句柄失效，应在空闲时执行；扩展通过 `FALCON_BOOTSTRAP.shared` 复用控件，`onUnload` 释放资源，并在 `active=false` 时停止后台循环。语法错误保留上一个运行时。
 
 ## 按需音色反馈
 

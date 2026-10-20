@@ -1,4 +1,4 @@
--- Compiled after bridge.lua, sharing its private dispatcher. No runtime eval.
+-- Compiled with bridge.lua from the trusted deployment file, never mailbox source.
 local engineLog = {}
 local logSequence = 0
 local originalPrint = print

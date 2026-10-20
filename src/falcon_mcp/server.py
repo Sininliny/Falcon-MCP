@@ -102,8 +102,9 @@ def create_server(config: Config | None = None) -> FastMCP:
     async def falcon_setup(verify_watch: bool = False) -> dict[str, Any]:
         """Prepare/check one-time Master installation without GUI automation.
 
-        verify_watch republishes the script once and checks the exact build loaded automatically.
-        Use when idle: reloading resets script widgets and voice/MIDI handles. Save Master in a
+        verify_watch republishes the runtime once and verifies the persistent bootstrap loaded it.
+        No file-watch checkbox is required. Use when idle: deployment invalidates voice/MIDI handles.
+        Save the Master bootstrap in a
         default Multi/DAW template once. Startup persistence cannot be verified by the public API.
         Failure returns a concrete setup step; never loop over computer-use mouse actions.
         """
@@ -476,8 +477,8 @@ def create_server(config: Config | None = None) -> FastMCP:
             "documented_modules": 182,
             "documented_parameters": 3066,
             "version": __version__,
-            "api_coverage": "falcon_api_coverage: direct JSON tools + native Lua extension (verified automatic file-watch reload)",
-            "installation": "falcon_setup: one-time Master/watch/default-Multi setup and no-GUI deployment verification",
+            "api_coverage": "falcon_api_coverage: direct JSON tools + native Lua extension (persistent bootstrap deployment)",
+            "installation": "falcon_setup: one-time Master bootstrap/default-Multi setup and no-GUI deployment verification",
             "project_parser": "All public nodes, parameters, connections, routes and sample metadata; completeness is reported",
             "project_formats": ["JSON", "PlantUML", "Mermaid", "SVG", "PNG"],
             "diagnostics": ["PSD", "spectrogram", "LUFS", "estimated true peak", "stereo", "envelope", "THD"],

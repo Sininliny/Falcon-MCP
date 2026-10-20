@@ -20,7 +20,13 @@ def main():
         nargs="?",
     )
     parser.add_argument("path", nargs="?", help="Audio path for describe")
-    parser.add_argument("--verify-watch", action="store_true", help="Test automatic script reload when idle")
+    parser.add_argument(
+        "--verify-reload",
+        "--verify-watch",
+        dest="verify_watch",
+        action="store_true",
+        help="Test automatic runtime deployment when idle (no file-watch checkbox required)",
+    )
     args = parser.parse_args()
     cfg = Config.from_env()
     if args.command == "serve":

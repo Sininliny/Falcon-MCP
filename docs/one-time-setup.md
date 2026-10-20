@@ -1,45 +1,48 @@
-# 一次设置与自动连接（0.2.2）
+# 一次设置与持久启动器（0.2.3）
 
-目标是用户完成一次 Falcon 设置后，GAI 的日常操作、扩展发布和版本核验都通过 MCP 完成。服务器不使用 computer use，不点击用户鼠标。首次创建 Script Processor、设置监视和默认 Multi 没有公开 UVIScript API，仍需用户完成一次；这些步骤不能被工具虚报为已自动安装。
+0.2.2 的文件监视方案有一个错误假设：本机 Falcon 27.0.2 在保存/重开默认 Multi 后不会恢复 **WATCH FOR SCRIPT CHANGES** 开关。0.2.3 改为把稳定启动器保存到 Master；它自己读取并部署新版运行时，**不需要文件监视、逐次点击 reload 或 computer use**。
 
-## 首次迁移
+## 首次安装
 
-1. 保留当前工程的备份。在 Master 的 EVENTS 中添加一个 Script Processor，载入 `falcon-mcp prepare` 输出的 `falcon_bridge.lua`。不要把持久桥放在 Program 里，否则更换音色会删除桥。
-2. 开启处理器的 **WATCH FOR SCRIPT CHANGES**。删除原 Program/Part 桥；同一个 Falcon 实例不能有两个桥争用同一个邮箱。
-3. 保存 **Save as default Multi**。插件用户也把 Master 桥保存到 DAW 模板及需要继续工作的工程；旧工程不会因修改默认 Multi 自动加入桥。不要用新默认 Multi 覆盖需要保留的其他初始配置。
-4. 保持音频引擎运行，没有播放序列/持续音符时执行 `falcon-mcp setup --verify-watch`，或调用 `falcon_setup(verify_watch=true)`。工具修改一次探测标记，等待 Falcon 回报精确构建 ID，成功才记录已验证。
-5. 重启 Falcon，或重新打开刚保存的宿主模板，再执行相同验收。`startup_persistence=unverified_by_api` 始终明确表示 API 无法读取启动配置；重开后的实际连接才是持久性证据。
+1. 备份当前 Multi。运行 `falcon-mcp prepare`，在 **Master** 的一个 Script Processor 中载入输出的 `falcon_bridge.lua`。删除原 Program/Part 桥；整个实例只保留一个桥。
+2. 将 Master 桥保存到 **Save as default Multi**。插件用户也保存到宿主模板/现有工程；旧工程不会因修改默认 Multi 自动加入桥。保留原来的默认配置备份。
+3. 保持引擎运行，无持续音符时运行 `falcon-mcp setup --verify-reload`，或调用 `falcon_setup(verify_watch=true)`。`verify_watch` / `--verify-watch` 是兼容旧客户端的参数名，实际验证持久启动器部署，不是检查 Watch 开关。
+4. 重启 Falcon 或重开宿主模板，再执行相同验收。`persistent_bootstrap=true`、`current_build_loaded=true`、`ready_without_gui=true` 才表示当前运行时完整就绪；`deployment_verified_this_instance=true` 表示本实例还通过了精确构建切换测试。
 
-本仓库的本机路径是 `F:/source/code/Falcon-MCP/.runtime/bridge/falcon_bridge.lua`。安装更新后重开 Codex 的 MCP 会话以发现新增 `falcon_setup` 工具。直接命令：
+本机执行示例：
 
 ```powershell
 $env:FALCON_MCP_HOME = "F:/source/code/Falcon-MCP/.runtime"
-F:/source/code/Falcon-MCP/.venv/Scripts/python.exe -m falcon_mcp setup --verify-watch
+F:/source/code/Falcon-MCP/.venv/Scripts/python.exe -m falcon_mcp setup --verify-reload
 ```
 
-## 正常运行
+## 加载过程
 
-MCP 启动自动生成/更新脚本；相同内容不触碰文件修改时间，避免重启客户端就重置脚本。不同 MCP 进程的生成操作用系统文件锁串行化，源码采用临时文件加原子替换，避免 Falcon 读到半份代码。
+- `falcon_bridge.lua` 是稳定启动器，保存到 Multi 中；不内嵌连接凭据或可变业务代码。
+- `falcon_runtime.lua` 包含引擎工具和用户扩展。MCP 启动、扩展发布时生成此文件，以原子替换发布；相同内容不改写。
+- `deployment.json` 最后发布，包含构建 ID。启动器每 250 ms 用官方异步文件 API 读取；源码文件的构建标记必须匹配 manifest，文件总量不超过 256 KiB。
+- 编译通过 `loadState` 触发的 **onLoad 非实时回调**执行，使用本机实测可用的 Lua 5.1 `loadstring` / `setfenv`。不会在音频回调里编译，也不会执行请求邮箱传入的代码。
+- 每个运行时使用独立 Lua 环境；成功后才切换回调并停止旧桥循环。语法/顶层初始化错误保留上一运行时，`falcon_status.installation.bootstrap_error` 报告原因。修正版的新构建会重新部署，不无限重试同一个错误版本。
+- MIDI 通过固定 `onEvent` 入口转交用户 `onEvent` 或具体 MIDI 回调；未定义时原样转发。`onTransport`、`onSave`、`onLoad` 保留委托；内部部署状态不传给用户的 `onLoad`。
+- `bootstrap-epoch.json` 保存启动计数，组合运行时代数和主机随机请求 ID，避免重启/更新后旧 voice/MIDI 句柄误指新对象。不要删除该文件以复用旧句柄。
 
-`falcon_status` 返回当前和预期构建 ID、Master 位置及当前 Lua 实例的监视验收。连接成功不等于安装完整。重开保存了旧嵌入源码的 Multi 后，如果 Falcon 仍加载旧构建，用 `falcon_setup(verify_watch=true)` 重新发布一次标记，触发监视并验证，整个过程不需要鼠标。
+启动器自身的协议升级仍可能需要一次重新载入并保存 Master；普通核心功能与扩展更新只替换运行时，不需要改默认 Multi。状态中的 `startup_persistence=unverified_by_api` 表示公开 API 无法读取宿主/默认配置；实际重启验收单独记录，不能虚报成 API 查询结果。
 
-`falcon_write_extension` 保存版本备份、生成源码、等待自动重载并读回构建 ID。相同源码不会重复重载。返回 `applied=false` 或 `requires_reload=true` 时不能继续假定新扩展已安装。先读取 `falcon_get_logs(source="native")` 排查语法和运行时错误；缺少监视或 Master 时，返回首次设置步骤。没有无条件重试和鼠标补救循环。
+## 原生扩展生命周期
 
-每次引擎写入前先发送只读 ping 握手。新 Lua 的写入必须匹配当前会话，首次读取磁盘上的残留写入会被拒绝；首次 ping 则立即处理，不再被初始化逻辑吞掉。已经发出的未知写入继续由 reconcile 守卫阻断，不能借重载清除未知结果。
+`falcon_write_extension` 保存版本备份、发布可信本地源码，并等待精确构建回执；`applied=true` 才表示已运行。`runtime_eval="trusted_deployment_file_only"` 明确标记动态编译的来源，不提供任意请求字符串求值接口。
 
-## 边界与恢复
+部署会使旧 voice/MIDI 句柄失效，应先停止桥音符。控件属于原生 ScriptProcessor，并不会因替换 Lua 环境自动删除；扩展应通过 `FALCON_BOOTSTRAP.shared` 复用控件和资源，在 `onUnload()` 释放自己的资源，并让后台循环在 `FALCON_BOOTSTRAP.active=false` 时退出。`onUnload` 是本项目生命周期约定，不是新增的 UVI 原生回调。不能假定热更新会重置整个 ScriptProcessor 的控件。
 
-- 加载另外一个不含 Master 桥的 Multi、Clear Multi、手动删除处理器，仍会移除桥；恢复已保存的桥 Multi/模板一次。正常替换 Program 不影响 Master 桥。
-- 脚本重载会重置控件、voice/MIDI 句柄及扩展局部状态。部署前停止桥音符；检测到播放序列或跟踪声部时拒绝部署。手动演奏也应先停下。
-- Falcon 关闭、引擎暂停或 DAW 让插件休眠时，Lua 轮询不能运行。宿主需持续处理；公开 API 无法从暂停的 Lua 内恢复宿主音频处理。
-- 只在同一实例装一个桥。多个 Falcon 实例必须设置不同 `FALCON_MCP_HOME`，分别生成和保存各自的桥，不能复制同一凭据和邮箱脚本到多个实例。
-- 删除 `connection.json` 会更换凭据；此时需更新加载的脚本。保留该文件和 runtime 路径以保持既有安装。
-- 生成/扩展/部署/错误日志写入 `<home>/logs/audit-*.jsonl`。审计不输出连接凭据。
+未知引擎写入仍由 reconcile 守卫阻断，部署不能绕过。Falcon 关闭、引擎暂停或宿主让插件休眠时，启动器与桥轮询都无法运行。加载不含 Master 桥的其他 Multi、Clear Multi、删除处理器也会移除桥，需要恢复保存的模板一次。不同 Falcon 实例必须使用不同 `FALCON_MCP_HOME`，不能争用一个邮箱。
 
-官方依据：[文件监视自动重载](https://manual.uvi.net/falcon/en/events/)、[默认 Multi 启动和 Master 保存范围](https://manual.uvi.net/falcon/en/interface/)、[Lua 异步文件操作与线程限制](https://lua.uvi.net/_lua_reference.html)。
+## 本机安装与验收
 
-## 本次验证范围
+- 默认 Multi：`C:/Users/Sinin/Documents/UVI/Falcon/Default Multi.uvim`。
+- 独立持久模板：`F:/source/code/Falcon-MCP/.runtime/templates/Falcon MCP Persistent.uvim`。
+- 原工程及设置备份：`.runtime/installation-backup/`，保留迁移前 Multi；Program/Layer/Keygroup 结构不变，实例只有一个 Master 桥。
+- 实机先证明 Watch 开关重启后关闭，再在 **Watch 关闭**时验证持久启动器部署成功。
+- 退出并重新启动 Falcon 后，不再输入任何界面操作，默认 Master 桥自动连接，启动计数从 1 增至 2，构建切换成功，`ready_without_gui=true`。
+- 验收详情：`.runtime/acceptance-bootstrap-after-restart.json`；部署状态 `.runtime/bridge/bootstrap-status.json`；审计 `.runtime/logs/audit-*.jsonl`。运行时、工程、凭据和本机报告不随 Git 提交。
 
-自动化覆盖真实 Lua 5.1 首次轮询、旧会话写入拒绝、源码发布幂等、监视成功/失败的构建验收、Program 安装拒绝、无鼠标扩展部署、未知写入阻断及 stdio 工具发现。文件监视测试使用可控引擎替身，不替代 Falcon 实机验收。
-
-本机实查的现有桥是 0.2.1，位置为 `/uvi/Part 0/Program`。生成新版脚本后仍回报旧构建，尚未完成 Master / 监视 / 默认 Multi 的首次迁移，不能声称已实机验证新桥自动启动。当前工程没有被替换，也没有操作鼠标。
+参考：[Falcon 默认 Multi](https://manual.uvi.net/falcon/en/interface/)、[Lua 主块/onLoad/onSave 的非实时约束与模块环境](https://lua.uvi.net/_lua_reference.html)、[状态读写回调](https://lua.uvi.net/_async_intro.html)。持久启动器已在本机 standalone 验收；VST/各 DAW 组合需分别验证。
