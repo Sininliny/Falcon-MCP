@@ -16,6 +16,7 @@ from .audit import AuditLog, trace_id
 from .bridge import FalconBridge
 from .catalog import search_catalog
 from .config import Config
+from .setup import installation_status, setup_bridge
 
 Selector = Annotated[
     str,
@@ -54,6 +55,12 @@ def create_server(config: Config | None = None) -> FastMCP:
     cfg = config or Config.from_env()
     audit = AuditLog(cfg.log_root)
     bridge, feedback = FalconBridge(cfg, audit), FeedbackRunner(cfg, audit)
+    # Startup must not require an agent to run a separate prepare command.
+    # A pending uncertain edit is left intact so reconciliation remains possible.
+    try:
+        bridge.prepare()
+    except RuntimeError as exc:
+        audit.error("bridge_prepare_deferred", exc)
     capture_lock = asyncio.Lock()
     mcp = FastMCP(
         "falcon_mcp",
@@ -63,7 +70,10 @@ def create_server(config: Config | None = None) -> FastMCP:
             "Runtime cannot create layers/keygroups/oscillators/modulators or save/load Programs. "
             "Timbre feedback is LOCAL CLAP descriptor matching with optional target text; it is subjective, "
             "not ground truth. Model is started per analysis and fully released after it. "
-            "Compare identical notes/velocity/output when iterating. Inspect timeout outcomes via falcon_reconcile."
+            "Compare identical notes/velocity/output when iterating. Inspect timeout outcomes via falcon_reconcile. "
+            "For installation/build mismatch call falcon_setup(verify_watch=true) once when idle. "
+            "Never repeatedly use computer-use/mouse tools to load or reload the bridge. "
+            "A missing Master bridge requires the one-time user setup, which is returned by falcon_setup."
         ),
     )
 
@@ -80,12 +90,24 @@ def create_server(config: Config | None = None) -> FastMCP:
             status["bridge_update_required"] = status["engine"].get("bridgeVersion") != __version__
             if status["bridge_update_required"]:
                 status["update_instructions"] = (
-                    "Run falcon-mcp prepare and reload the generated Lua in Falcon"
+                    "Call falcon_setup(verify_watch=true) once when idle; complete one-time setup only if needed"
                 )
         except (RuntimeError, TimeoutError, OSError, ValueError) as exc:
             status.update(connected=False, error=str(exc))
         status["uncertain_request"] = bridge.uncertain_request
+        status["installation"] = installation_status(bridge, status.get("engine"))
         return status
+
+    @mcp.tool(annotations=WRITE)
+    async def falcon_setup(verify_watch: bool = False) -> dict[str, Any]:
+        """Prepare/check one-time Master installation without GUI automation.
+
+        verify_watch republishes the script once and checks the exact build loaded automatically.
+        Use when idle: reloading resets script widgets and voice/MIDI handles. Save Master in a
+        default Multi/DAW template once. Startup persistence cannot be verified by the public API.
+        Failure returns a concrete setup step; never loop over computer-use mouse actions.
+        """
+        return await setup_bridge(bridge, verify_watch)
 
     @mcp.tool(annotations=WRITE)
     async def falcon_reconcile(acknowledge_unknown: bool = False) -> dict[str, Any]:
@@ -454,7 +476,8 @@ def create_server(config: Config | None = None) -> FastMCP:
             "documented_modules": 182,
             "documented_parameters": 3066,
             "version": __version__,
-            "api_coverage": "falcon_api_coverage: direct JSON tools + native Lua extension (reload required)",
+            "api_coverage": "falcon_api_coverage: direct JSON tools + native Lua extension (verified automatic file-watch reload)",
+            "installation": "falcon_setup: one-time Master/watch/default-Multi setup and no-GUI deployment verification",
             "project_parser": "All public nodes, parameters, connections, routes and sample metadata; completeness is reported",
             "project_formats": ["JSON", "PlantUML", "Mermaid", "SVG", "PNG"],
             "diagnostics": ["PSD", "spectrogram", "LUFS", "estimated true peak", "stereo", "envelope", "THD"],

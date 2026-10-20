@@ -101,3 +101,11 @@ $env:FALCON_MODEL_DEVICE = "cuda"  # 无 GPU 时设 cpu
 该脚本会拒绝把静音录音当作通过。模型生命周期与测量测试可离开 Falcon 单独运行。
 
 0.2 实机验收汇总写入 `.runtime/acceptance-v2.json`，完整工程及图片在 `.runtime/reports/`，完整审计在 `.runtime/logs/`。这些本机文件被 Git 忽略，避免将工程细节、路径和音频随源码分发。真实录音的诊断值：综合响度 **-38.3897 LUFS**，估算真峰值 **-26.8658 dBFS**，左右相关性 **0.2714**；没有削波/DC/反相关诊断提示。这些量值只描述该录音，不是音色质量评分。
+
+## 0.2.2 一次设置与无鼠标部署（2026-10-20）
+
+- 完整回归 **75 passed**；Ruff 检查通过。新增真实 Lua 5.1 首次轮询/拒绝旧会话、幂等源码发布、自动监视成功/失败、Program 桥拒绝持久安装、扩展部署及失联修复、未知写入守卫和 stdio 的 43 工具发现。
+- 本机 Python 环境更新为 0.2.2；wheel 构建及 `setup.py`/Lua 包含检查通过。
+- 真实 `scripts/smoke_setup.py` 通过 MCP stdio 读取本机 Falcon，确认 43 个工具、模型未加载、GUI 操作 0 次，报告存于 `.runtime/acceptance-setup.json`。
+- 本机现有 Falcon 仍运行 Program 下的 0.2.1 桥。新版诊断正确返回 `current_build_loaded=false,master_scope=false,watch_verified_this_instance=false,ready_without_gui=false`。没有替换工程或用鼠标重载；不能把软件测试通过当成 Master/默认 Multi 的自动启动实机验收。
+- 完成 [一次迁移](one-time-setup.md) 后，需真实执行 `falcon_setup(verify_watch=true)`，再重开 Falcon/DAW 模板重复验收，才能确认本机安装持续可用。

@@ -15,11 +15,12 @@ def main():
     parser = argparse.ArgumentParser(description="Falcon MCP local control + on-demand timbre analysis")
     parser.add_argument(
         "command",
-        choices=["serve", "prepare", "download-model", "describe", "status"],
+        choices=["serve", "prepare", "setup", "download-model", "describe", "status"],
         default="serve",
         nargs="?",
     )
     parser.add_argument("path", nargs="?", help="Audio path for describe")
+    parser.add_argument("--verify-watch", action="store_true", help="Test automatic script reload when idle")
     args = parser.parse_args()
     cfg = Config.from_env()
     if args.command == "serve":
@@ -30,6 +31,12 @@ def main():
         from .bridge import FalconBridge
 
         print(json.dumps(FalconBridge(cfg).prepare(), ensure_ascii=False, indent=2))
+    elif args.command == "setup":
+        from .bridge import FalconBridge
+        from .setup import setup_bridge
+
+        result = asyncio.run(setup_bridge(FalconBridge(cfg), args.verify_watch))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
     elif args.command == "download-model":
         # Download only. Do not load weights into Torch or allocate GPU memory.
         from huggingface_hub import snapshot_download
