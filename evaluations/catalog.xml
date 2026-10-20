@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Stable read-only agent evaluations against the bundled 2026-10-20 API snapshot.
+     Discover module types first, then inspect their parameter metadata with MCP tools. -->
+<evaluation>
+  <qa_pair><question>Find the alias-free basic analog oscillator, then its parameter controlling how many detuned copies play. What is its maximum? Return an integer.</question><answer>8</answer></qa_pair>
+  <qa_pair><question>Find the basic analog oscillator and compare the highest coarse pitch adjustment with the greatest hard-sync shift. How many semitones greater is the latter? Return an integer.</question><answer>12</answer></qa_pair>
+  <qa_pair><question>Find the analog ADSR modulator. Compare the documented maximum durations of the attack and release stages. What is their ratio, attack divided by release? Return an integer.</question><answer>1</answer></qa_pair>
+  <qa_pair><question>Find the standard periodic low-frequency modulator. Its delay and rise parameters share a documented maximum. What is their combined maximum in seconds? Return an integer.</question><answer>20</answer></qa_pair>
+  <qa_pair><question>Inspect the standard oscillator and its fine pitch adjustment. What is the full adjustment span, expressed in cents? Return an integer.</question><answer>200</answer></qa_pair>
+  <qa_pair><question>Compare the overall voice limit on a Program and its same-note voice limit in the bundled catalog. What is the smallest permitted same-note value? Return an integer.</question><answer>0</answer></qa_pair>
+  <qa_pair><question>Inspect the Keygroup's lower and upper velocity boundaries. What is the smallest MIDI velocity supported by BOTH boundary parameters? Return an integer.</question><answer>1</answer></qa_pair>
+  <qa_pair><question>Compare the stereo pan ranges on Part, Program and Keygroup. Do all three cover exactly the same interval? Return True or False.</question><answer>True</answer></qa_pair>
+  <qa_pair><question>Find the simple output-gain effect, then compare its internal level parameter name with the corresponding parameter on a Program. Return the effect's internal parameter name.</question><answer>Volume</answer></qa_pair>
+  <qa_pair><question>Find SparkVerb. Compare its two documented frequency crossover ranges. What is the difference between the minimum upper crossover and maximum lower crossover, in Hz? Return an integer.</question><answer>1000</answer></qa_pair>
+</evaluation>

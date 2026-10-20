@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "falcon": {
+      "command": "F:/source/code/Falcon-MCP/.venv/Scripts/python.exe",
+      "args": ["-m", "falcon_mcp", "serve"],
+      "env": {
+        "FALCON_MCP_HOME": "F:/source/code/Falcon-MCP/.runtime",
+        "FALCON_AUDIO_PYTHON": "F:/source/code/Falcon-MCP/.audio-venv/Scripts/python.exe",
+        "FALCON_MODEL_DEVICE": "cpu",
+        "FALCON_MODEL_OFFLINE": "1"
+      }
+    }
+  }
+}

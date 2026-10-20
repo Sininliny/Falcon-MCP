@@ -1,0 +1,250 @@
+{
+  "falcon_status": {
+    "feedback": {
+      "model_loaded": false,
+      "worker_pid": null,
+      "lifecycle": "one process per call; always exit after inference",
+      "model_id": "laion/clap-htsat-unfused",
+      "device": "cuda",
+      "offline": true
+    },
+    "audio_root": "F:\\source\\code\\Falcon-MCP\\.runtime\\audio",
+    "uncertain_request": null,
+    "engine": {
+      "lastMutation": {
+        "result": {
+          "scheduled": 3,
+          "scope": "Downstream of this Script Processor; use a Part/Program bridge for audition"
+        },
+        "op": "play",
+        "ok": true,
+        "id": "fb0773f57272483c881c447bb8943e9d"
+      },
+      "protocol": 1,
+      "bridgeVersion": "0.1.0",
+      "sampleRate": 48000,
+      "tempo": 120,
+      "time": 23380,
+      "sequence": {
+        "generation": 1,
+        "error": "",
+        "playing": false
+      },
+      "scope": {
+        "path": "/uvi/Part 0/Program",
+        "numParams": 16,
+        "displayName": "01 - Analog - Poly",
+        "name": "Program",
+        "type": "Program",
+        "selector": ""
+      },
+      "limitations": [
+        "No public layer/keygroup/oscillator creation API",
+        "No public Program save/load API"
+      ]
+    },
+    "connected": true
+  },
+  "falcon_record_test": {
+    "capture": {
+      "path": "<FALCON_AUDIO_ROOT>/live-test.wav",
+      "device": "Speakers (Realtek(R) Audio) [Loopback]",
+      "duration_seconds": 5.0,
+      "scope": "Entire selected output endpoint, including other apps; use an isolated Falcon output"
+    },
+    "notes": {
+      "scheduled": 3,
+      "scope": "Downstream of this Script Processor; use a Part/Program bridge for audition"
+    },
+    "feedback": {
+      "description": "亮度倾向温暖圆润；起音与延音倾向短促弹拨；质感倾向锯齿蜂鸣；动态变化倾向稳定；空间感倾向干燥贴近。",
+      "method": "CLAP audio/text descriptor retrieval",
+      "model_id": "laion/clap-htsat-unfused",
+      "device": "cuda",
+      "facets": [
+        {
+          "facet": "亮度",
+          "top_matches": [
+            {
+              "label": "温暖圆润",
+              "text": "A warm, round and mellow synthesizer tone.",
+              "cosine_similarity": 0.5456932187080383
+            },
+            {
+              "label": "低暗柔和",
+              "text": "A dark, soft and low-pass filtered synthesizer tone.",
+              "cosine_similarity": 0.2062452882528305
+            },
+            {
+              "label": "明亮锐利",
+              "text": "A bright, sharp synthesizer tone with strong high frequency harmonics.",
+              "cosine_similarity": 0.16048482060432434
+            }
+          ],
+          "margin": 0.3394479304552078,
+          "ambiguous": false
+        },
+        {
+          "facet": "起音与延音",
+          "top_matches": [
+            {
+              "label": "短促弹拨",
+              "text": "A short plucked synthesizer note with a sharp attack and quick decay.",
+              "cosine_similarity": 0.42403852939605713
+            },
+            {
+              "label": "缓慢铺开",
+              "text": "A soft synthesizer pad that swells in slowly and fades out gradually.",
+              "cosine_similarity": 0.29599729180336
+            },
+            {
+              "label": "平稳持续",
+              "text": "A steady sustained synthesizer note with a constant volume.",
+              "cosine_similarity": 0.17580121755599976
+            }
+          ],
+          "margin": 0.12804123759269714,
+          "ambiguous": false
+        },
+        {
+          "facet": "质感",
+          "top_matches": [
+            {
+              "label": "锯齿蜂鸣",
+              "text": "A buzzy sawtooth synthesizer sound with rich harmonics.",
+              "cosine_similarity": 0.3068827688694
+            },
+            {
+              "label": "金属钟鸣",
+              "text": "A metallic bell-like synthesizer sound with ringing inharmonic overtones.",
+              "cosine_similarity": 0.26380783319473267
+            },
+            {
+              "label": "纯净平滑",
+              "text": "A clean smooth pure sine-like musical tone with few harmonics.",
+              "cosine_similarity": 0.23615284264087677
+            }
+          ],
+          "margin": 0.04307493567466736,
+          "ambiguous": false
+        },
+        {
+          "facet": "动态变化",
+          "top_matches": [
+            {
+              "label": "稳定",
+              "text": "A stable musical note without vibrato, tremolo or rhythmic modulation.",
+              "cosine_similarity": 0.3389854431152344
+            },
+            {
+              "label": "节奏脉冲",
+              "text": "A pulsing synthesizer sound with rhythmic volume modulation.",
+              "cosine_similarity": 0.2437041997909546
+            },
+            {
+              "label": "颤音摇摆",
+              "text": "A musical note with clear pitch vibrato wobbling up and down.",
+              "cosine_similarity": 0.2421838343143463
+            }
+          ],
+          "margin": 0.09528124332427979,
+          "ambiguous": false
+        },
+        {
+          "facet": "空间感",
+          "top_matches": [
+            {
+              "label": "干燥贴近",
+              "text": "A dry close musical sound without reverb or echo.",
+              "cosine_similarity": 0.4900260865688324
+            },
+            {
+              "label": "延迟回声",
+              "text": "A musical note with distinct repeating delay echoes.",
+              "cosine_similarity": 0.39918845891952515
+            },
+            {
+              "label": "宽广合唱",
+              "text": "A wide lush layered synthesizer with detuned chorus and stereo movement.",
+              "cosine_similarity": 0.3982217609882355
+            }
+          ],
+          "margin": 0.09083762764930725,
+          "ambiguous": false
+        }
+      ],
+      "target_matches": [],
+      "windows_analyzed": 1,
+      "limitations": [
+        "Similarity is relative, not a calibrated probability or a free-form caption.",
+        "Descriptors depend on the candidate bank. Use identical notes, velocity and recording conditions for A/B.",
+        "The model does not infer Falcon parameter values or automatically apply changes."
+      ],
+      "measurements": {
+        "duration_seconds": 5.0,
+        "sample_rate": 48000,
+        "channels": 2,
+        "peak_dbfs": -26.874469626129734,
+        "rms_dbfs": -43.04381564556447,
+        "crest_db": 16.169346019434737,
+        "clipped_fraction": 0.0,
+        "spectral_centroid_hz": 313.3791037273435,
+        "spectral_rolloff_85_hz": 410.15625,
+        "spectral_flatness": 2.505717190873304e-05,
+        "zero_crossing_rate": 0.010941712257134405,
+        "silent": false,
+        "mono_cancellation": false,
+        "note": "These are signal measurements, not LUFS or perceptual judgments."
+      },
+      "model_used": true,
+      "model_released": true
+    }
+  },
+  "post_inference_status": {
+    "feedback": {
+      "model_loaded": false,
+      "worker_pid": null,
+      "lifecycle": "one process per call; always exit after inference",
+      "model_id": "laion/clap-htsat-unfused",
+      "device": "cuda",
+      "offline": true
+    },
+    "audio_root": "F:\\source\\code\\Falcon-MCP\\.runtime\\audio",
+    "uncertain_request": null,
+    "engine": {
+      "lastMutation": {
+        "result": {
+          "scheduled": 3,
+          "scope": "Downstream of this Script Processor; use a Part/Program bridge for audition"
+        },
+        "op": "play",
+        "ok": true,
+        "id": "fb0773f57272483c881c447bb8943e9d"
+      },
+      "protocol": 1,
+      "bridgeVersion": "0.1.0",
+      "sampleRate": 48000,
+      "tempo": 120,
+      "time": 23380,
+      "sequence": {
+        "generation": 1,
+        "error": "",
+        "playing": false
+      },
+      "scope": {
+        "path": "/uvi/Part 0/Program",
+        "numParams": 16,
+        "displayName": "01 - Analog - Poly",
+        "name": "Program",
+        "type": "Program",
+        "selector": ""
+      },
+      "limitations": [
+        "No public layer/keygroup/oscillator creation API",
+        "No public Program save/load API"
+      ]
+    },
+    "connected": true
+  },
+  "tool_count": 22
+}

@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local research, bridge secrets, model weights, audio recordings and isolated runtimes
+.research/
+.runtime/
+.tmp/
+.audio-venv/
+dist/
+build/
+*.egg-info/
