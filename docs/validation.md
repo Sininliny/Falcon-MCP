@@ -1,5 +1,7 @@
 # Validation records
 
+Current 0.3.0: 112 automated tests pass, with 52-tool MCP discovery and native VST3 file/render/reference acceptance on Yingg. See [current workflow, evidence and limits](native-and-reference.md). Older results below retain their original scope.
+
 Historical hardware environment: 2026-10-20, Windows, Falcon standalone 27.0.2, Python 3.12.9, MCP Python SDK 1.30.0, RTX 3070 Ti Laptop 8 GB. Versioned results below describe their original releases; they do not imply native acceptance of later changes.
 
 ## 0.2.0 automated checks

@@ -115,6 +115,7 @@ def create_server(config: Config | None = None) -> FastMCP:
         status["installation"] = installation_status(bridge, status.get("engine"))
         status["connection"] = bridge.connection_status(status.get("engine"), status.get("error"))
         status["capture"] = capture_monitor.snapshot()
+        status["native_host"] = native_host.status()
         return status
 
     @mcp.tool(annotations=READ)
@@ -556,11 +557,13 @@ def create_server(config: Config | None = None) -> FastMCP:
                 "runtime_control": {"status": "implemented", "validation": "See docs/validation.md; not every module was hardware-tested"},
                 "instance_binding": {"status": "implemented", "validation": "Automated protocol/Lua tests; per-server opt-in guard"},
                 "capture_readiness": {"status": "implemented", "validation": "Automated buffer/ordering tests; endpoint must be tested locally"},
-                "program_multi_save_load": {"status": "public_api_gap", "alternative": "Use Falcon's native save/load UI"},
+                "program_multi_save_load": {"status": "public_api_gap", "alternative": "Owned VST3 native_file tools or Falcon UI; Lua gap remains"},
                 "synthesis_node_creation": {"status": "public_api_gap", "alternative": "Native editing or separately validated offline authoring"},
                 "offline_preset_authoring": {"status": "not_implemented", "validation": "User-reported workflow; not a server-supported file writer"},
                 "ufs_index_native_preview": {"status": "not_implemented", "validation": "No reliable native association workflow established"},
                 "continuous_model_listening": {"status": "not_implemented", "alternative": "One capture and one analysis per call"},
+                "owned_vst3_files": {"status": "implemented", "scope": "Separate owned Windows VST3 instance; native_file load/save, native_edit, native_render"},
+                "reference_segments": {"status": "implemented", "scope": "Explicit local audio range, no source separation; level-normalized measurement hypotheses"},
             },
             "model": feedback.status(),
             "manual": "https://manual.uvi.net/falcon/en/",
@@ -582,8 +585,12 @@ def create_server(config: Config | None = None) -> FastMCP:
         )
 
     from .advanced import register_advanced
+    from .native_tools import register_native
+    from .reference_tools import register_reference
 
     register_advanced(mcp, cfg, bridge, audit, capture_lock, capture_monitor)
+    register_reference(mcp, cfg, feedback)
+    native_host = register_native(mcp, cfg, audit)
     # Audit at the protocol boundary, so rejected input/unknown tools are logged too.
     for request_type, original in list(mcp._mcp_server.request_handlers.items()):
 

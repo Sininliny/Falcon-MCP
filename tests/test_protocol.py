@@ -29,7 +29,9 @@ async def test_real_stdio_initialize_tools_resource_and_validation(config):
             "falcon_bind_instance",
             "falcon_capture_status",
         } <= names
-        assert len(names) == 45
+        assert {"falcon_native_host", "falcon_native_file", "falcon_native_edit", "falcon_native_render",
+                "falcon_analyze_reference", "falcon_compare_reference", "falcon_audio_meter"} <= names
+        assert len(names) == 52
         assert (config.runtime / "falcon_bridge.lua").is_file()
         assert all(t.outputSchema is not None for t in tools.tools)
         capture = await client.call_tool("falcon_capture_status", {})

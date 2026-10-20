@@ -1,6 +1,6 @@
 # Installation and operating precautions
 
-Applies to Falcon MCP 0.2.4. Persistent startup was verified with 0.2.3 on Windows Falcon standalone 27.0.2; the 0.2.4 guards/readiness additions have automated coverage and require native acceptance. VST/DAW combinations and other Falcon versions require separate validation.
+Applies to Falcon MCP 0.3.0. This guide configures the open-instance Lua bridge. For the separate owned VST3 host and automated Program/Multi file operations, see [native hosting](native-and-reference.md). Persistent standalone startup was verified with 0.2.3; owned-host file I/O/rendering was verified with 0.3.0 on Windows Falcon 27.0.2. Other versions/hosts require separate validation.
 
 ## 1. Install the server
 
@@ -20,6 +20,9 @@ Optional components:
 ```powershell
 # Windows WASAPI output capture.
 .venv\Scripts\python.exe -m pip install -e ".[capture]"
+
+# Owned Falcon VST3 file operations and direct offline rendering.
+.venv\Scripts\python.exe -m pip install -e ".[host]"
 
 # Local timbre feedback; installs PyTorch and Transformers.
 .venv\Scripts\python.exe -m pip install -e ".[feedback]"

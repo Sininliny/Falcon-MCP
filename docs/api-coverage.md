@@ -31,11 +31,14 @@ Read `falcon://capabilities.workflow_support` for machine-readable distinctions 
 |---|---|
 | Instance binding | `bind_instance` pins one MCP process to a runtime and optional Program names; automated protocol/Lua tests. It cannot identify the foreground window. |
 | Capture readiness | First successful buffer, lifecycle status and timing checks are implemented; the real endpoint must still be validated locally. |
-| Native Program/Multi saving and loading | No corresponding public runtime API in this implementation; use Falcon's UI. |
+| Program/Multi saving and loading | No public Lua API. The separate owned VST3 host restores/serializes native state with guarded load/save and readback. |
 | Layer/keygroup/oscillator/modulator/connection creation or deletion | Public runtime API gap; effect-chain editing is an exception. |
 | Offline preset construction | Reported successful by the user, but no supported file builder is included here. XML parsing does not establish native compatibility. |
 | UFS packaging, indexing, native browser preview association | No reliable server workflow established; a same-name OGG is not acceptance evidence. |
 | Continuous model feedback | Not implemented; feedback is one capture/file and one worker invocation. |
+| Reference audio | Exact local time range, meters and normalized comparison; no target-source separation from a mix. |
+
+Owned native hosting is validated on Windows Falcon 27.0.2/Pedalboard 0.9.26 for a basic synth Program. It is not a way to capture a different running instance's unsaved state. Persistent Lua loops can stall offline hosting; original instrument scripts are retained, and compatibility is reported per preset. See [native validation and usage](native-and-reference.md).
 
 Other exclusions include host/driver configuration, ScriptProcessor source inspection and processor insertion, protected-bank internals, complete internal MultiSample zone enumeration, and an atomic engine freeze. Public API availability may change by Falcon version; these are current implementation boundaries.
 

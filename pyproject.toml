@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "falcon-mcp"
-version = "0.2.4"
+version = "0.3.0"
 description = "Local MCP control and on-demand timbre feedback for UVI Falcon 2027"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,6 +15,7 @@ dependencies = ["mcp>=1.26,<2", "numpy>=1.26,<3", "scipy>=1.12,<2", "soundfile>=
 [project.optional-dependencies]
 feedback = ["torch>=2.6,<3", "transformers>=4.49,<5"]
 capture = ["PyAudioWPatch>=0.2.12.7; sys_platform == 'win32'"]
+host = ["pedalboard>=0.9.26,<0.10"]
 dev = ["pytest>=8", "pytest-asyncio>=0.25", "lupa>=2.2", "beautifulsoup4>=4.12", "requests>=2.32", "ruff>=0.12"]
 
 [project.scripts]

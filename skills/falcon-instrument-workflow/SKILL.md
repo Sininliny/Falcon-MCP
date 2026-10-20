@@ -1,11 +1,17 @@
 ---
 name: falcon-instrument-workflow
-description: Build, refine, diagnose, and validate UVI Falcon instruments and preset libraries with Falcon MCP, including instance selection, performance routing, audio capture, and release checks.
+description: Build, load, save, render, refine, and validate UVI Falcon instruments with Falcon MCP, including native VST3 sessions, reference-audio segments, standalone routing, and preset-library release checks.
 ---
 
 # Falcon instrument workflow
 
 Keep four deliverables distinct: instrument sound, performance routing, library presentation, and the local MCP environment. A working Multi does not establish that each standalone Program or portable library is complete.
+
+## Choose the execution context
+
+- For automated load/save and repeatable audio rendering, use `falcon_native_host`, `falcon_native_file`, `falcon_native_edit`, and `falcon_native_render`. They control a separate owned VST3 instance, guarded by its returned `session_id`, without opening an editor or driving the desktop. Read [native sessions and reference matching](references/native-and-reference.md) before using this path.
+- For the already-open standalone/DAW instance, use the Lua bridge workflow below. Native-host tools cannot capture its unsaved state. Never assume the two contexts contain the same Program. Public Lua Program/Multi save/load remains unavailable.
+- For an uploaded/local reference, `falcon_analyze_reference` selects exact timestamps and preserves the target instrument and requested changes. `falcon_compare_reference` compares subsequent renders/captures; `falcon_audio_meter` provides compact level evidence. These tools support agents without native audio input. Read the same reference for interpretation limits.
 
 ## Connect to the intended instrument
 
@@ -20,7 +26,7 @@ For missing bridges, follow the [manual initialization guide](https://github.com
 ## Choose the production path
 
 - Existing structures and supported effect chains: use live MCP tools with readback and expected-value guards.
-- Missing synthesis structures: current public runtime APIs do not expose general Layer/Keygroup/Oscillator/Modulator/connection creation. Use native editing or an explicitly chosen offline authoring workflow, then test native loading, sound and reopening. XML parsing alone is insufficient; the server does not supply a validated preset writer.
+- Missing synthesis structures: current public runtime APIs do not expose general Layer/Keygroup/Oscillator/Modulator/connection creation. Use native editing or an explicitly chosen offline authoring workflow, then test native loading, sound and reopening. The owned host can validate/export existing native structures; it does not provide general structure creation. XML parsing alone is insufficient.
 - UI/event logic: use trusted Lua extensions within public API limits. Preserve saved control state; opening a panel must not reset a patch. Forward each incoming MIDI event once, preserving channel/port and note/release identity. Check repeated same-note presses, overlapping channels/ports, sustain, releases and All Notes Off.
 - Capability questions: read `falcon://capabilities` and `falcon_api_coverage`. Signature mappings/function existence, implemented tools, automated tests and native acceptance are different evidence.
 
@@ -49,7 +55,9 @@ If only one instrument or several instruments sound unexpectedly, resolve routin
 | Performance scene/snapshot | `.uvim` Multi | Parts, routing, Master and embedded Program states. |
 | Music production | DAW project | Arrangement, automation, host routing and plugin state. |
 
-Use Load Multi for `.uvim`, Load Program for `.uvip`. Saving a Multi does not update the separate Program files on disk. Save modified Programs individually; inspect unsaved state. Create variants with Save Program As before using Save Program for later edits. These native save/load operations are not currently exposed as server runtime tools.
+Use Load Multi for `.uvim`, Load Program for `.uvip`. Saving a Multi does not update the separate Program files on disk. Save modified Programs individually; inspect unsaved state. Create variants with Save Program As before using Save Program for later edits. The standalone Lua bridge does not expose these file operations.
+
+In an owned VST3 session, `falcon_native_file` implements these file operations through native state serialization: choose `kind=program` or `kind=multi`, and save each deliverable deliberately. Outputs are confined to `<home>/presets`; overwriting requires the inspected hash and retains a backup. Resources are not automatically collected. This is separate from the public Lua API and from the unsaved standalone/DAW state.
 
 Validate instrument files, routing templates, demos and library presentation separately. Generating preview audio is one deliverable; verified native browser preview association is another. Same-name OGG files alone do not establish association. UFS packaging/indexing/native preview remain unresolved here.
 

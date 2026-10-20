@@ -1,8 +1,8 @@
-# Falcon MCP 0.2.4
+# Falcon MCP 0.3.0
 
 Local MCP control for UVI Falcon 2027: inspect the engine, edit parameters, audition and capture audio, diagnose signals, export project graphs, and compare timbres with an optional local model.
 
-Native acceptance through 0.2.3 used Windows with Falcon standalone **27.0.2**. Version 0.2.4 adds instance guards and capture observability with automated coverage; native acceptance of those additions remains pending. The server uses stdio and opens no network listener. VST/DAW combinations require separate validation.
+Two explicit contexts: the Lua bridge controls an open standalone/DAW instance; the optional owned VST3 host provides automated file load/save and direct audio rendering. Windows Falcon **27.0.2** native-host acceptance passed for a basic synth Program, including readback, gain edits, Program/Multi save/reopen and audio. Other hosts, versions and scripted presets require separate validation. The server uses stdio and opens no network listener.
 
 ## Installation
 
@@ -23,6 +23,8 @@ Load the generated `falcon_bridge.lua` into **one Master Script Processor**, sav
 
 Optional extras: `[capture]` for Windows WASAPI loopback; `[feedback]` for PyTorch/Transformers. Neither is required for engine control, project parsing, UML, or file-based diagnostics.
 
+For file operations without desktop automation, install `[host]` and call `falcon_native_host(action="start")`. This uses a separate licensed Falcon VST3 instance; no Master bridge installation is needed for that context. It cannot extract unsaved state from the already-open standalone. See [native hosting and reference-audio workflow](docs/native-and-reference.md).
+
 ## Capabilities
 
 | Area | Support |
@@ -38,19 +40,23 @@ Optional extras: `[capture]` for Windows WASAPI loopback; `[feedback]` for PyTor
 | Logs | Requests/results, exceptions, timing, worker output/lifecycle, bridge print ring, and Falcon native log access. |
 | Session safety | Explicit instance/Program-name binding, target summaries, observed lifecycle changes and possible disconnect causes. |
 | Capture state | First-buffer readiness, current/last capture status, endpoint metadata and possible tail-truncation warnings. |
+| Native files | Load/save `.uvip` and `.uvim` in the owned VST3 session, guarded native XML parameter edits, readback, direct MIDI rendering. |
+| Reference audio | Exact 0.1..30 s segment extraction from a local attachment, instrument/change brief, meters, normalized A/B bands and testable adjustment hypotheses. |
 
-UVIScript does **not** expose creation/deletion of layers, keygroups, oscillators, modulators, or modulation connections, nor Program/Multi loading and saving. Prepare those structures in Falcon. Effect-chain editing is supported. Protected or otherwise hidden state remains outside public project snapshots.
+UVIScript does **not** expose general synthesis-node creation/deletion or Program/Multi loading and saving. The owned VST3 backend implements file operations through a separate, version-checked native state adapter; it is not a public Lua API. Effect-chain editing is supported by the bridge. Protected/hidden state remains outside public project snapshots; native file import supports unprotected UVI4 XML only.
 
 The offline index contains 182 module classes, 3,066 parameter definitions, and 1,489 API-member records. Inherited/duplicate records are included; these counts do not represent independently tested operations. See [API coverage](docs/api-coverage.md) and [validation records](docs/validation.md).
 
 ## MCP tools
 
-The server exposes **45 tools**, structured schemas, the `falcon://capabilities` resource, and the `refine_timbre` prompt. Use tool discovery for full arguments and constraints. The resource's `workflow_support` distinguishes implemented paths, public API gaps and unsupported workflows.
+The server exposes **52 tools**, structured schemas, the `falcon://capabilities` resource, and the `refine_timbre` prompt. Use tool discovery for full arguments and constraints. The resource's `workflow_support` distinguishes implemented paths, public API gaps and unsupported workflows.
 
 | Tools | Purpose |
 |---|---|
 | `falcon_status`, `falcon_setup`, `falcon_reconcile` | Connection, persistent deployment, uncertain-write recovery. |
 | `falcon_bind_instance`, `falcon_capture_status` | Pin inspected runtime/Program targets; observe recording readiness and completion. |
+| `falcon_native_host`, `falcon_native_file`, `falcon_native_edit`, `falcon_native_render` | Own a separate VST3 session; native preset I/O, guarded parameter edits and direct offline audio. |
+| `falcon_analyze_reference`, `falcon_compare_reference`, `falcon_audio_meter` | Import a reference time range, preserve the design goal, compare candidate evidence, inspect levels. |
 | `falcon_search_catalog`, `falcon_api_coverage` | Offline parameter/API indexes and runtime function probes. |
 | `falcon_list_children`, `falcon_list_parameters`, `falcon_get_parameters`, `falcon_set_parameters` | Browse and edit public state. |
 | `falcon_get_connections`, `falcon_set_connection_parameters`, `falcon_set_output` | Existing modulation and routing. |
@@ -75,6 +81,7 @@ The server exposes **45 tools**, structured schemas, the `falcon://capabilities`
 - Keep the audio engine processing. Host plugin sleep pauses both launcher and mailbox polling.
 - Wrapper MIDI channels are 1..16; native `MidiEvent` channels are 0..15. `post_event.delta` is milliseconds. Apply sample offsets at voice start; later calls cannot reposition an already-playing voice.
 - Use a distinct runtime home for each Falcon instance. Multiple MCP clients serialize access to one mailbox through OS locks.
+- Native tools use their returned `session_id` and native child paths. Lua tools use the standalone bridge instance and Lua selectors. Edits in one context do not appear in the other. Stop the owned host when finished.
 
 Example parameter write, after reading the target definition/value:
 
@@ -101,13 +108,15 @@ Diagnostics and UML rendering run locally without loading CLAP. True peak uses 4
 
 Project scans are non-atomic public-state snapshots. `complete=false` identifies read errors, truncation, or detected structural changes. Host/driver settings, hidden script source, protected bank contents, and internal MultiSample zone enumeration are not exposed.
 
+Reference extraction reads only the selected source frames, preserving raw levels and provenance. A user can specify timestamps, the desired instrument and requested changes. Comparison separates level difference from normalized band balance and supplies hypotheses rather than invented synth settings. Mixed audio is not source-separated; other instruments can dominate. See the [agent workflow](skills/falcon-instrument-workflow/references/native-and-reference.md).
+
 ## Local files and verification
 
 `FALCON_MCP_HOME` defaults to `~/.falcon-mcp`. It contains `bridge/`, `models/`, `audio/`, `assets/`, `reports/`, and `logs/`. Preserve credentials, instance counters, and recovery templates; exclude private runtime data from Git.
 
 Audit JSONL records include UTC timestamps, trace/session IDs, arguments/results, errors, timings, and worker lifecycle; credential fields are redacted. Engine print access is a 256-entry ring. Native logs contain only what Falcon writes. Historical audit files are not automatically deleted.
 
-Release 0.2.4 passes **91 automated tests**, including real stdio discovery of 45 tools. See [changes and validation limits](docs/changes-0.2.4.md). Historical 0.2.3 native acceptance covered restart/deployment without subsequent GUI input, extension recovery, project/UML/diagnostic/voice/MIDI checks; see [installation evidence](docs/one-time-setup.md#verified-installation-lessons).
+See [0.3 validation and usage](docs/native-and-reference.md), [0.2.4 regression results](docs/changes-0.2.4.md), and [historical standalone acceptance](docs/validation.md). Automated tests, signature coverage and native compatibility remain separate evidence.
 
 License: [Apache-2.0](LICENSE).
 
