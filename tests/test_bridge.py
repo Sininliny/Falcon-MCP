@@ -45,8 +45,10 @@ async def test_wrong_token_and_id_never_accepted(config):
     bridge = FalconBridge(config)
     bridge.prepare()
     atomic_json(config.runtime / "response.json", {"id": "old", "token": "wrong", "ok": True})
+    worker = asyncio.create_task(respond(bridge))  # handshake succeeds; the write receives no response
     with pytest.raises(TimeoutError):
         await bridge.request("set_parameters", mutation=True)
+    await worker
     assert bridge.uncertain_request
     with pytest.raises(BridgeError, match="outcome is unknown"):
         await bridge.request("set_parameters", mutation=True)
@@ -61,8 +63,10 @@ async def test_wrong_token_and_id_never_accepted(config):
 async def test_cancelled_mutation_is_uncertain(config):
     bridge = FalconBridge(config)
     bridge.prepare()
+    worker = asyncio.create_task(respond(bridge))
     task = asyncio.create_task(bridge.request("play", mutation=True))
-    await asyncio.sleep(0.01)
+    await worker
+    await asyncio.sleep(0.04)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -72,8 +76,10 @@ async def test_cancelled_mutation_is_uncertain(config):
 async def test_restart_keeps_uncertain_state(config):
     first = FalconBridge(config)
     first.prepare()
+    worker = asyncio.create_task(respond(first))
     with pytest.raises(TimeoutError):
         await first.request("play", mutation=True)
+    await worker
     restarted = FalconBridge(config)
     with pytest.raises(BridgeError, match="outcome is unknown"):
         await restarted.request("play", mutation=True)
@@ -100,7 +106,7 @@ async def test_other_client_reconciliation_clears_stale_local_flag(config):
     bridge = FalconBridge(config)
     bridge.prepare()
     bridge.uncertain_request = "old"
-    worker = asyncio.create_task(respond(bridge))
+    worker = asyncio.create_task(respond(bridge, 2))
     assert (await bridge.request("play", mutation=True))["op"] == "play"
     await worker
 

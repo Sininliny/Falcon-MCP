@@ -62,7 +62,62 @@ def table(lua, obj):
 
 
 def request(lua, d, op, args):
-    return d.process(table(lua, {"protocol": 1, "id": uuid.uuid4().hex, "op": op, "args": args}))
+    engine = d.process(table(lua, {"protocol": 1, "id": uuid.uuid4().hex, "op": "ping"}))
+    return d.process(
+        table(
+            lua, {"protocol": 1, "id": uuid.uuid4().hex, "op": op, "args": args, "session": engine.instance}
+        )
+    )
+
+
+def test_reload_rejects_stale_mutation_before_and_after_handshake():
+    lua, d = dispatcher()
+    stale = table(
+        lua,
+        {
+            "protocol": 1,
+            "id": "stale",
+            "op": "set_parameters",
+            "session": "previous",
+            "args": {"selector": "Program", "changes": [{"name": "Gain", "value": 0.2}]},
+        },
+    )
+    with pytest.raises(LuaError, match="session changed"):
+        d.process(stale)
+    assert (
+        request(lua, d, "get_parameters", {"selector": "Program", "names": ["Gain"]})["items"][1].value == 1
+    )
+    with pytest.raises(LuaError, match="session changed"):
+        d.process(stale)
+
+
+@pytest.mark.parametrize("op", ["ping", "set_parameters"])
+def test_first_mailbox_poll_accepts_ping_and_never_replays_stale_write(op):
+    lua, d = dispatcher()
+    lua.globals().BRIDGE_ROOT = "/test"
+    lua.globals().incoming = table(
+        lua,
+        {
+            "protocol": 1,
+            "id": "first-request",
+            "op": op,
+            "session": "old-instance",
+            "args": {"selector": "Program", "changes": [{"name": "Gain", "value": 0.2}]},
+        },
+    )
+    lua.execute("""
+      require("uvi.json").decode=function(text) return incoming end
+      function loadTextData(path) return {finished=true,data="request"} end
+      function saveData(value,path,cb) written=value;cb({success=true}) end
+      function wait(ms) error("STOP AFTER FIRST POLL") end
+    """)
+    with pytest.raises(LuaError, match="STOP AFTER FIRST POLL"):
+        lua.globals().onInit()
+    assert lua.globals().written is not None
+    assert lua.globals().written.ok is (op == "ping")
+    assert (
+        request(lua, d, "get_parameters", {"selector": "Program", "names": ["Gain"]})["items"][1].value == 1
+    )
 
 
 def test_script_instance_is_a_stable_host_nonce_not_a_reusable_lua_address():
@@ -341,3 +396,20 @@ def test_midi_track_is_checked_before_native_access():
     with pytest.raises(LuaError, match="track index"):
         request(lua, d, "midi_file", {"action": "events", "handle": handle, "track": 2})
     assert not lua.globals().nativeTrackCalled
+
+
+def test_readonly_midi_query_needs_no_mutation_session():
+    lua, d = dispatcher()
+    handle = create_midi_double(lua, d)
+    result = d.process(
+        table(
+            lua,
+            {
+                "protocol": 1,
+                "id": "read-only",
+                "op": "midi_file",
+                "args": {"action": "events", "handle": handle, "track": 1},
+            },
+        )
+    )
+    assert result.total_count == 0

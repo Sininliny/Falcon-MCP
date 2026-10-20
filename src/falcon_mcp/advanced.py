@@ -447,22 +447,18 @@ def register_advanced(mcp, config: Config, bridge: FalconBridge, audit: AuditLog
         )
 
     @mcp.tool(annotations=WRITE)
-    def falcon_write_extension(source: Annotated[str, Field(max_length=65536)]) -> dict[str, Any]:
+    async def falcon_write_extension(source: Annotated[str, Field(max_length=65536)]) -> dict[str, Any]:
         """Install native UVIScript source to access EVERY documented Lua API including UI and event callbacks.
 
-        Writes a versioned backup, embeds extension in the bridge, and REQUIRES Falcon script reload (no public reload API).
+        Writes a versioned backup and verifies automatic reload through WATCH FOR SCRIPT CHANGES.
+        Requires one-time Master/watch/default-Multi setup. Returns applied=false if not loaded.
+        Use when idle: reload resets script widgets and voice/MIDI handles; fix compile errors via native logs.
         Runs inside Falcon's Lua sandbox; do not write unbounded loops. Supports onInit/onNote/onSave/onLoad and UI widgets.
         Bridge onInit is preserved. This deliberately enables native scripting beyond the JSON wrappers.
         """
-        config.runtime.mkdir(parents=True, exist_ok=True)
-        target = config.runtime / "extension.lua"
-        if target.exists():
-            import uuid
+        from .setup import deploy_extension
 
-            (config.runtime / ("extension-" + uuid.uuid4().hex + ".lua")).write_bytes(target.read_bytes())
-        target.write_text(source, encoding="utf8")
-        result = bridge.prepare()
-        return {**result, "requires_reload": True, "extension": str(target), "runtime_eval": False}
+        return await deploy_extension(bridge, source)
 
     @mcp.tool(annotations=READ)
     async def falcon_api_coverage(
@@ -481,6 +477,7 @@ def register_advanced(mcp, config: Config, bridge: FalconBridge, audit: AuditLog
             "next_offset": min(len(matches), offset + limit),
             "source": data["source"],
             "native_extension_reload_required": True,
+            "native_extension_reload": "Automatic with one-time WATCH FOR SCRIPT CHANGES setup; exact build verified",
         }
         if probe_runtime:
             result["runtime"] = await bridge.request("api_info")

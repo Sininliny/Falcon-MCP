@@ -21,11 +21,11 @@
 | UML | PlantUML、Mermaid、SVG、PNG；组合、调制、路由关系，支持聚焦子树 |
 | 音频诊断 | 数值频谱、声谱图、包络、波形、LUFS、估算真峰值、DC、相位/单声道兼容性、测试音 THD |
 | 日志 | 完整请求/结果、错误堆栈、耗时、模型进程输出；本地 JSONL、引擎 print 和原生日志 |
-| 官方 API 覆盖 | 直接工具 + 需要重载的原生 Lua 扩展；1489 条官方签名/属性索引可查询 |
+| 官方 API 覆盖 | 直接工具 + 可自动重载的原生 Lua 扩展；1489 条官方签名/属性索引可查询 |
 
 **公开 API 的边界：**UVIScript 无法创建/删除 Layer、Keygroup、Oscillator、Modulator 和调制连线，也没有 Program 加载/保存接口。先在 Falcon 中准备结构，再由 GAI 调整已有节点；效果链编辑是例外。本项目不会声称实现不存在的接口，也不绕过音色保护。
 
-常用引擎功能可以直接通过 MCP 调用。UI 控件、事件回调、线程/异步任务等必须在 Falcon Lua 上下文运行的 API，可用 `falcon_write_extension` 写入原生脚本后在 Falcon 重载。**API 可达不代表每个接口都已逐项实机验收，也不代表全部接口都能在一次即时 JSON 调用中运行。**详细映射和边界见 [API 覆盖说明](docs/api-coverage.md)。
+常用引擎功能可以直接通过 MCP 调用。UI 控件、事件回调、线程/异步任务等必须在 Falcon Lua 上下文运行的 API，可用 `falcon_write_extension` 写入原生脚本，首次设置文件监视后由 Falcon 自动重载。**API 可达不代表每个接口都已逐项实机验收，也不代表全部接口都能在一次即时 JSON 调用中运行。**详细映射和边界见 [API 覆盖说明](docs/api-coverage.md)。
 
 Standalone 和 VST 内可使用同一 Lua 桥。本机验证使用 standalone；VST 宿主组合尚未逐一实测。宿主必须持续处理音频，休眠会使桥轮询暂停。
 
@@ -43,11 +43,20 @@ $env:FALCON_MCP_HOME = "$PWD\.runtime"
 
 `download-model` 只下载权重到磁盘，不载入模型、不占用显存。默认模型 `laion/clap-htsat-unfused` 使用 Apache 2.0 许可，权重约 615 MB。推理默认离线，不上传音频。
 
-在 Falcon 的 **EVENTS → + → Script Processor → Default** 中添加一个处理器，使用文件夹按钮载入 `prepare` 输出的 `falcon_bridge.lua`。整个实例只载入一个桥：
+首次在 Falcon 的 **Master → EVENTS → + → Script Processor → Default** 添加一个处理器，使用文件夹按钮载入 `prepare` 输出的 `falcon_bridge.lua`。然后只做一次：
 
-- **Program / Part**：便于隔离试听；替换该 Program 会移除其中的桥。
-- **Master**：便于跨 Part 控制；生成的事件会经过下游 MIDI 路由。
-- 跨 Part 始终使用 `Synth.parts[1].program...`；`Program` 等快捷根取决于桥所在上下文。
+1. 在该处理器开启 **WATCH FOR SCRIPT CHANGES**。
+2. 从主菜单 **Save as default Multi** 保存；使用 DAW 时也保存到宿主模板/工程。默认 Multi 会在新启动的 standalone/plugin 实例载入。
+3. 删除旧的 Program 桥，整个实例只保留一个桥。在空闲、没有持续音符时运行下面的验收命令。
+
+```powershell
+$env:FALCON_MCP_HOME = "$PWD\.runtime"
+.venv\Scripts\python.exe -m falcon_mcp setup --verify-watch
+```
+
+只有读到对应构建且自动重载探测成功，才返回 `installation.ready_without_gui=true`。重启 Falcon / 重开宿主模板后再执行一次，确认宿主确实保存了安装；公开 API 无法直接读取默认 Multi/宿主模板配置。详细操作和恢复边界见 [一次设置与自动连接](docs/one-time-setup.md)。
+
+Master 桥不会随着替换 Program 消失。生成的事件经过下游 MIDI 路由；跨 Part 使用 `Synth.parts[1].program...`，`Program` 等快捷根取决于脚本上下文。Program/Part 桥仍可用于临时隔离试听，但不视为持久安装。
 
 保持 Falcon 音频引擎运行，然后检查：
 
@@ -74,7 +83,7 @@ $env:FALCON_MCP_HOME = "$PWD\.runtime"
 
 本机开发时将模型依赖独立在 `.audio-venv` 中，复用已有 CUDA PyTorch。使用该环境时，配置再加入 `"FALCON_AUDIO_PYTHON": "F:/source/code/Falcon-MCP/.audio-venv/Scripts/python.exe"`。独立环境可选，普通全新安装默认使用服务器自己的 Python。
 
-更新 Lua 后重新执行 `prepare` 并在 Falcon 中重载脚本；重载不会重放留在磁盘上的旧指令。
+MCP 启动会自动准备桥文件，相同内容不改写文件。启用监视后，源码更新和 `falcon_write_extension` 由 Falcon 自动重载；扩展调用等待精确构建 ID 回执，`applied=true` 才表示已生效。更新后可调用 `falcon_setup(verify_watch=true)` 验证。禁止用反复 computer use / 鼠标操作维持连接。重载会重置脚本控件与 voice/MIDI 句柄，应在空闲时执行；新桥通过握手会话拒绝重放残留写入。
 
 ## 按需音色反馈
 
@@ -93,11 +102,12 @@ CLAP 是音频/文本匹配模型，**不是自由生成式音频问答模型**�
 
 ## MCP 工具
 
-共 **42 个工具**。新增功能已纳入相同的 stdio 服务，无需另启动服务。
+共 **43 个工具**。新增功能已纳入相同的 stdio 服务，无需另启动服务。
 
 | 工具 | 用途 |
 |---|---|
 | `falcon_status` / `falcon_reconcile` | 连接、能力、模型进程；超时后检查引擎回执 |
+| `falcon_setup` | 一次安装检查、自动重载验收；返回具体恢复步骤，不操作鼠标 |
 | `falcon_search_catalog` | 离线参数元数据 |
 | `falcon_list_children` | 分页结构查询，返回可用 selector |
 | `falcon_list_parameters` / `falcon_get_parameters` | 实时参数定义/读取 |
@@ -140,7 +150,7 @@ selector 示例：`Synth.parts[1].program.layers[1].keygroups[1].oscillators[1]`
 
 整批预检查不是引擎事务或 Undo 块，运行期失败仍可能部分写入。写入超时/取消后会保存未确定状态并阻止后续写入；调用 `falcon_reconcile` 检查回执后再决定下一步，不能盲目重试。多个 MCP 进程通过操作系统文件锁共享同一个邮箱。
 
-0.2.1 起，reconcile 必须匹配原请求 ID 的回执才会自动解除阻断；脚本重载导致回执丢失时，返回 `resolved=false,outcome="unknown"` 并继续阻断。先读取受影响参数确认当前状态，再显式调用 `falcon_reconcile(acknowledge_unknown=true)`。这个操作仅确认已核查未知结果，不重放原命令、不声称原命令成功。`falcon_status` 会提示 Lua 桥版本不匹配，升级后需重新 prepare 并重载。
+0.2.1 起，reconcile 必须匹配原请求 ID 的回执才会自动解除阻断；脚本重载导致回执丢失时，返回 `resolved=false,outcome="unknown"` 并继续阻断。先读取受影响参数确认当前状态，再显式调用 `falcon_reconcile(acknowledge_unknown=true)`。这个操作仅确认已核查未知结果，不重放原命令、不声称原命令成功。0.2.2 起，每次写入前先进行只读握手，新 Lua 拒绝旧会话写入；握手失败不会声称写入已发出。存在未确认写入时，源码更新会推迟，保留回执以便核查。
 
 ## 解析工程、生成 UML 与诊断
 

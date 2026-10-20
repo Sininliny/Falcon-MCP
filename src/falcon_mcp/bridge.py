@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import secrets
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,41 @@ from .config import Config
 
 class BridgeError(RuntimeError):
     pass
+
+
+@contextmanager
+def preparation_lock(root: Path, timeout: float):
+    """Serialize startup publishers, including creation of the shared credential."""
+    with (root / "prepare.lock").open("a+b") as handle:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"0")
+            handle.flush()
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise BridgeError("Another MCP process is preparing this bridge; reconnect shortly")
+                time.sleep(0.01)
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 @asynccontextmanager
@@ -70,6 +106,19 @@ def atomic_json(path: Path, data: Any) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def atomic_text(path: Path, content: str) -> bool:
+    """Publish whole source only when changed: Falcon watches this pathname."""
+    if path.is_file() and path.read_text(encoding="utf8") == content:
+        return False
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(content, encoding="utf8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return True
+
+
 class FalconBridge:
     """One serialized mailbox. No automatic retries of engine mutations."""
 
@@ -80,9 +129,14 @@ class FalconBridge:
         self._token: str | None = None
         self.audit = audit or AuditLog(config.log_root)
 
-    def prepare(self) -> dict:
+    def prepare(self, *, probe: bool = False) -> dict:
         root = self.config.runtime
         root.mkdir(parents=True, exist_ok=True)
+        with preparation_lock(root, self.config.bridge_timeout):
+            return self._prepare(probe=probe)
+
+    def _prepare(self, *, probe: bool) -> dict:
+        root = self.config.runtime
         config_path = root / "connection.json"
         if config_path.exists():
             self._token = json.loads(config_path.read_text(encoding="utf8"))["token"]
@@ -101,16 +155,34 @@ class FalconBridge:
                 + "local _userInit = onInit\nfunction onInit()\nspawn(_coreInit)\n"
                 + "if _userInit ~= _coreInit then _userInit() end\nend\n"
             )
+        # A probe changes the file without changing the extension or user program.
+        # Keep its nonce across normal starts to avoid a gratuitous script reload.
+        nonce_path = root / "watch-nonce.json"
+        if probe:
+            atomic_json(nonce_path, {"nonce": uuid.uuid4().hex})
+        nonce = json.loads(nonce_path.read_text(encoding="utf8"))["nonce"] if nonce_path.exists() else ""
         prefix = f"local BRIDGE_ROOT = {json.dumps(root.as_posix(), ensure_ascii=False)}\nlocal TOKEN = {json.dumps(self._token)}\n"
+        build_id = hashlib.sha256((prefix + source + nonce).encode("utf8")).hexdigest()
+        prefix += f"local BUILD_ID = {json.dumps(build_id)}\n"
         target = root / "falcon_bridge.lua"
-        target.write_text(prefix + source, encoding="utf8")
-        return {
+        if (root / "uncertain.json").exists() and (
+            not target.exists() or target.read_text(encoding="utf8") != prefix + source
+        ):
+            raise BridgeError("Reconcile the previous uncertain mutation before updating the watched bridge")
+        changed = atomic_text(target, prefix + source)
+        result = {
             "script": str(target),
             "runtime": str(root),
             "protocol": 1,
-            "instructions": "Load falcon_bridge.lua in ONE Script Processor on the Master (Synth) "
-            "or a dedicated Part. Keep the audio engine processing. Do not duplicate this bridge.",
+            "build_id": build_id,
+            "changed": changed,
+            "instructions": "One-time setup: load falcon_bridge.lua in ONE Master (Synth) Script Processor; "
+            "enable WATCH FOR SCRIPT CHANGES; save as default Multi and in your DAW template. "
+            "Run falcon-mcp setup --verify-watch to verify automatic reload. Keep the audio engine running.",
         }
+        atomic_json(root / "deployment.json", {k: v for k, v in result.items() if k != "changed"})
+        self.audit.event("bridge_prepared", **result)
+        return result
 
     def _read_token(self) -> str:
         if self._token is None:
@@ -136,7 +208,9 @@ class FalconBridge:
             self.audit.error("bridge_error", exc, op=op, duration_ms=(time.monotonic() - started) * 1000)
             raise
 
-    async def _request_locked(self, op: str, args: dict | None, mutation: bool, token: str) -> dict:
+    async def _request_locked(
+        self, op: str, args: dict | None, mutation: bool, token: str, *, timeout: float | None = None
+    ) -> dict:
         uncertain_file = self.config.runtime / "uncertain.json"
         if uncertain_file.exists():
             self.uncertain_request = json.loads(uncertain_file.read_text(encoding="utf8"))["id"]
@@ -149,13 +223,25 @@ class FalconBridge:
             )
         identifier = uuid.uuid4().hex
         request = {"protocol": 1, "token": token, "id": identifier, "op": op, "args": args or {}}
+        if mutation:
+            # A read-only handshake precedes EVERY write. After reload, a stale
+            # command cannot initialize a new session or replay a previous edit.
+            try:
+                engine = await self._request_locked("ping", None, False, token, timeout=timeout)
+            except TimeoutError as exc:
+                raise TimeoutError(
+                    "Falcon readiness handshake failed; the engine mutation was NOT dispatched. "
+                    "Run falcon_setup to check the one-time installation and audio engine."
+                ) from exc
+            if engine.get("sessionRequired"):
+                request["session"] = engine["instance"]
         if len(json.dumps(request, ensure_ascii=False, allow_nan=False).encode("utf8")) > 65536:
             raise ValueError("Bridge request exceeds 64 KiB; split the parameter batch")
         self.audit.event("bridge_dispatch", request_id=identifier, op=op, mutation=mutation)
         if mutation:
             atomic_json(uncertain_file, {"id": identifier, "op": op})
         atomic_json(self.config.runtime / "request.json", request)
-        deadline = time.monotonic() + self.config.bridge_timeout
+        deadline = time.monotonic() + (self.config.bridge_timeout if timeout is None else timeout)
         try:
             while time.monotonic() < deadline:
                 try:

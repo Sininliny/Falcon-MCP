@@ -25,7 +25,10 @@ async def test_real_stdio_initialize_tools_resource_and_validation(config):
             "falcon_get_logs",
             "falcon_api_coverage",
             "falcon_voice_control",
+            "falcon_setup",
         } <= names
+        assert len(names) == 43
+        assert (config.runtime / "falcon_bridge.lua").is_file()
         assert all(t.outputSchema is not None for t in tools.tools)
         result = await client.call_tool("falcon_search_catalog", {"query": "Analog"})
         assert not result.isError and result.structuredContent["total_count"] > 0
