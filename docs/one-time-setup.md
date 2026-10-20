@@ -62,7 +62,52 @@ PYTHONIOENCODING = "utf-8"
 
 Add `FALCON_AUDIO_PYTHON` only when using a separate feedback interpreter. Keep unrelated server settings intact. Reconnect the Falcon MCP service after package/configuration changes: an existing Python process retains old imports and tool definitions.
 
-## 4. Verify deployment and persistence
+## 4. Initialize automatically or manually
+
+| Mode | Use |
+|---|---|
+| Automatic | Normal startup after the Master launcher, default Multi/host template, and Codex configuration have been installed once. |
+| Manual | First installation, a missing launcher, a changed runtime-home path, or a launcher-protocol upgrade. |
+
+### Automatic initialization
+
+1. Start Falcon or open the DAW project containing the saved Master launcher. Keep audio processing enabled; disable host plugin sleep if it suspends the processor.
+2. Open Codex with the configured Falcon MCP service enabled. Codex starts `falcon_mcp serve`; the server prepares and publishes the runtime automatically. No separate terminal or repeated `prepare` command is required.
+3. The saved Master launcher reads the deployment manifest and loads the published runtime. Ordinary runtime updates apply while idle, without Watch or Script Processor interaction.
+4. Call `falcon_status` with no arguments. Require `connected=true`, `installation.master_scope=true`, `installation.persistent_bootstrap=true`, `installation.current_build_loaded=true`, and `installation.ready_without_gui=true`. If initialization is still pending, let the idle engine process and check again. For deployment acceptance, use the verification procedure below.
+
+Automatic initialization does not start the Falcon application, insert a Script Processor, or save a default Multi. Those steps require the one-time installation above. It does not load the feedback model; weights load only during a feedback call.
+
+### Manual initialization
+
+For a new installation, complete sections 1–3 first. For recovery, use the existing checkout and the **same absolute home configured in Codex**. Example:
+
+```powershell
+Set-Location 'C:\Tools\Falcon-MCP'
+$env:FALCON_MCP_HOME = 'C:\Tools\Falcon-MCP\.runtime'
+.venv\Scripts\python.exe -m falcon_mcp prepare
+```
+
+Start Falcon and keep it processing audio. If the Master launcher is absent, its embedded home has changed, or its protocol requires an upgrade, load the printed `falcon_bridge.lua` path using section 2, then resave the recovery Multi and default Multi/host template. An already-installed compatible launcher needs no GUI reload.
+
+Stop notes and sequences, then initialize and verify the connection:
+
+```powershell
+.venv\Scripts\python.exe -m falcon_mcp setup --verify-reload
+```
+
+Check the JSON against the table below. Reconnect Codex after package/configuration changes and call `falcon_status`. Do not start an additional `serve` process in a terminal: Codex owns the configured stdio process.
+
+| Command | Effect |
+|---|---|
+| `prepare` | Generate launcher/runtime files; does not install the processor or connect Falcon. |
+| `status` | Query the engine and feedback-worker state. |
+| `setup` | Prepare files, check the connection, and report installation state. |
+| `setup --verify-reload` | Also publish a probe build and verify that the current idle instance loads it. |
+
+From MCP, call `falcon_setup` with `{"verify_watch": true}` for the same deployment test. The argument retains its historical name; Watch is unnecessary. If an unknown write blocks initialization, follow reconciliation in the recovery table; preserve credentials and instance counters.
+
+## 5. Verify deployment and persistence
 
 Keep the audio engine processing. Run while idle:
 
