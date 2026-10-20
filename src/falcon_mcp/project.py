@@ -74,11 +74,14 @@ class ProjectInspector:
                     edges.append({"kind": "contains", "source": parent, "target": path, "relation": relation})
                 args = {"selector": selector, "expected_path": path}
                 children = list(first.get("items", []))
-                offset = first["next_offset"]
+                offset = 0
                 while first.get("has_more"):
+                    next_offset = first["next_offset"]
+                    if next_offset <= offset:
+                        raise RuntimeError("Non-advancing child pagination")
+                    offset = next_offset
                     first = await self.bridge.request("inspect_node", {**args, "offset": offset, "limit": 50})
                     children.extend(first.get("items", []))
-                    offset = first["next_offset"]
                 signatures[path] = [(c["path"], c["relation"], c.get("index")) for c in children]
                 for c in children:
                     queue.append((c["selector"], path, c["relation"], depth + 1))
@@ -113,6 +116,8 @@ class ProjectInspector:
                         return (
                             value.get("truncated") is True
                             or "unavailable" in value
+                            or bool(value.get("error"))
+                            or bool(value.get("connection_error"))
                             or any(incomplete(v) for v in value.values())
                         )
                     if isinstance(value, list):
@@ -181,6 +186,8 @@ class ProjectInspector:
             for c in node["connections"]:
                 values = {p["definition"]["name"]: p.get("value") for p in c["parameters"]}
                 source = values.get("Source", "")
+                if not isinstance(source, str):
+                    source = ""  # original unavailable/error metadata remains in settings
                 resolved = source if source in by_path else None
                 if isinstance(source, str) and source and not source.startswith(("/", "$")):
                     # @MIDI / @VoiceParam are actual engine child names; resolve in nearest owning scope.
@@ -214,7 +221,7 @@ class ProjectInspector:
                     }
                 )
             parameters = {p["definition"]["name"]: p.get("value") for p in node["parameters"]}
-            if parameters.get("OutputName"):
+            if isinstance(parameters.get("OutputName"), str) and parameters["OutputName"]:
                 document["edges"].append(
                     {
                         "kind": "routing",
@@ -223,7 +230,11 @@ class ProjectInspector:
                         "resolved": parameters["OutputName"] in by_path,
                     }
                 )
-            if node["type"] == "BusRouter" and parameters.get("Destination"):
+            if (
+                node["type"] == "BusRouter"
+                and isinstance(parameters.get("Destination"), str)
+                and parameters["Destination"]
+            ):
                 destination = parameters["Destination"]
                 target = posixpath.normpath(posixpath.join(node["path"], destination))
                 document["edges"].append(

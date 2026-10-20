@@ -2,6 +2,8 @@
 
 日期：2026-10-20。平台：Windows，Falcon standalone 27.0.2，Python 3.12.9，MCP Python SDK 1.30.0，RTX 3070 Ti Laptop 8 GB。
 
+**最新 0.2.1：63 项回归测试通过，已重新完成 Falcon 实机验收。**新增修复、真实超时/重载恢复及升级步骤见 [bugfixes-0.2.1.md](bugfixes-0.2.1.md)。下文保留 0.2.0 的初次验收记录。
+
 ## 自动化检查
 
 - `pytest -q`：**42 项通过**（0.2，含真实 stdio 客户端与 Lua 5.1）。

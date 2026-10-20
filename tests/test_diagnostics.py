@@ -49,6 +49,22 @@ def test_short_silent_clip_has_finite_json():
     json.dumps(report, allow_nan=False)
 
 
+def test_short_low_frequency_clip_does_not_report_false_thd():
+    rate = 48000
+    t = np.arange(480) / rate
+    report = diagnose((0.5 * np.sin(2 * np.pi * 50 * t))[:, None], rate, 50)
+    assert report["harmonic_test"]["thd_db"] is None
+    assert not report["harmonic_test"]["available"]
+
+
+def test_thd_needs_at_least_one_higher_harmonic_below_nyquist():
+    rate = 8000
+    t = np.arange(rate) / rate
+    report = diagnose((0.5 * np.sin(2 * np.pi * 3000 * t))[:, None], rate, 3000)
+    assert report["harmonic_test"]["thd_db"] is None
+    assert not report["harmonic_test"]["available"]
+
+
 def test_exported_figures_and_data(config):
     config.audio_root.mkdir()
     path = config.audio_root / "tone.wav"

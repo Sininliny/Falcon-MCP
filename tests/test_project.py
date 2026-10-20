@@ -1,3 +1,4 @@
+import asyncio
 import json
 import xml.etree.ElementTree as ET
 
@@ -114,3 +115,51 @@ async def test_project_marks_read_failure_incomplete(config, monkeypatch):
     result = await ProjectInspector(config, bridge).scan()
     assert not result["complete"] and result["errors"]
     json.loads(report_path(config, result["report_id"]).read_text())
+
+
+async def test_connection_read_errors_cannot_claim_complete_project(config, monkeypatch):
+    bridge = FalconBridge(config)
+
+    async def engine(op, args=None, **kwargs):
+        if op == "ping":
+            return {"instance": "one"}
+        if op == "inspect_node":
+            return {"node": snapshot()["nodes"][0], "items": [], "next_offset": 0, "has_more": False}
+        if op == "parameter_page":
+            return {"items": [{"definition": {"name": "Gain"}, "value": 1, "connection_count": 1}]}
+        if op == "connections":
+            return {
+                "items": [
+                    {"name": "c", "parameters": [{"definition": {"name": "Source"}, "error": "unreadable"}]}
+                ]
+            }
+        raise AssertionError(op)
+
+    monkeypatch.setattr(bridge, "request", engine)
+    result = await ProjectInspector(config, bridge).scan()
+    assert not result["complete"] and result["errors"]
+    assert report_path(config, result["report_id"]).is_file()
+
+
+def test_unavailable_modulation_source_does_not_abort_export(config):
+    data = snapshot()
+    data["nodes"][1]["connections"][0]["parameters"][0]["value"] = {"unavailable": "userdata"}
+    ProjectInspector._derive_edges(data)
+    edge = next(e for e in data["edges"] if e["kind"] == "modulation")
+    assert not edge["resolved"] and isinstance(edge["source"], str)
+
+
+async def test_stalled_child_pagination_returns_incomplete_report(config, monkeypatch):
+    bridge = FalconBridge(config)
+
+    async def engine(op, args=None, **kwargs):
+        await asyncio.sleep(0)
+        if op == "ping":
+            return {"instance": "one"}
+        if op == "inspect_node":
+            return {"node": snapshot()["nodes"][0], "items": [], "next_offset": 0, "has_more": True}
+        return {"items": []}
+
+    monkeypatch.setattr(bridge, "request", engine)
+    result = await asyncio.wait_for(ProjectInspector(config, bridge).scan(), 0.5)
+    assert not result["complete"] and "pagination" in str(result["errors"])

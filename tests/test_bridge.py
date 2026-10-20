@@ -7,7 +7,7 @@ import pytest
 from falcon_mcp.bridge import BridgeError, FalconBridge, atomic_json
 
 
-async def respond(bridge, replies=1):
+async def respond(bridge, replies=1, result_extra=None):
     path = bridge.config.runtime / "request.json"
     last = ""
     for _ in range(replies):
@@ -20,7 +20,12 @@ async def respond(bridge, replies=1):
         last = req["id"]
         atomic_json(
             bridge.config.runtime / "response.json",
-            {"id": last, "token": req["token"], "ok": True, "result": {"op": req["op"]}},
+            {
+                "id": last,
+                "token": req["token"],
+                "ok": True,
+                "result": {"op": req["op"], **(result_extra or {})},
+            },
         )
 
 
@@ -32,6 +37,8 @@ async def test_roundtrip_and_serial_concurrency(config):
     a, b = await asyncio.gather(bridge.request("ping"), bridge.request("parameters"))
     await worker
     assert a == {"op": "ping"} and b == {"op": "parameters"}
+    dispatches = bridge.audit.read(event="bridge_dispatch")["items"]
+    assert len(dispatches) == 2 and all(len(r["request_id"]) == 32 for r in dispatches)
 
 
 async def test_wrong_token_and_id_never_accepted(config):
@@ -43,7 +50,9 @@ async def test_wrong_token_and_id_never_accepted(config):
     assert bridge.uncertain_request
     with pytest.raises(BridgeError, match="outcome is unknown"):
         await bridge.request("set_parameters", mutation=True)
-    worker = asyncio.create_task(respond(bridge))
+    worker = asyncio.create_task(
+        respond(bridge, result_extra={"lastMutation": {"id": bridge.uncertain_request, "ok": True}})
+    )
     result = await bridge.reconcile()
     await worker
     assert result["uncertain_request"] and bridge.uncertain_request is None
@@ -94,6 +103,24 @@ async def test_other_client_reconciliation_clears_stale_local_flag(config):
     worker = asyncio.create_task(respond(bridge))
     assert (await bridge.request("play", mutation=True))["op"] == "play"
     await worker
+
+
+async def test_reconcile_keeps_block_when_engine_receipt_was_lost(config):
+    bridge = FalconBridge(config)
+    bridge.prepare()
+    atomic_json(config.runtime / "uncertain.json", {"id": "lost-mutation", "op": "set_parameters"})
+    worker = asyncio.create_task(respond(bridge))
+    result = await bridge.reconcile()
+    await worker
+    assert not result["resolved"] and result["outcome"] == "unknown"
+    assert (config.runtime / "uncertain.json").exists()
+    with pytest.raises(BridgeError, match="outcome is unknown"):
+        await bridge.request("set_parameters", mutation=True)
+    worker = asyncio.create_task(respond(bridge))
+    result = await bridge.reconcile(acknowledge_unknown=True)
+    await worker
+    assert result["acknowledged_unknown"] and not result["resolved"]
+    assert not (config.runtime / "uncertain.json").exists()
 
 
 def test_extension_preserves_core_init_and_is_not_runtime_eval(config):

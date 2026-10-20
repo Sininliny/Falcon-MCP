@@ -1,4 +1,4 @@
-# Falcon MCP 0.2
+# Falcon MCP 0.2.1
 
 面向 GAI 的本地 UVI Falcon 2027 MCP 服务器。通过 **UVIScript 实时桥**控制引擎，使用 **按需启动的开源 CLAP 模型**提供音色描述，形成“查询 → 调参 → 试听回录 → 描述 → A/B 比较”的工作流。
 
@@ -140,6 +140,8 @@ selector 示例：`Synth.parts[1].program.layers[1].keygroups[1].oscillators[1]`
 
 整批预检查不是引擎事务或 Undo 块，运行期失败仍可能部分写入。写入超时/取消后会保存未确定状态并阻止后续写入；调用 `falcon_reconcile` 检查回执后再决定下一步，不能盲目重试。多个 MCP 进程通过操作系统文件锁共享同一个邮箱。
 
+0.2.1 起，reconcile 必须匹配原请求 ID 的回执才会自动解除阻断；脚本重载导致回执丢失时，返回 `resolved=false,outcome="unknown"` 并继续阻断。先读取受影响参数确认当前状态，再显式调用 `falcon_reconcile(acknowledge_unknown=true)`。这个操作仅确认已核查未知结果，不重放原命令、不声称原命令成功。`falcon_status` 会提示 Lua 桥版本不匹配，升级后需重新 prepare 并重载。
+
 ## 解析工程、生成 UML 与诊断
 
 按顺序调用以下工具；`report_id` 使用上一步返回的值：
@@ -154,6 +156,8 @@ selector 示例：`Synth.parts[1].program.layers[1].keygroups[1].oscillators[1]`
 这是调用顺序示意；实际 MCP 调用由客户端传入工具名和 arguments。JSON、`.puml`、`.mmd`、SVG 与 PNG 保存在 `<home>/reports`，不发送到外部渲染服务。大工程用 `root_path` 聚焦子树，返回值明确说明截断和未显示的外部连线。解析得到的是**公开实时状态快照**，不包含官方未暴露的脚本源码、受保护音色内部数据、MultiSample 各内部 zone 列表及宿主/驱动配置。扫描不是原子操作；错误、限额或结构变化会使 `complete=false`，可读取已完成的部分。
 
 `falcon_diagnose_audio` 输出每通道 Welch PSD（dBFS/Hz）、声谱图、10 ms 包络、峰值波形概览、立体声向量图和完整数值 JSON。LUFS 仅对至少 400 ms 的单/双声道计算；真峰值为 4 倍 FIR 过采样估算，不是认证仪表。提供 `fundamental_hz` 可计算稳态单音谐波/THD，不用于复音或持续调制音色。所有这些分析均不加载模型。
+
+当片段太短、频率分辨率不足、基频能量不足或 Nyquist 以下没有高次谐波时，THD 返回 `available=false,thd_db=null` 并说明原因，避免返回误导性的数值。0.2.1 修复记录见 [bugfixes-0.2.1.md](docs/bugfixes-0.2.1.md)。
 
 `falcon_start_voice` 返回字符串声部句柄，原生 VoiceId 保留在 Falcon 中；用 `falcon_voice_control` 控制或释放，重载后句柄失效。`sample_offset_ms` 在发声同一音频回调内应用；后续单独调用 `setSampleOffset` 不能移动已经播放的声音。普通演奏 channel 为 1..16，原生 `MidiEvent` channel 为 0..15，`post_event.delta` 单位为毫秒。
 

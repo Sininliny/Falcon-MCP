@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+from .async_utils import join_cleanup
 from .audit import AuditLog
 from .config import Config
 
@@ -133,12 +134,7 @@ class FeedbackRunner:
                         env=env,
                     )
                 )
-                try:
-                    self.process = await asyncio.shield(launch)
-                except asyncio.CancelledError:
-                    # Cancellation during subprocess creation must not orphan the child.
-                    self.process = await launch
-                    raise
+                self.process = await asyncio.shield(launch)
                 self.audit.event(
                     "model_started", pid=self.process.pid, path=str(path), model=self.config.model_id
                 )
@@ -172,23 +168,43 @@ class FeedbackRunner:
                 self.audit.error("model_error", exc)
                 raise
             finally:
-                if self.process is not None and self.process.returncode is None:
+
+                async def cleanup():
                     try:
-                        self.process.kill()
-                    except ProcessLookupError:
-                        pass
-                    await asyncio.shield(self.process.wait())
-                if communication is not None and not output_logged:
-                    stdout, stderr = await asyncio.shield(communication)
-                    self.audit.event(
-                        "model_output",
-                        pid=self.process.pid,
-                        exit_code=self.process.returncode,
-                        stdout=stdout.decode("utf8", "replace"),
-                        stderr=stderr.decode("utf8", "replace"),
-                    )
-                self.process = None
-                self.audit.event("model_released", model_loaded=False)
+                        if self.process is None and launch is not None:
+                            try:
+                                self.process = await launch
+                            except Exception:  # noqa: BLE001 - preserve the already logged spawn failure
+                                return  # failed spawn was already logged by analyze
+                        if self.process is None:
+                            return
+                        # Even cancellation before communicate starts must drain
+                        # pipes: wait() can hang after kill() when stdout is full.
+                        drain = communication or asyncio.create_task(self.process.communicate())
+                        if self.process is not None and self.process.returncode is None:
+                            try:
+                                self.process.kill()
+                            except ProcessLookupError:
+                                pass
+                        if not output_logged:
+                            try:
+                                stdout, stderr = await drain
+                            except Exception as exc:  # noqa: BLE001 - drain failures cannot skip process cleanup
+                                self.audit.error("model_output_error", exc)
+                            else:
+                                self.audit.event(
+                                    "model_output",
+                                    pid=self.process.pid,
+                                    exit_code=self.process.returncode,
+                                    stdout=stdout.decode("utf8", "replace"),
+                                    stderr=stderr.decode("utf8", "replace"),
+                                )
+                        await self.process.wait()
+                    finally:
+                        self.process = None
+                        self.audit.event("model_released", model_loaded=False)
+
+                await join_cleanup(asyncio.create_task(cleanup()))
 
 
 def list_loopback_devices() -> list[dict]:

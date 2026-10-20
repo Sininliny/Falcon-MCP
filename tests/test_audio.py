@@ -98,6 +98,110 @@ async def test_cancel_during_spawn_does_not_orphan_model(config, monkeypatch):
     assert processes[0].returncode is not None and runner.process is None
 
 
+async def test_repeated_cancellation_during_spawn_still_joins_model(config, monkeypatch):
+    config.audio_root.mkdir()
+    path = config.audio_root / "sound.wav"
+    sf.write(path, np.ones(8000) * 0.1, 8000)
+    original = asyncio.create_subprocess_exec
+    created, gate = asyncio.Event(), asyncio.Event()
+    processes = []
+
+    async def delayed_worker(*args, **kwargs):
+        child = await original(sys.executable, "-c", "import time; time.sleep(30)", **kwargs)
+        processes.append(child)
+        created.set()
+        await gate.wait()
+        return child
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", delayed_worker)
+    runner = FeedbackRunner(config)
+    task = asyncio.create_task(runner.analyze(path))
+    try:
+        await asyncio.wait_for(created.wait(), 5)
+        task.cancel()
+        await asyncio.sleep(0.02)
+        task.cancel()  # e.g. client cancel followed by transport disconnect
+        gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert processes[0].returncode is not None and runner.process is None
+    finally:
+        if processes and processes[0].returncode is None:
+            processes[0].kill()
+            await processes[0].wait()
+
+
+async def test_broken_model_pipe_clears_lifecycle_state(config, monkeypatch):
+    config.audio_root.mkdir()
+    path = config.audio_root / "sound.wav"
+    sf.write(path, np.ones(8000) * 0.1, 8000)
+    original = asyncio.create_subprocess_exec
+    processes = []
+
+    class BrokenPipes:
+        def __init__(self, child):
+            self.child = child
+
+        def __getattr__(self, name):
+            return getattr(self.child, name)
+
+        async def communicate(self, data):
+            raise OSError("model pipe failed")
+
+    async def worker(*args, **kwargs):
+        child = await original(sys.executable, "-c", "import time; time.sleep(30)", **kwargs)
+        processes.append(child)
+        return BrokenPipes(child)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", worker)
+    runner = FeedbackRunner(config)
+    with pytest.raises(OSError, match="model pipe failed"):
+        await runner.analyze(path)
+    assert processes[0].returncode is not None and runner.process is None
+
+
+async def test_cancel_during_spawn_drains_full_output_pipe(config, monkeypatch):
+    config.audio_root.mkdir()
+    path = config.audio_root / "sound.wav"
+    sf.write(path, np.ones(8000) * 0.1, 8000)
+    original = asyncio.create_subprocess_exec
+    ready, gate = asyncio.Event(), asyncio.Event()
+    processes = []
+
+    async def noisy_startup(*args, **kwargs):
+        child = await original(
+            sys.executable,
+            "-c",
+            'import sys,time;sys.stdout.buffer.write(b"x"*1000000);sys.stdout.flush();time.sleep(30)',
+            **kwargs,
+        )
+        processes.append(child)
+        await asyncio.sleep(0.2)  # fill the asyncio reader and OS pipe before returning the child
+        ready.set()
+        await gate.wait()
+        return child
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", noisy_startup)
+    runner = FeedbackRunner(config)
+    task = asyncio.create_task(runner.analyze(path))
+    try:
+        await asyncio.wait_for(ready.wait(), 5)
+        task.cancel()
+        gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(asyncio.shield(task), 3)
+        assert processes[0].returncode is not None and runner.process is None
+        assert runner.audit.read(event="model_output")["items"][0]["stdout"]
+    finally:
+        gate.set()
+        if not task.done():
+            if processes[0].returncode is None:
+                processes[0].kill()
+            await processes[0].communicate()  # rescue a failed regression without orphaning a process
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+
 def test_no_ml_import_in_server():
     import subprocess
 

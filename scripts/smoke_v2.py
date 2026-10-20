@@ -16,6 +16,8 @@ from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from falcon_mcp import __version__
+
 
 async def run(audio: str):
     parameters = StdioServerParameters(
@@ -35,6 +37,9 @@ async def run(audio: str):
         results["tools"] = [t.name for t in (await client.list_tools()).tools]
         status = await call("falcon_status")
         assert status["connected"]
+        assert status["engine"]["bridgeVersion"] == __version__, (
+            "Reload the matching generated bridge before acceptance"
+        )
         coverage = await call("falcon_api_coverage", {"probe_runtime": True, "limit": 1})
         assert all(coverage["runtime"]["functions"].values())
         await call("falcon_query_api", {"method": "getTimeSignature"})

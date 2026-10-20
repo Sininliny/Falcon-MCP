@@ -1,6 +1,7 @@
 -- UVI Falcon 2027 / UVIScript Lua 5.1. BRIDGE_ROOT and TOKEN are generated.
 -- Use documented asynchronous file I/O only. Never load/execute mailbox code.
 local json = require("uvi.json")
+local BRIDGE_VERSION="0.2.1"
 local lastId = ""
 local initialized = false
 local lastMutation = {}
@@ -9,7 +10,9 @@ local pending = nil
 local playing = false
 local sequenceGeneration = 0
 local sequenceError = ""
-local bridgeInstance=tostring({})
+-- Assigned from the first authenticated request's random host UUID. Lua table
+-- addresses and getTime can both repeat after a script reload.
+local bridgeInstance=nil
 local collections = {parts=true, layers=true, keygroups=true, oscillators=true,
     inserts=true, auxs=true, sends=true, mods=true, eventProcessors=true, children=true}
 local mutations = {set_parameters=true, edit_effect=true, load_sample=true,
@@ -124,7 +127,7 @@ end
 
 local handlers = {}
 function handlers.ping(a)
-    return {protocol=1, bridgeVersion="0.2.0", instance=bridgeInstance, sampleRate=getSamplingRate(),
+    return {protocol=1, bridgeVersion=BRIDGE_VERSION, instance=bridgeInstance, sampleRate=getSamplingRate(),
         tempo=getTempo(), time=getTime(), lastMutation=lastMutation,
         sequence={playing=playing,generation=sequenceGeneration,error=sequenceError},
         scope=summary(this.parent, ""),
@@ -178,20 +181,37 @@ local function setParameters(node,a)
     if a.expected_path then check(node.path==a.expected_path,"Stale node identity; re-query tree") end
     -- Validate the entire batch and compare expected values BEFORE any mutation.
     for _, change in ipairs(a.changes) do
-        validateValue(definition(node,change.name),change.value)
+        local d=definition(node,change.name)
+        validateValue(d,change.value)
         if change.expected ~= nil then
-            check(node:getParameter(change.name) == change.expected,
+            local current=node:getParameter(change.name)
+            local matches=current==change.expected
+            if d.type=="float" and type(current)=="number" and type(change.expected)=="number" then
+                -- saveData rounds JSON numbers to about 14 significant digits.
+                -- Keep this far tighter than the normal float32 parameter step,
+                -- and use no absolute floor that could hide near-zero edits.
+                matches=math.abs(current-change.expected)<=1e-13*math.max(math.abs(current),math.abs(change.expected))
+            end
+            check(matches,
                 "Stale expected value for " .. change.name .. "; refresh before editing")
         end
     end
     for _, change in ipairs(a.changes) do
-        local before = node:getParameter(change.name)
+        local readable,before = pcall(function() return node:getParameter(change.name) end)
+        if not readable then
+            out[#out+1]={name=change.name,requested=change.value,error=tostring(before),verified=false,applied=false}
+            return {items=out,verified=false,partial=#out>1,error=tostring(before)}
+        end
         local applied,failure=pcall(function() node:setParameter(change.name,change.value) end)
         if not applied then
             out[#out+1]={name=change.name,before=before,requested=change.value,error=tostring(failure),verified=false}
-            return {items=out,verified=false,partial=#out>1,error=tostring(failure)}
+            return {items=out,verified=false,partial=true,outcome_unknown=true,error=tostring(failure)}
         end
-        local after = node:getParameter(change.name)
+        local readback,after = pcall(function() return node:getParameter(change.name) end)
+        if not readback then
+            out[#out+1]={name=change.name,before=before,requested=change.value,error=tostring(after),verified=false,applied=true}
+            return {items=out,verified=false,partial=true,error=tostring(after)}
+        end
         local matches = after == change.value
         if type(after) == "number" and type(change.value) == "number" then
             matches = math.abs(after-change.value) <= 0.00001*math.max(1,math.abs(change.value))
@@ -284,6 +304,16 @@ function handlers.play(a)
     sequenceError=""
     spawn(function()
         local ownVoices={}
+        local function failed(message)
+            sequenceError=message
+            print("MCP playNote failed: " .. message)
+            local remaining={}
+            for _,id in ipairs(voices) do
+                if ownVoices[id] then pcall(function() releaseVoice(id) end)
+                else remaining[#remaining+1]=id end
+            end
+            voices=remaining;playing=false
+        end
         local elapsed, finish = 0, 0
         for _, n in ipairs(a.notes) do
             if n.delay_ms and n.delay_ms > 0 then
@@ -292,12 +322,8 @@ function handlers.play(a)
             end
             if generation ~= sequenceGeneration then return end
             local ok, id = pcall(playNote,n.note,n.velocity,n.duration_ms,a.layer,a.channel or 1)
-            if not ok then
-                sequenceError=tostring(id)
-                print("MCP playNote failed: " .. sequenceError)
-                playing=false
-                return
-            end
+            if not ok then failed(tostring(id));return end
+            if id==nil then failed("playNote returned no voice");return end
             voices[#voices+1] = id
             ownVoices[id]=true
             finish=math.max(finish,elapsed+n.duration_ms)
@@ -333,6 +359,7 @@ local function process(req)
     check(req.protocol == 1 and req.token == TOKEN and type(req.id) == "string", "Invalid request")
     local handler = handlers[req.op]
     check(handler ~= nil, "Unsupported operation")
+    if not bridgeInstance then bridgeInstance=req.id end
     return handler(req.args or {})
 end
 

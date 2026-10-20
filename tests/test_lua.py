@@ -3,6 +3,7 @@
 These test validation, selector parsing and async scheduling; hardware integration is separate.
 """
 
+import uuid
 from importlib.resources import files
 
 import pytest
@@ -61,7 +62,14 @@ def table(lua, obj):
 
 
 def request(lua, d, op, args):
-    return d.process(table(lua, {"protocol": 1, "id": "test", "op": op, "args": args}))
+    return d.process(table(lua, {"protocol": 1, "id": uuid.uuid4().hex, "op": op, "args": args}))
+
+
+def test_script_instance_is_a_stable_host_nonce_not_a_reusable_lua_address():
+    lua, d = dispatcher()
+    first = d.process(table(lua, {"protocol": 1, "id": "unique-host-nonce", "op": "ping"}))
+    second = request(lua, d, "ping", {})
+    assert first.instance == "unique-host-nonce" and second.instance == first.instance
 
 
 def test_parameter_types_and_optimistic_guard():
@@ -79,6 +87,40 @@ def test_parameter_types_and_optimistic_guard():
             d,
             "set_parameters",
             {"selector": "Program", "changes": [{"name": "Gain", "value": 0.7, "expected": 1}]},
+        )
+
+
+def test_expected_float_accepts_uvi_json_rounding_but_rejects_stale_values():
+    lua, d = dispatcher()
+    lua.execute('Program:setParameter("Gain",0.100000001490116)')
+    result = request(
+        lua,
+        d,
+        "set_parameters",
+        {"selector": "Program", "changes": [{"name": "Gain", "expected": 0.10000000149012, "value": 0.2}]},
+    )
+    assert result.verified
+    with pytest.raises(LuaError, match="Stale expected"):
+        request(
+            lua,
+            d,
+            "set_parameters",
+            {
+                "selector": "Program",
+                "changes": [{"name": "Gain", "expected": 0.10000000149012, "value": 0.3}],
+            },
+        )
+
+
+def test_expected_float_tolerance_does_not_mask_near_zero_edits():
+    lua, d = dispatcher()
+    lua.execute('Program:setParameter("Gain",1e-20)')
+    with pytest.raises(LuaError, match="Stale expected"):
+        request(
+            lua,
+            d,
+            "set_parameters",
+            {"selector": "Program", "changes": [{"name": "Gain", "expected": 2e-20, "value": 0.3}]},
         )
 
 
@@ -211,3 +253,91 @@ def test_posted_voice_is_released_by_panic_and_handles_expire():
     assert lua.globals().released
     with pytest.raises(LuaError, match="Unknown/expired"):
         request(lua, d, "voice_api", {"method": "releaseVoice", "arguments": [handle]})
+
+
+def test_failed_sample_offset_releases_voice_created_before_error():
+    lua, d = dispatcher()
+    lua.execute("""
+      nativeId=newproxy(true);releases=0
+      function playNote(...) return nativeId end
+      function setSampleOffset(...) error("offset failure") end
+      function releaseVoice(id) assert(id==nativeId);releases=releases+1 end
+    """)
+    with pytest.raises(LuaError, match="offset failure"):
+        request(lua, d, "voice_start", {"note": 60, "duration_ms": 1000, "sample_offset_ms": 120})
+    assert lua.globals().releases == 1
+    request(lua, d, "panic", {})
+    assert lua.globals().releases == 1
+
+
+def test_noteoff_and_controller_still_work_at_voice_capacity():
+    lua, d = dispatcher()
+    lua.execute("""
+      function playNote(...) return newproxy(true) end
+      function postEvent(e,delta) lastEvent=e;return e.id end
+    """)
+    for _ in range(256):
+        handle = request(lua, d, "voice_start", {"note": 60, "duration_ms": 1000}).voice_id
+    result = request(lua, d, "post_event", {"event": {"type": 128, "id": handle}, "delta": 0})
+    assert result.posted
+    assert request(lua, d, "post_event", {"event": {"type": 176}, "delta": 0}).posted
+
+
+def test_sequence_nil_voice_does_not_leave_playing_stuck():
+    lua, d = dispatcher()
+    lua.execute("""
+      scheduled={}
+      function spawn(fn) scheduled[#scheduled+1]=coroutine.create(fn) end
+      function playNote(...) return nil end
+      function releaseVoice(id) end
+    """)
+    request(lua, d, "play", {"notes": [{"note": 60, "velocity": 1, "duration_ms": 100}]})
+    ok, error = lua.execute("local ok,err=coroutine.resume(scheduled[1]);return ok,err")
+    assert ok, error
+    result = request(lua, d, "ping", {})
+    assert not result.sequence.playing and "no voice" in result.sequence.error
+
+
+def test_setter_readback_failure_keeps_applied_outcome():
+    lua, d = dispatcher()
+    lua.execute("""
+      local get=Program.getParameter; local set=Program.setParameter;local changed=false
+      function Program:getParameter(name)
+        if changed then error("readback unavailable") end
+        return get(self,name)
+      end
+      function Program:setParameter(name,value) set(self,name,value);changed=true end
+    """)
+    result = request(
+        lua, d, "set_parameters", {"selector": "Program", "changes": [{"name": "Gain", "value": 0.2}]}
+    )
+    assert not result.verified and result.partial
+    assert result["items"][1].applied and "readback unavailable" in result["items"][1].error
+
+
+def create_midi_double(lua, d):
+    lua.execute("""
+      midi={numTracks=1,division=960,ppq=960,format=1}
+      function midi:getNumEventsForTrack(track) nativeTrackCalled=true;return 0 end
+      function createMidiFile(tracks,events,cb) cb({success=true,midi=midi});return {} end
+    """)
+    request(lua, d, "midi_file", {"action": "create", "max_tracks": 1, "max_events": 16})
+    return d.pending().result.handle
+
+
+def test_midi_handles_do_not_alias_across_script_instances():
+    lua1, d1 = dispatcher()
+    handle1 = create_midi_double(lua1, d1)
+    lua2, d2 = dispatcher()
+    handle2 = create_midi_double(lua2, d2)
+    assert handle1 != handle2
+    with pytest.raises(LuaError, match="expired"):
+        request(lua2, d2, "midi_file", {"action": "events", "handle": handle1, "track": 1})
+
+
+def test_midi_track_is_checked_before_native_access():
+    lua, d = dispatcher()
+    handle = create_midi_double(lua, d)
+    with pytest.raises(LuaError, match="track index"):
+        request(lua, d, "midi_file", {"action": "events", "handle": handle, "track": 2})
+    assert not lua.globals().nativeTrackCalled

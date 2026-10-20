@@ -154,14 +154,25 @@ def diagnose(audio: np.ndarray, rate: int, fundamental_hz: float | None = None) 
         p = p.mean(axis=0)
         width = f[1] - f[0] if len(f) > 1 else rate
         harmonic = []
-        for order in range(1, min(32, int(rate / 2 / fundamental_hz)) + 1):
-            mask = np.abs(f - order * fundamental_hz) <= max(width * 2, fundamental_hz * 0.01)
-            harmonic.append(float(p[mask].sum()))
+        bandwidth = max(width * 2, fundamental_hz * 0.01)
+        # Do not count the same FFT bins as both the fundamental and its harmonics.
+        for order in range(1, min(32, int(np.nextafter(rate / 2, 0) / fundamental_hz)) + 1):
+            mask = np.abs(f - order * fundamental_hz) <= bandwidth
+            harmonic.append(float(p[mask].sum() * width))
+        reason = None
+        if bandwidth * 2 >= fundamental_hz:
+            reason = "Insufficient frequency resolution; provide a longer steady tone"
+        elif len(harmonic) < 2:
+            reason = "No higher harmonics below Nyquist at this sample rate"
+        elif harmonic[0] <= 1e-20:
+            reason = "Fundamental energy is too low for a reliable ratio"
         result["harmonic_test"] = {
+            "available": reason is None,
+            "reason": reason,
             "fundamental_hz": fundamental_hz,
             "harmonic_powers": harmonic,
             "thd_db": float(10 * np.log10(max(sum(harmonic[1:]), 1e-24) / max(harmonic[0], 1e-24)))
-            if harmonic and harmonic[0] > 1e-20
+            if reason is None
             else None,
             "limitations": "Steady isolated test tone only; polyphonic/modulated sounds and spectral leakage invalidate THD interpretation.",
         }
