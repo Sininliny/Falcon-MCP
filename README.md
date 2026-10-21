@@ -25,6 +25,42 @@ Optional extras: `[capture]` for Windows WASAPI loopback; `[feedback]` for PyTor
 
 For file operations without desktop automation, install `[host]` and call `falcon_native_host(action="start")`. This uses a separate licensed Falcon VST3 instance; no Master bridge installation is needed for that context. It cannot extract unsaved state from the already-open standalone. See [native hosting and reference-audio workflow](docs/native-and-reference.md).
 
+### Claude Desktop on Windows
+
+Install the Python environment above first. In Claude Desktop, open **Settings → Developer → Edit Config** and back up the file before editing. The usual path is `%APPDATA%/Claude/claude_desktop_config.json`. Microsoft Store installations may use `%LOCALAPPDATA%/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/claude_desktop_config.json`; use the file opened by **Edit Config**, rather than assuming the profiles are interchangeable.
+
+Merge this `falcon` entry into the existing `mcpServers` object. Preserve other servers and top-level settings. Replace every `C:/Tools/Falcon-MCP` with the checkout's permanent absolute path:
+
+```json
+{
+  "mcpServers": {
+    "falcon": {
+      "command": "C:/Tools/Falcon-MCP/.venv/Scripts/python.exe",
+      "args": ["-m", "falcon_mcp", "serve"],
+      "env": {
+        "FALCON_MCP_HOME": "C:/Tools/Falcon-MCP/.runtime",
+        "FALCON_MODEL_DEVICE": "cpu",
+        "FALCON_MODEL_OFFLINE": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    }
+  }
+}
+```
+
+Use the same `FALCON_MCP_HOME` as the installed Master launcher. If Codex already controls that Falcon instance, reuse its home and optional `FALCON_AUDIO_PYTHON` setting. Different Falcon instances need separate homes; multiple clients of one instance share the mailbox lock and must still bind their intended target. Claude Desktop starts its own stdio server; do not launch an extra `serve` process manually.
+
+Install the [English agent skill](skills/falcon-instrument-workflow/SKILL.md) separately. From the repository root, package the whole folder, including `references/`:
+
+```powershell
+New-Item -ItemType Directory -Force .runtime | Out-Null
+Compress-Archive -Path .\skills\falcon-instrument-workflow -DestinationPath .\.runtime\falcon-instrument-workflow.zip -Force
+```
+
+Enable **Code execution and file creation** under **Settings → Capabilities**. Go to **Customize → Skills → Add skill → Upload a skill**, select the ZIP, and enable the skill. The archive must contain `falcon-instrument-workflow/SKILL.md` and its supporting files. Copying the folder to `%USERPROFILE%/.claude/skills/` installs it for local Claude Code workflows; that alone does not install the account-level skill used by Desktop chat. See [Claude's skill installation guide](https://support.claude.com/en/articles/12512180-use-skills-in-claude).
+
+When active Claude tasks are finished, fully quit and reopen Claude Desktop to load the MCP configuration, then start a new conversation. Check that Falcon appears under local MCP servers and that tool discovery exposes 56 tools. For the open Falcon instance, call `falcon_status`, confirm the runtime and Program names, and bind before editing. If disconnected, follow [manual bridge initialization](docs/one-time-setup.md#manual-initialization). Owned VST3 tools work in their separate context without a standalone bridge. Configuration loading and skill availability are separate checks; a valid JSON file or ZIP alone does not prove either is active.
+
 ## Capabilities
 
 | Area | Support |
