@@ -85,6 +85,8 @@ def create_server(config: Config | None = None) -> FastMCP:
             "Use selectors and live parameter definitions, "
             "never invent parameter names or use UI units as engine units. Query before mutating. "
             "Runtime cannot create layers/keygroups/oscillators/modulators or save/load Programs. "
+            "Use native_host/native_file for a separate owned VST3; build_instrument for allowlisted templates; "
+            "revision and accept_instrument bind file, rendered evidence and publication. "
             "Timbre feedback is LOCAL CLAP descriptor matching with optional target text; it is subjective, "
             "not ground truth. Model is started per analysis and fully released after it. "
             "Compare identical notes/velocity/output when iterating. Inspect timeout outcomes via falcon_reconcile. "
@@ -258,10 +260,16 @@ def create_server(config: Config | None = None) -> FastMCP:
         parameter: Name,
         index: Annotated[int, Field(ge=1, le=256)],
         changes: Annotated[list[Change], Field(min_length=1, max_length=32)],
+        guard: Annotated[str, Field(min_length=1, max_length=512)],
+        dry_run: bool = True,
+        allow_protected: bool = False,
     ) -> dict[str, Any]:
         """Edit an EXISTING modulation connection using its live parameter definitions.
 
-        Query falcon_get_connections first; use the returned parameter names and 1-based index.
+        Query falcon_get_connections first; pass its opaque guard. Default previews the diff;
+        repeat the exact request with dry_run=false to apply. Source/name/destination and all
+        destination-owner connections must still match. Every change needs an expected old value.
+        Gain/envelope and Pitch Wheel paths require allow_protected=true; rewiring is unsupported.
         Cannot create/delete modulation assignments through the public API.
         """
         if len({c.name for c in changes}) != len(changes):
@@ -273,6 +281,7 @@ def create_server(config: Config | None = None) -> FastMCP:
                 "parameter": parameter,
                 "index": index,
                 "changes": [c.model_dump(exclude_none=True) for c in changes],
+                "guard": guard, "dry_run": dry_run, "allow_protected": allow_protected,
             },
             mutation=True,
         )
@@ -559,7 +568,10 @@ def create_server(config: Config | None = None) -> FastMCP:
                 "capture_readiness": {"status": "implemented", "validation": "Automated buffer/ordering tests; endpoint must be tested locally"},
                 "program_multi_save_load": {"status": "public_api_gap", "alternative": "Owned VST3 native_file tools or Falcon UI; Lua gap remains"},
                 "synthesis_node_creation": {"status": "public_api_gap", "alternative": "Native editing or separately validated offline authoring"},
-                "offline_preset_authoring": {"status": "not_implemented", "validation": "User-reported workflow; not a server-supported file writer"},
+                "offline_preset_authoring": {"status": "implemented_limited", "validation": "Versioned analog-v1 template builder; isolated native acceptance required before export"},
+                "guarded_connections": {"status": "implemented", "scope": "Identity/revision guards, mandatory preview and Gain/Pitch Wheel protection"},
+                "instrument_acceptance": {"status": "implemented", "scope": "Owned-host role profiles, immutable file/audio evidence; not subjective or all-control validation"},
+                "revision_publishing": {"status": "implemented", "scope": "Latest unchanged validated revision only; staged immutable version folders, hashes and rollback"},
                 "ufs_index_native_preview": {"status": "not_implemented", "validation": "No reliable native association workflow established"},
                 "continuous_model_listening": {"status": "not_implemented", "alternative": "One capture and one analysis per call"},
                 "owned_vst3_files": {"status": "implemented", "scope": "Separate owned Windows VST3 instance; native_file load/save, native_edit, native_render"},
@@ -587,10 +599,12 @@ def create_server(config: Config | None = None) -> FastMCP:
     from .advanced import register_advanced
     from .native_tools import register_native
     from .reference_tools import register_reference
+    from .workflow_tools import register_workflows
 
     register_advanced(mcp, cfg, bridge, audit, capture_lock, capture_monitor)
     register_reference(mcp, cfg, feedback)
     native_host = register_native(mcp, cfg, audit)
+    register_workflows(mcp, cfg, audit)
     # Audit at the protocol boundary, so rejected input/unknown tools are logged too.
     for request_type, original in list(mcp._mcp_server.request_handlers.items()):
 

@@ -1,6 +1,14 @@
 # Validation records
 
-Current 0.3.0: 112 automated tests pass, with 52-tool MCP discovery and native VST3 file/render/reference acceptance on Yingg. See [current workflow, evidence and limits](native-and-reference.md). Older results below retain their original scope.
+Current 0.4.0: 123 automated tests pass, with 56-tool discovery, guarded modulation, controlled building and revision-bound publishing. See [production safety](production-safety.md) for profiles and limits. Older results below retain their original scope.
+
+## 0.4.0 native workflow acceptance
+
+On Yingg, 2026-10-21, Windows Falcon 27.0.2/Pedalboard 0.9.26: the real MCP stdio workflow built a two-layer analog Program with retained gain-envelope and Pitch Wheel connections. Four pitches, three velocities, seven-note headroom and sound after native save/reopen passed; the Program exported and published with revision/artifact hashes. Wrong connection source, applying before preview, and using a stale native state revision were rejected. The saved default Multi hash was restored; no editor or mouse operation was used.
+
+The installed package and live Master bridge were updated to 0.4.0; `setup --verify-reload` confirmed matching builds and `ready_without_gui=true`. A live Lua preview on `Nordic Nylon` identified `PitchBendMod`, `@PitchBend` → Pitch, Ratio 2, without applying a parameter write. Its live Ratio definition confirmed float with the UVI unbounded min/max sentinel. Evidence: `.runtime/deployment-040-final.json` and `.runtime/acceptance-live-connection-040.json`. This update does not repeat the historical standalone restart test.
+
+Local evidence: `.runtime/workflow-040-release/acceptance-workflows.json` and its referenced revision report, native export and raw case WAVs. Reproduce with `FALCON_MCP_HOME` set to an isolated validation directory and `.venv/Scripts/python.exe scripts/smoke_workflows.py`. Tests also cover connection reordering/unrelated edits, octave dominance/tuning drift, silence/clipping/flat velocity, stale source/revision/evidence rejection and publication failure rollback. This establishes the tested analog template/Keys path, not every profile, module or scripted instrument.
 
 ## 0.3.0 installation verification
 

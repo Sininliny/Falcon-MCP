@@ -122,7 +122,11 @@ function handlers.connections(a)
             if ok then item.value=clean(value,0) else item.error=tostring(value) end
             parameters[#parameters+1]=item
         end
-        out[#out+1]={index=i,name=c.name,type=c.type,path=c.path,parameters=parameters}
+        local guard=nil
+        if c:hasParameter("Source") and c:hasParameter("Destination") then
+            guard=connectionGuard(node,a.parameter,i,c)
+        end
+        out[#out+1]={index=i,name=c.name,type=c.type,path=c.path,parameters=parameters,guard=guard}
     end
     return {items=out,total_count=#all,has_more=(a.offset or 0)+#out<#all,next_offset=(a.offset or 0)+#out}
 end

@@ -1,6 +1,6 @@
 ---
 name: falcon-instrument-workflow
-description: Build, load, save, render, refine, and validate UVI Falcon instruments with Falcon MCP, including native VST3 sessions, reference-audio segments, standalone routing, and preset-library release checks.
+description: Build, edit, render, accept, and publish UVI Falcon instruments with Falcon MCP, including guarded modulation, native VST3 file operations, reference-audio matching, standalone routing, and revision-bound releases.
 ---
 
 # Falcon instrument workflow
@@ -25,8 +25,10 @@ For missing bridges, follow the [manual initialization guide](https://github.com
 
 ## Choose the production path
 
+For guarded modulation, template structure creation, audio acceptance and immutable releases, read [production safety](references/production-safety.md). Use `falcon_native_connections` for connection writes, `falcon_build_instrument` for allowlisted structures, and snapshot → `falcon_accept_instrument` → publish for revision-bound evidence. Do not reuse a passing report after changing a file.
+
 - Existing structures and supported effect chains: use live MCP tools with readback and expected-value guards.
-- Missing synthesis structures: current public runtime APIs do not expose general Layer/Keygroup/Oscillator/Modulator/connection creation. Use native editing or an explicitly chosen offline authoring workflow, then test native loading, sound and reopening. The owned host can validate/export existing native structures; it does not provide general structure creation. XML parsing alone is insufficient.
+- Missing synthesis structures: current public runtime APIs do not expose general Layer/Keygroup/Oscillator/Modulator/connection creation. Prefer the controlled builder when its catalog covers the design; otherwise use an explicitly chosen offline authoring workflow and test native loading, sound and reopening. The owned host can validate/export structures; it does not provide general runtime structure creation. XML parsing alone is insufficient.
 - UI/event logic: use trusted Lua extensions within public API limits. Preserve saved control state; opening a panel must not reset a patch. Forward each incoming MIDI event once, preserving channel/port and note/release identity. Check repeated same-note presses, overlapping channels/ports, sustain, releases and All Notes Off.
 - Capability questions: read `falcon://capabilities` and `falcon_api_coverage`. Signature mappings/function existence, implemented tools, automated tests and native acceptance are different evidence.
 

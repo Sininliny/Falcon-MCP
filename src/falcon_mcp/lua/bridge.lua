@@ -1,7 +1,7 @@
 -- UVI Falcon 2027 / UVIScript Lua 5.1. BRIDGE_ROOT and TOKEN are generated.
 -- Use documented asynchronous file I/O only. Never load/execute mailbox code.
 local json = require("uvi.json")
-local BRIDGE_VERSION="0.3.0"
+local BRIDGE_VERSION="0.4.0"
 local lastId = ""
 local lastMutation = {}
 local voices = {}
@@ -239,12 +239,79 @@ function handlers.set_parameters(a)
     return setParameters(resolve(a.selector),a)
 end
 
+local connectionGuards={}
+local connectionGuardSequence=0
+-- This is an exact local snapshot, not a cryptographic project fingerprint.
+local function connectionSnapshot(node,parameter)
+    local out={tostring(node.path),tostring(node.name),tostring(node.type),parameter}
+    for _,d in ipairs(definitions(node)) do
+        local all=node:getParameterConnections(d.name) or {}
+        out[#out+1]=d.name..":"..#all
+        for _,c in ipairs(all) do
+            out[#out+1]=tostring(c.path)..":"..tostring(c.name)
+            for _,cd in ipairs(definitions(c)) do
+                local v=c:getParameter(cd.name)
+                local text=type(v)=="number" and string.format("%.17g",v) or tostring(v)
+                out[#out+1]=cd.name..":"..type(v)..":"..#text..":"..text
+            end
+        end
+    end
+    return table.concat(out,"\n")
+end
+
+local function connectionGuard(node,parameter,index,c)
+    connectionGuardSequence=connectionGuardSequence+1
+    local key=tostring(bridgeInstance)..":connection:"..connectionGuardSequence
+    connectionGuards[key]={snapshot=connectionSnapshot(node,parameter),parameter=parameter,
+        index=index,name=c.name,path=c.path,source=c:getParameter("Source"),destination=c:getParameter("Destination")}
+    -- Bound storage even when clients keep browsing without writing.
+    if connectionGuardSequence>128 then
+        connectionGuards[tostring(bridgeInstance)..":connection:"..(connectionGuardSequence-128)]=nil
+    end
+    return key
+end
+
 function handlers.set_connection(a)
     local node=resolve(a.selector)
     definition(node,a.parameter)
     local connections=node:getParameterConnections(a.parameter) or {}
     check(connections[a.index] ~= nil,"Connection no longer exists; refresh connections")
-    return setParameters(connections[a.index],a)
+    local c=connections[a.index]
+    local guard=connectionGuards[a.guard]
+    check(guard~=nil,"Connection guard missing/expired; inspect connections again")
+    check(guard.parameter==a.parameter and guard.index==a.index and guard.name==c.name and guard.path==c.path
+        and guard.source==c:getParameter("Source") and guard.destination==c:getParameter("Destination")
+        and guard.snapshot==connectionSnapshot(node,a.parameter),"Connection identity/structure changed; inspect again")
+    local diff={}
+    local protected=guard.source=="@PitchBend" or guard.destination=="Gain"
+    check(not protected or a.allow_protected==true,"Pitch wheel/gain connections require allow_protected=true")
+    local plan={}
+    for _,change in ipairs(a.changes) do
+        check(change.name~="Source" and change.name~="Destination" and change.name~="Name",
+            "Connection rewiring is unsupported; change numeric/bool settings only")
+        check(change.expected~=nil,"Connection changes require expected old values")
+        local d=definition(c,change.name);validateValue(d,change.value)
+        local old=c:getParameter(change.name)
+        local matches=old==change.expected
+        if d.type=="float" and type(old)=="number" and type(change.expected)=="number" then
+            matches=math.abs(old-change.expected)<=1e-13*math.max(math.abs(old),math.abs(change.expected))
+        end
+        check(matches,"Stale expected connection value")
+        diff[#diff+1]={name=change.name,before=old,after=change.value}
+        local v=change.value
+        local text=type(v)=="number" and string.format("%.17g",v) or tostring(v)
+        plan[#plan+1]=change.name..":"..type(v)..":"..#text..":"..text
+    end
+    local encodedPlan=table.concat(plan,"\n")
+    if a.dry_run~=false then
+        guard.plan=encodedPlan
+        return {dry_run=true,diff=diff,name=guard.name,source=guard.source,destination=guard.destination,
+            guard=a.guard,protected=protected,structure_scope="All connections on the destination owner"}
+    end
+    check(guard.plan==encodedPlan,"Preview this exact connection diff before applying")
+    connectionGuards[a.guard]=nil
+    local result=setParameters(c,a);result.diff=diff
+    return result
 end
 
 function handlers.connections(a)

@@ -34,6 +34,13 @@ class NativeChange(BaseModel):
     expected: str = Field(max_length=256, description="Exact attribute string returned by native_edit read")
 
 
+class ConnectionIdentity(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    Name: str
+    Source: str
+    Destination: str
+
+
 def register_native(mcp, config, audit):
     host = NativeHost(config, audit)
 
@@ -96,16 +103,38 @@ def register_native(mcp, config, audit):
     async def falcon_native_edit(
         session_id: Session, selector: Annotated[str, Field(min_length=1, max_length=1024)],
         changes: Annotated[list[NativeChange], Field(max_length=64)] | None = None,
+        expected_revision: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")] | None = None,
     ) -> dict[str, Any]:
         """Browse/edit the owned session's serialized native parameters with expected-attribute guards.
 
         Start browsing at Engine/Synth, then use returned child selectors (native XML paths, not Lua selectors).
         changes omitted reads attributes/children and official indexed definitions. Only indexed numeric/bool
-        attributes can change; no structural/metadata writes. Native restore and readback follow edits.
+        attributes can change; no structural/metadata writes. Changes require expected_revision from
+        the inspected read. SignalConnection writes require native_connections instead.
         Uses versioned offline definitions, not live Lua definitions; confirm native render after each edit.
         """
         return await host.request(session_id, "edit", {
             "selector": selector, "changes": [c.model_dump() for c in changes or []],
+            "expected_revision": expected_revision,
+        })
+
+    @mcp.tool(annotations=WRITE)
+    async def falcon_native_connections(
+        session_id: Session, selector: str,
+        changes: Annotated[list[NativeChange], Field(max_length=32)] | None = None,
+        expected_revision: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")] | None = None,
+        identity: ConnectionIdentity | None = None, apply: bool = False, allow_protected: bool = False,
+    ) -> dict[str, Any]:
+        """Inspect/preview/apply one existing native connection with exact identity and state revision.
+
+        Omit changes to read identity (Name/Source/Destination) and revision. Send changes to preview;
+        repeat exactly with apply=true. Any state change expires the plan. Gain/envelope and Pitch
+        Wheel paths require allow_protected=true. No source/destination rewiring; numeric/bool only.
+        """
+        return await host.request(session_id, "connection", {
+            "selector": selector, "changes": [c.model_dump() for c in changes or []],
+            "expected_revision": expected_revision, "identity": identity.model_dump() if identity else None,
+            "apply": apply, "allow_protected": allow_protected,
         })
 
     @mcp.tool(annotations=WRITE)
@@ -113,6 +142,7 @@ def register_native(mcp, config, audit):
         session_id: Session, notes: Annotated[list[RenderNote], Field(min_length=1, max_length=64)],
         seconds: Annotated[float, Field(ge=1, le=30)] = 3,
         sample_rate: Literal[44100, 48000, 96000] = 48000,
+        expected_revision: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")] | None = None,
     ) -> dict[str, Any]:
         """Render finite MIDI directly from the owned VST3 instance to a unique WAV plus objective meters.
 
@@ -127,6 +157,7 @@ def register_native(mcp, config, audit):
         result = await host.request(session_id, "render", {
             "path": str(path), "seconds": seconds, "sample_rate": sample_rate,
             "notes": [n.model_dump() for n in notes],
+            "expected_revision": expected_revision,
         })
         audio, rate = await asyncio.to_thread(read_audio, path)
         report = await asyncio.to_thread(diagnose, audio, rate)

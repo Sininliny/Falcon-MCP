@@ -1,4 +1,6 @@
-# 0.3.0: native preset files and reference audio
+# Native preset files and reference audio
+
+Introduced in 0.3.0; current 0.4.0 adds [connection guards, controlled building and revision-bound acceptance](production-safety.md). Native writes require the inspected `expected_revision`; connection edits use `falcon_native_connections` with a preview.
 
 ## Install on Windows
 
@@ -8,7 +10,7 @@ Use an activated/licensed Falcon 27.0.2 installation and the project's Python en
 .venv\Scripts\python.exe -m pip install -e ".[host]"
 ```
 
-Existing Codex configuration continues to run `falcon_mcp serve`; reconnect after upgrading to discover 52 tools. The optional host is loaded only by `falcon_native_host(action="start")`. It consumes plugin memory until stopped; the separate CLAP feedback model still loads/releases per analysis call.
+Existing Codex configuration continues to run `falcon_mcp serve`; reconnect after upgrading to discover 56 tools. The optional host is loaded only by `falcon_native_host(action="start")` or an explicit build/acceptance call. It consumes plugin memory until stopped; build/acceptance hosts stop after the call, and the separate CLAP feedback model still loads/releases per analysis call.
 
 Optional environment settings:
 

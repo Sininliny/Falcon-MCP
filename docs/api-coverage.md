@@ -33,7 +33,10 @@ Read `falcon://capabilities.workflow_support` for machine-readable distinctions 
 | Capture readiness | First successful buffer, lifecycle status and timing checks are implemented; the real endpoint must still be validated locally. |
 | Program/Multi saving and loading | No public Lua API. The separate owned VST3 host restores/serializes native state with guarded load/save and readback. |
 | Layer/keygroup/oscillator/modulator/connection creation or deletion | Public runtime API gap; effect-chain editing is an exception. |
-| Offline preset construction | Reported successful by the user, but no supported file builder is included here. XML parsing does not establish native compatibility. |
+| Offline preset construction | `build_instrument` supports versioned analog-v1 templates; isolated native acceptance gates export. No arbitrary XML/module creation interface. |
+| Connection safety | Lua owner-connection snapshots or owned-state revisions, exact source/name/destination guards, mandatory diff previews and Gain/Pitch Wheel protection. |
+| Instrument acceptance | Owned native role profiles, pitch/octave/drift, velocity, silence/clipping, headroom, envelope evidence and save/reopen sound. Not full-key/macro/UI/keyboard validation. |
+| Revisions and publishing | Immutable byte/content fingerprints, artifact-bound acceptance, latest-source checks, staged version folders, hashes and failure rollback. |
 | UFS packaging, indexing, native browser preview association | No reliable server workflow established; a same-name OGG is not acceptance evidence. |
 | Continuous model feedback | Not implemented; feedback is one capture/file and one worker invocation. |
 | Reference audio | Exact local time range, meters and normalized comparison; no target-source separation from a mix. |

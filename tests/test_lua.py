@@ -249,10 +249,65 @@ def test_connection_false_values_are_not_dropped():
       local c={name="connection",path="/Program/c",type="SignalConnection",
                parameterDefinitions={{name="Bypass",type="bool",readOnly=false}}}
       function c:getParameter(name) return false end
+      function c:hasParameter(name) return name=="Bypass" end
       function Program:getParameterConnections(name) return {c} end
     """)
     result = request(lua, d, "connections", {"selector": "Program", "parameter": "Gain"})
     assert result["items"][1].parameters[1].value is False
+
+
+def modulation_dispatcher():
+    lua, d = dispatcher()
+    lua.execute('''
+      local defs={{name="Source",type="string"},{name="Destination",type="string"},
+                  {name="Ratio",type="float",min=1,max=0},{name="Bypass",type="bool"}}
+      function makeConnection(name,source,ratio)
+        local values={Source=source,Destination="Gain",Ratio=ratio,Bypass=false}
+        local c={name=name,path="/Program/"..name,type="SignalConnection",parameterDefinitions=defs}
+        function c:getParameter(key) return values[key] end
+        function c:hasParameter(key) return values[key]~=nil end
+        function c:setParameter(key,value) values[key]=value end
+        return c
+      end
+      wheel=makeConnection("Pitch Wheel","@PitchBend",2)
+      drift=makeConnection("Organic Drift","Organic Drift",0.01)
+      paths={wheel,drift}
+      function Program:getParameterConnections(name) if name=="Gain" then return paths else return {} end end
+    ''')
+    return lua, d
+
+
+def test_modulation_requires_exact_preview_identity_expected_and_expiring_structure_guard():
+    lua, d = modulation_dispatcher()
+    read = request(lua, d, "connections", {"selector": "Program", "parameter": "Gain"})
+    guard = read["items"][2].guard
+    args = {"selector": "Program", "parameter": "Gain", "index": 2, "guard": guard,
+            "allow_protected": True, "changes": [{"name": "Ratio", "expected": 0.01, "value": 0.02}]}
+    with pytest.raises(LuaError, match="Preview"):
+        request(lua, d, "set_connection", {**args, "dry_run": False})
+    preview = request(lua, d, "set_connection", args)
+    assert preview.source == "Organic Drift" and lua.globals().drift.getParameter(None, "Ratio") == 0.01
+    lua.execute("paths={drift,wheel}")
+    with pytest.raises(LuaError, match="identity/structure changed"):
+        request(lua, d, "set_connection", {**args, "dry_run": False})
+    lua.execute("paths={wheel,drift}")
+    result = request(lua, d, "set_connection", {**args, "dry_run": False})
+    assert result.verified and lua.globals().wheel.getParameter(None, "Ratio") == 2
+    with pytest.raises(LuaError, match="missing/expired"):
+        request(lua, d, "set_connection", {**args, "dry_run": False})
+
+
+def test_modulation_protects_wheel_and_gain_and_invalidates_other_connection_changes():
+    lua, d = modulation_dispatcher()
+    read = request(lua, d, "connections", {"selector": "Program", "parameter": "Gain"})
+    args = {"selector": "Program", "parameter": "Gain", "index": 2, "guard": read["items"][2].guard,
+            "changes": [{"name": "Ratio", "expected": 0.01, "value": 0.02}]}
+    with pytest.raises(LuaError, match="allow_protected"):
+        request(lua, d, "set_connection", args)
+    request(lua, d, "set_connection", {**args, "allow_protected": True})
+    lua.execute('wheel:setParameter("Ratio",12)')
+    with pytest.raises(LuaError, match="structure changed"):
+        request(lua, d, "set_connection", {**args, "allow_protected": True, "dry_run": False})
 
 
 def test_generic_multisample_purge_rejects_silent_noop():

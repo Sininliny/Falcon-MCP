@@ -26,6 +26,7 @@ from .native_state import (
     state_xml,
     strip_bridges,
 )
+from .revisions import content_fingerprint, sha256
 
 
 def write_bytes(path: Path, data: bytes):
@@ -150,7 +151,11 @@ def engine(root: Path):
     if plugin_path.is_dir() and os.name == "nt":
         plugin_path = plugin_path / "Contents/x86_64-win/Falcon.vst3"
     plugin = load_plugin(str(plugin_path))
+    plugin_hash = sha256(plugin_path)
     session_id = os.environ["FALCON_NATIVE_SESSION"]
+    revision_number = 0
+    connection_plans = {}
+    loaded_source = {}
 
     def current():
         return parse_xml(state_xml(plugin.raw_state))
@@ -158,14 +163,24 @@ def engine(root: Path):
     def summary():
         tree = current()
         parts = program_nodes(tree)
-        return {"session_id": session_id, "programs": [
+        source = dict(loaded_source)
+        if source:
+            path = Path(source["path"])
+            source["disk_changed_since_load"] = not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != source["sha256"]
+            source["session_modified_since_load"] = content_fingerprint(tree) != source["native_revision"]
+        return {"session_id": session_id, "revision": content_fingerprint(tree),
+                "revision_number": revision_number, "loaded_source": source, "programs": [
             {"part": i, "name": p.find("Program").get("DisplayName", "Program")}
             for i, p in enumerate(parts, 1) if p.find("Program") is not None
-        ], "scope": "Owned VST3 instance", "plugin": plugin.name}
+        ], "scope": "Owned VST3 instance", "plugin": plugin.name,
+            "plugin_path": str(plugin_path), "plugin_sha256": plugin_hash}
 
     def apply(tree):
+        nonlocal revision_number
         strip_bridges(tree)
         plugin.raw_state = replace_state_xml(plugin.raw_state, ET.tostring(tree, encoding="utf-8"))
+        revision_number += 1
+        connection_plans.clear()
         write_bytes(root / "session.uvim", state_xml(plugin.raw_state))
 
     # The startup supervisor removed MCP loops from the default. Keep this owned
@@ -183,13 +198,19 @@ def engine(root: Path):
             if request["session_id"] != session_id:
                 raise ValueError("Native session guard mismatch")
             op, args = request["op"], request["args"]
+            if args.get("expected_revision") and content_fingerprint(current()) != args["expected_revision"]:
+                raise ValueError("Native revision changed; inspect before retrying")
             if op == "status":
                 result = summary()
             elif op == "load":
                 source = Path(args["path"])
                 if source.stat().st_size > MAX_STATE:
                     raise ValueError("Preset exceeds 32 MiB")
-                incoming = parse_xml(source.read_bytes())
+                source_bytes = source.read_bytes()
+                source_hash = hashlib.sha256(source_bytes).hexdigest()
+                if args.get("expected_sha256") and source_hash != args["expected_sha256"]:
+                    raise ValueError("Source file hash changed; inspect before loading")
+                incoming = parse_xml(source_bytes)
                 removed = strip_bridges(incoming)
                 if args["kind"] == "program":
                     program = incoming.find("Program")
@@ -209,6 +230,8 @@ def engine(root: Path):
                 expected = [p.find("Program").get("DisplayName", "Program") for p in program_nodes(tree)
                             if p.find("Program") is not None]
                 apply(tree)
+                loaded_source = {"path": str(source), "sha256": source_hash, "kind": args["kind"],
+                                 "native_revision": content_fingerprint(current())}
                 result = summary()
                 if [p["name"] for p in result["programs"]] != expected:
                     raise RuntimeError("Native load readback differs; inspect session before further editing")
@@ -237,6 +260,7 @@ def engine(root: Path):
                     with destination.open("xb") as stream:
                         stream.write(data)
                 result = {"path": str(destination), "sha256": hashlib.sha256(data).hexdigest(),
+                          "revision": content_fingerprint(tree), "revision_number": revision_number,
                           "kind": args["kind"], "bytes": len(data), "resources_collected": False,
                           "source": "Native plugin serialized state; not a public UVIScript save API"}
             elif op == "render":
@@ -244,6 +268,7 @@ def engine(root: Path):
                 import soundfile as sf
 
                 events = []
+                render_revision = content_fingerprint(current())
                 for note in args["notes"]:
                     channel = note.get("channel", 1) - 1
                     events += [(bytes([0x90 + channel, note["note"], note["velocity"]]), note["start_seconds"]),
@@ -252,16 +277,57 @@ def engine(root: Path):
                                sample_rate=args["sample_rate"], num_channels=2, buffer_size=512)
                 sf.write(args["path"], audio.T, args["sample_rate"], subtype="FLOAT")
                 result = {"path": args["path"], "frames": audio.shape[1], "peak": float(np.abs(audio).max()),
+                          "revision": render_revision, "revision_number": revision_number,
                           "scope": "Direct plugin render; no driver, loopback or other applications"}
                 write_bytes(root / "session.uvim", state_xml(plugin.raw_state))
             elif op == "edit":
-                from .native_edit import edit_node
+                from .native_edit import edit_node, verify_changes
 
                 tree = current()
+                if args.get("changes") and not args.get("expected_revision"):
+                    raise ValueError("Native writes require expected_revision from an inspected read")
                 result = edit_node(tree, args["selector"], args.get("changes", []))
                 if args.get("changes"):
                     apply(tree)
                     result["readback"] = edit_node(current(), args["selector"], [])
+                    result["verified"] = verify_changes(result["readback"], args["changes"])
+                    if not result["verified"]:
+                        raise RuntimeError("Native edit readback mismatch; inspect the current state before retrying")
+                result.update(revision=content_fingerprint(current()), revision_number=revision_number)
+            elif op == "connection":
+                from .connections import plan_connection
+
+                tree = current()
+                if not args.get("changes"):
+                    from .native_edit import edit_node
+
+                    result = edit_node(tree, args["selector"], [])
+                    if result["type"] != "SignalConnection":
+                        raise ValueError("Select a SignalConnection")
+                    result["revision"] = content_fingerprint(tree)
+                    result["identity"] = {key: result["attributes"].get(key) for key in ("Name", "Source", "Destination")}
+                else:
+                    result = plan_connection(tree, args["selector"], args["changes"],
+                                             args.get("expected_revision"), args.get("identity"),
+                                             args.get("allow_protected", False))
+                    if args.get("apply"):
+                        if connection_plans.get(result["plan_id"]) != result:
+                            raise ValueError("Preview this exact native diff before applying")
+                        from .native_edit import edit_node, verify_changes
+
+                        edit_node(tree, args["selector"], args["changes"], connection_guarded=True)
+                        apply(tree)
+                        result["readback"] = edit_node(current(), args["selector"], [])
+                        result["verified"] = verify_changes(result["readback"], args["changes"])
+                        if not result["verified"]:
+                            raise RuntimeError("Native connection readback mismatch; inspect before retrying")
+                        result["applied"] = True
+                        result["revision"] = content_fingerprint(current())
+                    else:
+                        if len(connection_plans) >= 128:
+                            connection_plans.clear()
+                        connection_plans[result["plan_id"]] = copy.deepcopy(result)
+                        result["applied"] = False
             else:
                 raise ValueError("Unsupported native operation")
             reply = {"id": request["id"], "session_id": session_id, "ok": True, "result": result}

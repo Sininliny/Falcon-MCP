@@ -1,4 +1,4 @@
-# Falcon MCP 0.3.0
+# Falcon MCP 0.4.0
 
 Local MCP control for UVI Falcon 2027: inspect the engine, edit parameters, audition and capture audio, diagnose signals, export project graphs, and compare timbres with an optional local model.
 
@@ -31,6 +31,9 @@ For file operations without desktop automation, install `[host]` and call `falco
 |---|---|
 | Engine | Public hierarchy; live parameter definitions/values; type/range validation; batch preflight; optional expected-value guards; readback. |
 | Modulation and routing | Existing modulators/connections, sends, and output buses. |
+| Production safety | Connection identity/revision guards and required diff previews; protected Gain/Pitch Wheel paths. |
+| Structure building | Versioned analog templates; isolated native load/save/reopen/audio acceptance before export. |
+| Acceptance and releases | Role-specific pitch/velocity/headroom evidence; immutable revisions and staged, hash-checked publication. |
 | Effects and samples | Insert/remove/move effects; load samples into existing oscillators; playback ranges, purge, mapping, and IR operations. |
 | Audition | Notes, MIDI, aftertouch, voice handles, fades, expression, and release. |
 | Project analysis | Public nodes, parameters, modulation, routes, and sample metadata; JSON snapshots and paginated queries. |
@@ -49,13 +52,14 @@ The offline index contains 182 module classes, 3,066 parameter definitions, and 
 
 ## MCP tools
 
-The server exposes **52 tools**, structured schemas, the `falcon://capabilities` resource, and the `refine_timbre` prompt. Use tool discovery for full arguments and constraints. The resource's `workflow_support` distinguishes implemented paths, public API gaps and unsupported workflows.
+The server exposes **56 tools**, structured schemas, the `falcon://capabilities` resource, and the `refine_timbre` prompt. Use tool discovery for full arguments and constraints. The resource's `workflow_support` distinguishes implemented paths, public API gaps and unsupported workflows. See [production safety](docs/production-safety.md) for connection previews, controlled building, acceptance and publishing.
 
 | Tools | Purpose |
 |---|---|
 | `falcon_status`, `falcon_setup`, `falcon_reconcile` | Connection, persistent deployment, uncertain-write recovery. |
 | `falcon_bind_instance`, `falcon_capture_status` | Pin inspected runtime/Program targets; observe recording readiness and completion. |
-| `falcon_native_host`, `falcon_native_file`, `falcon_native_edit`, `falcon_native_render` | Own a separate VST3 session; native preset I/O, guarded parameter edits and direct offline audio. |
+| `falcon_native_host`, `falcon_native_file`, `falcon_native_edit`, `falcon_native_render`, `falcon_native_connections` | Own a separate VST3 session; native preset I/O, guarded parameter/connection edits and direct offline audio. |
+| `falcon_build_instrument`, `falcon_accept_instrument`, `falcon_revision` | Controlled analog structures, role-specific acceptance, revision-bound publishing. |
 | `falcon_analyze_reference`, `falcon_compare_reference`, `falcon_audio_meter` | Import a reference time range, preserve the design goal, compare candidate evidence, inspect levels. |
 | `falcon_search_catalog`, `falcon_api_coverage` | Offline parameter/API indexes and runtime function probes. |
 | `falcon_list_children`, `falcon_list_parameters`, `falcon_get_parameters`, `falcon_set_parameters` | Browse and edit public state. |
