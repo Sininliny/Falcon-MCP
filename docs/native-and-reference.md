@@ -28,6 +28,7 @@ The native context does not require a Master launcher or any mouse/editor intera
 | `falcon_native_host` | Start/status/stop a supervised, separate Falcon VST3 instance; returns `session_id`. |
 | `falcon_native_file` | Native load/save for a Program (`.uvip`) or Multi (`.uvim`); Program replacement preserves that Part's routing. |
 | `falcon_native_edit` | Browse native child paths/attributes; edit existing indexed numeric/bool parameters with exact old-value guards and native readback. |
+| `falcon_native_structure` | Add whitelisted insert modules (filter, chorus, amp, tremolo, saturation) with preview, revision guard, readback, mandatory before/after render and rollback. See [structure edits](structure-edits.md). |
 | `falcon_native_render` | Finite MIDI to direct stereo WAV and diagnostics; no audio-device or loopback dependency. |
 | `falcon_analyze_reference` | Read 0.1..30 s from an explicit local attachment, preserve target/changes, return measurements and optional CLAP retrieval. |
 | `falcon_compare_reference` | Compare a later capture/render with the saved range; separate level from spectral balance. |
