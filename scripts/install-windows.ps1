@@ -66,7 +66,8 @@ function Invoke-Native {
     if ($DryRun -and -not $Always) { Write-Plan "run: $display"; return }
     Write-Info "> $display"
     $ErrorActionPreference = 'Continue'  # Native stderr (pip warnings, progress) must not abort the step.
-    & $File @Arguments | Out-Host
+    # 2>&1 plus string conversion shows stderr as plain text instead of NativeCommandError records.
+    & $File @Arguments 2>&1 | ForEach-Object { "$_" } | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "'$display' exited with code $LASTEXITCODE" }
 }
 

@@ -82,3 +82,16 @@ def test_main_dry_run_writes_nothing_and_real_run_backs_up(tmp_path, capsys):
 
     assert configure.main(args) == 0
     assert {r["status"] for r in json.loads(capsys.readouterr().out)["results"]} == {"unchanged"}
+
+
+def test_backups_of_profiles_with_the_same_file_name_do_not_overwrite(tmp_path, capsys):
+    first, second = tmp_path / "a" / "claude_desktop_config.json", tmp_path / "b" / "claude_desktop_config.json"
+    for path, marker in ((first, "A"), (second, "B")):
+        path.parent.mkdir()
+        path.write_text(json.dumps({"marker": marker}), encoding="utf-8")
+    backups = tmp_path / "backups"
+    assert configure.main(["--python", PY, "--home", HOME, "--repo", "F:\\r", "--claude-desktop", str(first),
+                           "--claude-desktop", str(second), "--backup-dir", str(backups)]) == 0
+    saved = {json.loads(p.read_text(encoding="utf-8"))["marker"] for p in backups.iterdir()}
+    assert saved == {"A", "B"}
+    assert {r["backup"] for r in json.loads(capsys.readouterr().out)["results"]} == {str(p) for p in backups.iterdir()}

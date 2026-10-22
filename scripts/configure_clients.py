@@ -108,6 +108,10 @@ def apply(path: Path, new: str, old: str | None, backup_dir: Path, dry_run: bool
     if old is not None:
         backup_dir.mkdir(parents=True, exist_ok=True)
         backup = backup_dir / f"{label}-{path.name}"
+        counter = 2
+        while backup.exists():  # Several profiles share a file name, e.g. two Claude Desktop installs.
+            backup = backup_dir / f"{label}-{counter}-{path.name}"
+            counter += 1
         shutil.copy2(path, backup)
         result["backup"] = str(backup)
     path.parent.mkdir(parents=True, exist_ok=True)
