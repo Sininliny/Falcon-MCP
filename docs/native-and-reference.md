@@ -41,6 +41,10 @@ Startup is a guarded transaction: a saved default containing the live MCP poller
 
 Imported Multis have MCP launchers removed; ordinary user scripts remain. Persistent Lua pollers/animation loops can still stall this offline host. Operations time out and terminate the owned process tree; inspect worker logs and saved results before retrying writes. This is not universal scripted-preset compatibility. Startup backups, worker logs and the last native checkpoint remain under `<home>/native-host/<session_id>`.
 
+## Relative media and portable libraries
+
+For directory-relative sample paths, embedded Multi copies and the difference between browser loading and raw-state restoration, read [portable preset resources](../skills/falcon-instrument-workflow/references/portable-resources.md). Ordinary relative paths worked in the tested deployed library; the current raw-state backend does not itself resolve them against the input file directory. A silent native render alone is not a browser compatibility verdict. Use the configured runtime destination for user tests and retain the exact evidence scope.
+
 ## Reference-driven refinement
 
 Give the agent the local audio attachment, timestamps, instrument focus and requested changes. For example: “42.5–47.0 s, the lead above the accompaniment; retain soft attack, reduce metallic brightness and shorten its tail.” The extractor seeks to those frames without reading an entire long recording, and does not normalize the selected range.

@@ -19,6 +19,10 @@ Imported Multis have embedded MCP launchers removed; ordinary instrument scripts
 
 Existing Lua tools still target the standalone bridge. Do not edit there and then save the owned instance expecting those edits to appear. To migrate an unsaved standalone/DAW state, first obtain a real native snapshot through that application's supported save workflow; this backend cannot extract it remotely.
 
+## Relative media paths
+
+The native backend restores serialized plugin state; it does not supply the browser's file-open context for relative media. A silent sample here does not establish a browser failure. Read [portable preset resources](portable-resources.md) before rebasing, moving or testing a sampled library; keep adapter evidence distinct from actual file-loader or user feedback.
+
 ## Reference audio for agents without hearing
 
 An example user request is: “Use the lead at 42.5–47.0 seconds, retain its soft attack, shorten its tail and make it less metallic.” Preserve all four components: source file, time range, target instrument, and requested changes.
