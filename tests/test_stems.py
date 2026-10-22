@@ -67,7 +67,7 @@ class FakeHost:
     def attr(self, selector, name):
         return self.root.find(selector).get(name)
 
-    async def request(self, session_id, op, args):
+    async def request(self, session_id, op, args, **kwargs):
         assert session_id == SESSION
         if args.get("expected_revision") and args["expected_revision"] != self.revision():
             raise ValueError("Native revision changed; inspect before retrying")
@@ -318,10 +318,10 @@ class SlowHost(FakeHost):
         super().__init__(**kwargs)
         self.delay = delay
 
-    async def request(self, session_id, op, args):
+    async def request(self, session_id, op, args, **kwargs):
         if op == "render":
             await asyncio.sleep(self.delay)
-        return await super().request(session_id, op, args)
+        return await super().request(session_id, op, args, **kwargs)
 
 
 def stem_tools_with_result(config, host):

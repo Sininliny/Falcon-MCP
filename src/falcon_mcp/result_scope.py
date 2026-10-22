@@ -166,6 +166,9 @@ declare("falcon_native_stems", "owned_vst3_host", ["offline_render", "dsp_measur
 declare("falcon_native_stems_result", "owned_vst3_host", ["offline_render", "dsp_measured", "native_readback"],
         ["realtime_cpu", "open_instance", "perceptual_quality"], "render",
         note="Collects a background falcon_native_stems run; its edits are restored before it finishes.")
+declare("falcon_native_job_result", "owned_vst3_host", ["offline_render", "dsp_measured", "native_readback"],
+        ["realtime_cpu", "open_instance", "perceptual_quality"], "render",
+        note="Collects a background sweep, parameter sweep or stems run; temporary edits are restored before it finishes.")
 declare("falcon_stem_analyze", "audio_file_analysis", ["dsp_measured"], ["perceptual_quality"])
 
 # Channel conventions differ between tools; state the one that applies.
