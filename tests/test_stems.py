@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 from mcp.server.fastmcp import FastMCP
+from scipy.signal import fftconvolve
 
 from falcon_mcp import stems
 from falcon_mcp.audit import AuditLog
@@ -39,11 +40,13 @@ def layer_signals(time, windows, modes_gain):
     body, hammer, modes = (np.zeros(len(time)) for _ in range(3))
     for w in windows:
         f0 = 440 * 2 ** ((w["note"] - 69) / 12)
-        gate = np.clip((time - w["on"]) / 0.01, 0, 1) * np.clip(1 - (time - w["off"]) / 0.08, 0, 1)
-        body += 0.15 * gate * sum(np.sin(2 * np.pi * k * f0 * time) / k for k in range(1, 8))
+        span = (time > w["on"]) & (time < w["off"] + 0.08)  # The gate is zero elsewhere.
+        t = time[span]
+        gate = np.clip((t - w["on"]) / 0.01, 0, 1) * np.clip(1 - (t - w["off"]) / 0.08, 0, 1)
+        body[span] += 0.15 * gate * sum(np.sin(2 * np.pi * k * f0 * t) / k for k in range(1, 8))
         burst = (time >= w["on"]) & (time < w["on"] + 0.025)
         hammer[burst] += 0.4 * np.diff(rng.standard_normal(burst.sum() + 1))
-        modes += modes_gain * gate * np.sin(2 * np.pi * 2.76 * f0 * time)
+        modes[span] += modes_gain * gate * np.sin(2 * np.pi * 2.76 * f0 * t)
     return body, hammer, modes
 
 
@@ -106,7 +109,8 @@ class FakeHost:
             decay = np.exp(-np.arange(length) / (0.35 * RATE))
             for ch in range(2):
                 ir = 0.002 * rng.standard_normal(length) * decay
-                stereo[:, ch] += np.convolve(dry, ir)[:frames]
+                # Direct np.convolve of a 1.2 s IR takes minutes on Windows CI.
+                stereo[:, ch] += fftconvolve(dry, ir)[:frames]
         send = float(self.attr(f"{PART}/BusRouters[1]/BusRouter[1]", "Gain"))
         stereo += 0.0 * send  # The aux is empty; its send only has to be restored.
         sf.write(args["path"], stereo.astype("float32"), args["sample_rate"], subtype="FLOAT")
