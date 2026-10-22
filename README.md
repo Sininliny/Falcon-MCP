@@ -25,6 +25,8 @@ Optional extras: `[capture]` for Windows WASAPI loopback; `[feedback]` for PyTor
 
 For file operations without desktop automation, install `[host]` and call `falcon_native_host(action="start")`. This uses a separate licensed Falcon VST3 instance; no Master bridge installation is needed for that context. It cannot extract unsaved state from the already-open standalone. See [native hosting and reference-audio workflow](docs/native-and-reference.md).
 
+For sample-folder migration, read [portable preset resources](skills/falcon-instrument-workflow/references/portable-resources.md). Relative media paths use the containing Program/Multi directory; the native raw-state backend and Falcon browser have different file-context behavior.
+
 ### Claude Desktop on Windows
 
 Install the Python environment above first. In Claude Desktop, open **Settings → Developer → Edit Config** and back up the file before editing. The usual path is `%APPDATA%\Claude\claude_desktop_config.json`. Microsoft Store installations may use `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json`; use the file opened by **Edit Config**, rather than assuming the profiles are interchangeable.

@@ -82,6 +82,9 @@ def register_native(mcp, config, audit):
         Save exports native serialized state, not a public Lua save call; outputs stay under <home>/presets.
         Existing files require expected_sha256 and get a backup. Resources are not collected; verify
         sample/image/IR paths and reopen saved files. Does not save the separate standalone/DAW instance.
+        Load restores plugin state, not the browser file-open context; this backend does not resolve
+        relative media against the input preset directory. Silence here alone does not prove a
+        relative-path library fails in Falcon. See the skill reference portable-resources.md.
         """
         suffix = ".uvip" if kind == "program" else ".uvim"
         preset_root = (config.runtime.parent / "presets").resolve()

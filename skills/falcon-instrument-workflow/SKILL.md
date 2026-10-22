@@ -87,6 +87,8 @@ Validate instrument files, routing templates, demos and library presentation sep
 
 Record versions, preset list, macro/CC map, resource paths/hashes and validation scope in a release manifest. Keep work, immutable versioned releases and local MCP configuration separate. Preserve used samples/images/IRs and verify dependencies after copying the release to a new location. A portable template must not depend on this machine's bridge path.
 
+Before rebasing media or diagnosing a relative-path preset, read [portable preset resources](references/portable-resources.md). Base media paths on the containing .uvip/.uvim, including embedded Program copies. A silent raw-state render alone does not prove browser loading fails; honor the configured user runtime directory for test deployment.
+
 Report what passed, what failed and what remains untested. User-reported production results are useful evidence, but do not generalize a specific patch, driver or Falcon version into a universal rule.
 
 Official references: [Falcon structure](https://manual.uvi.net/falcon/en/structure/), [save/load and routing](https://manual.uvi.net/falcon/en/interface/), [UVIScript](https://lua.uvi.net/).
