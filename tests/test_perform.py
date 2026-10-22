@@ -266,6 +266,8 @@ async def test_suite_pins_revision_and_returns_scorecard(config):
         "session_id": SESSION, "phrases": ["polyphony", "sustain_pedal"]})
     assert result["status"] == "warn" and result["scorecard"][0].startswith("polyphony")
     assert result["phrases"][1]["issues"] == [{"status": "ok", "detail": "all checks passed"}]
+    # A non-ok phrase must list at least one non-ok check, including render_peak (checks[0]).
+    assert all((r["status"] == "ok") == (r["issues"][0]["status"] == "ok") for r in result["phrases"])
     assert host.renders[1]["expected_revision"] == host.revision()
     original = host.request
 

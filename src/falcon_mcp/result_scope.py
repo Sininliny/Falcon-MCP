@@ -29,6 +29,7 @@ ENVIRONMENTS = {
     "managed_files": "Files under <FALCON_MCP_HOME> (revisions, releases); no Falcon instance is involved.",
     "audio_file_analysis": "DSP on existing audio files only; no Falcon instance is contacted.",
     "system_audio_capture": "Records the selected Windows output endpoint: everything audible there, not only Falcon.",
+    "preset_file_analysis": "Offline analysis of a preset or script file in an emulated runtime; no Falcon instance runs it.",
     "offline_reference": "Bundled documentation/catalog snapshot; says nothing about the installed Falcon.",
     "unclassified": "No scope profile was declared for this tool; treat environment and verification as unknown.",
 }
@@ -121,6 +122,7 @@ for _name in ["falcon_play_notes", "falcon_send_midi", "falcon_start_voice", "fa
               "falcon_poly_aftertouch", "falcon_post_midi", "falcon_post_event", "falcon_midi_file"]:
     declare(_name, "open_instance", ["scheduled_in_bridge"], TRANSPORT_UNCHECKED, "midi")
 declare("falcon_api_coverage", "offline_reference", kind="api")
+declare("falcon_capabilities", "offline_reference")
 declare("falcon_search_catalog", "offline_reference", kind="catalog")
 for _name in ["falcon_param_lookup", "falcon_param_search", "falcon_param_value", "falcon_sound_recipe",
               "falcon_timbre_vocabulary", "falcon_design_check", "falcon_query_project", "falcon_export_uml"]:
@@ -149,6 +151,19 @@ declare("falcon_accept_instrument", "temporary_owned_host", ["offline_render", "
 declare("falcon_build_instrument", "temporary_owned_host", ["offline_render", "native_readback", "file_hash"],
         kind="acceptance")
 declare("falcon_revision", "managed_files", ["file_hash"], kind="save")
+CODES.update(control_tree="Script UI widget tree, visibility and enabled state.",
+             mouse_blocking="Parents that stop mouse clicks reaching child controls.",
+             label_contrast="Text-to-background contrast of control labels.",
+             save_reload="Value persists after a native save and reload of the Program.")
+declare("falcon_ui_check", "preset_file_analysis", ["control_tree", "mouse_blocking", "label_contrast"],
+        ["mouse_interaction", "ui_display", "open_instance", "owned_instance"])
+declare("falcon_ui_live_probe", "open_instance", ["engine_readback"], ["mouse_interaction", "ui_display"])
+declare("falcon_native_ui_roundtrip", "owned_vst3_host", ["native_readback", "save_reload"],
+        ["mouse_interaction", "ui_display", "open_instance"])
+declare("falcon_native_stems", "owned_vst3_host", ["offline_render", "dsp_measured", "native_readback"],
+        ["realtime_cpu", "open_instance", "perceptual_quality"], "render",
+        note="Layer mutes/bypasses are temporary edits in the owned session and are restored before returning.")
+declare("falcon_stem_analyze", "audio_file_analysis", ["dsp_measured"], ["perceptual_quality"])
 
 # Channel conventions differ between tools; state the one that applies.
 CHANNEL_BASE = {"falcon_post_midi": 0, "falcon_midi_file": 0}

@@ -270,7 +270,7 @@ def register_perform(mcp, config, audit, host):
                 session_id, timeline, length, sample_rate, buffer_size, True, 100, revision, name)
             revision = revision or result.get("revision")
             view = await evaluate(timeline, sections, length, meta, compiled, audio, rate, wav, False)
-            rows.append({"phrase": name, "status": view["status"], "issues": _trim(view["checks"][1:]),
+            rows.append({"phrase": name, "status": view["status"], "issues": _trim(view["checks"]),
                          "path": str(wav), "mid_path": files["mid_path"], "full_report": view["full_report"]})
         order = {"fail": 0, "warn": 1, "info": 2, "unknown": 2, "ok": 3}
         overall = min((r["status"] for r in rows), key=lambda s: order.get(s, 3))

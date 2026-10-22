@@ -603,6 +603,11 @@ def create_server(config: Config | None = None) -> FastMCP:
             "bootstrap": "falcon-mcp prepare",
         }
 
+    @mcp.tool(annotations=READ)
+    def falcon_capabilities() -> dict[str, Any]:
+        """Same content as the falcon://capabilities resource, for MCP clients that cannot read resources."""
+        return capabilities()
+
     @mcp.prompt()
     def refine_timbre(target: str) -> str:
         """Guide a measurable, reversible Falcon sound refinement workflow."""

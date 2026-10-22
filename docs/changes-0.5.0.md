@@ -24,6 +24,8 @@ Agents without native audio input could render and capture Falcon output, but mo
 - Performance UI checks ([UI checks](ui-check.md)): `falcon_ui_check`, `falcon_ui_live_probe` and `falcon_native_ui_roundtrip` check the control tree, parent mouse blocking, enabled state, overlap, label contrast and control -> engine -> save/reload persistence. Real mouse input is reported as untested. `lupa` is now a core dependency.
 - Result scope ([result scope](result-scope.md)): every dict result starts with a compact `result_scope` block naming the environment (open instance, owned VST3, acceptance host, files), instance/session, versions, what was and was not checked, units and channel base. `FALCON_MCP_RESULT_SCOPE=compact|full|off`; `scripts/check_versions.py --strict` keeps guide and code versions aligned.
 
+- `falcon_capabilities` returns the `falcon://capabilities` content as a tool, for MCP clients that cannot read resources (Claude Desktop reported "does not support resources").
+
 ## Limits
 
 All wording is heuristic and exists to steer reversible edits; it is not a perceptual or quality verdict. Pitch, harmonic and ADSR estimates assume an isolated single note; chords, mixes and heavy modulation weaken them. Envelope timings after the peak use a 60 ms window, so very short releases read as roughly 30 ms minimum. Click detection requires a burst to stand 10 dB above any other high-frequency burst within 50 ms, so small clicks inside bright saw/pulse material can be missed. The new code was tested with synthetic signals on Linux (305 tests, including 50 listening tests with signal-derived expectations). None of the 0.5.0 tools has been accepted against a real Falcon session on Windows yet; capabilities mark the newest ones `implemented_unvalidated`.

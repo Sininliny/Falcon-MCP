@@ -297,3 +297,11 @@ def test_code_versions_agree():
     spec.loader.exec_module(module)
     versions = module.code_versions(root)
     assert set(versions.values()) == {__version__}
+
+
+def test_every_registered_tool_has_a_scope_profile(config):
+    from falcon_mcp import result_scope
+    from falcon_mcp.server import create_server
+
+    names = [tool.name for tool in create_server(config)._tool_manager.list_tools()]
+    assert [n for n in names if n not in result_scope.PROFILES] == []
