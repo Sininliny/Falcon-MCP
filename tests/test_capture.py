@@ -156,7 +156,8 @@ def test_loopback_signals_ready_only_after_first_successful_read(config, monkeyp
         def open(self, **kwargs):
             return Stream()
 
-    monkeypatch.setattr(sys, "platform", "win32")
+    # Patch only the module under test; a global sys.platform change makes soundfile call Windows-only APIs.
+    monkeypatch.setattr("falcon_mcp.audio.sys", SimpleNamespace(platform="win32"))
     monkeypatch.setitem(sys.modules, "pyaudiowpatch", SimpleNamespace(PyAudio=PA, paFloat32=1))
     config.audio_root.mkdir()
     result = capture_loopback(config.audio_root / "test.wav", 1, lambda: order.append("ready"))
