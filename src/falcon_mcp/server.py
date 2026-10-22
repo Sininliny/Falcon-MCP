@@ -623,9 +623,11 @@ def create_server(config: Config | None = None) -> FastMCP:
         )
 
     from .advanced import register_advanced
+    from .capture_tools import register_capture
     from .design_tools import register_design
     from .knowledge_tools import register_knowledge
     from .listen_tools import register_listening
+    from .mix_tools import register_mix
     from .native_tools import register_native
     from .perf_tools import register_perf
     from .perform_tools import register_perform
@@ -647,6 +649,8 @@ def create_server(config: Config | None = None) -> FastMCP:
     register_ui_checks(mcp, cfg, audit, bridge, native_host)
     register_stems(mcp, cfg, audit, native_host)
     register_workflows(mcp, cfg, audit)
+    register_mix(mcp, cfg, audit)
+    register_capture(mcp, cfg, audit, bridge)
     # Last: every registered tool gets a result_scope block (see docs/result-scope.md).
     from .result_scope import install_result_scope
 

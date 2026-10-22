@@ -1,6 +1,6 @@
 # Performance rendering
 
-`falcon_native_render` plays notes only. A sound that is fine as a single note can still fail when it is
+`falcon_native_render` plays notes with optional controllers (see [mix and capture](mix-and-capture.md)). A sound that is fine as a single note can still fail when it is
 played: fast repeats click, legato joins dip, the pedal is ignored or cuts held keys, dense chords steal
 voices, the mod wheel does nothing, or a second MIDI channel is not routed. The performance tools render a
 timestamped timeline with notes **and** controllers in one offline pass of the owned VST3 session, then check

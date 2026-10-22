@@ -13,6 +13,8 @@ from .audio import read_audio
 from .diagnostics import diagnose
 from .listen import listen
 from .native_host import NativeHost
+from .perform import TimelineError, summarize, timeline_end
+from .perform_tools import ControllerEvent, render_timeline
 
 READ = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
 WRITE = {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False}
@@ -147,32 +149,57 @@ def register_native(mcp, config, audit):
         seconds: Annotated[float, Field(ge=1, le=30)] = 3,
         sample_rate: Literal[44100, 48000, 96000] = 48000,
         expected_revision: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")] | None = None,
+        controllers: Annotated[list[ControllerEvent], Field(max_length=256)] | None = None,
+        reset_controllers: bool = True,
+        buffer_size: Annotated[int, Field(ge=32, le=4096)] = 512,
     ) -> dict[str, Any]:
         """Render finite MIDI directly from the owned VST3 instance to a unique WAV plus objective meters.
 
         No loopback, microphone, audio-driver change or other application's audio. Channels are 1..16;
         the Multi's existing routing still determines which Parts sound. Allow at least 0.5 seconds tail.
         Does not play through speakers. Use reference comparison for iterative timbre matching.
+        controllers adds timed sustain pedal, CC (CC1 mod wheel, CC11, CC64...), pitch bend and pressure
+        events with the same schema as falcon_native_perform (time in seconds, optional ramp to+end);
+        reset_controllers clears pedal/bend and used CCs at t=0. With controllers the render also
+        writes a .mid of the exact timeline. For longer phrases and performance checks use falcon_native_perform.
         """
         if max(n.start_seconds + n.duration_seconds for n in notes) + 0.5 > seconds:
             raise ValueError("Allow the note sequence plus at least 0.5 seconds tail")
-        config.audio_root.mkdir(parents=True, exist_ok=True)
-        path = config.audio_path(f"native-{uuid.uuid4().hex}.wav", must_exist=False)
-        result = await host.request(session_id, "render", {
-            "path": str(path), "seconds": seconds, "sample_rate": sample_rate,
-            "notes": [n.model_dump() for n in notes],
-            "expected_revision": expected_revision,
-        })
-        audio, rate = await asyncio.to_thread(read_audio, path)
+        extra: dict[str, Any] = {}
+        if controllers:
+            timeline = [{"type": "note", "time": n.start_seconds, "note": n.note, "velocity": n.velocity,
+                         "duration": n.duration_seconds, "channel": n.channel} for n in notes]
+            timeline += [c.model_dump(exclude_none=True) for c in controllers]
+            if timeline_end(timeline) + 0.3 > seconds:
+                raise ValueError("Allow at least 0.3 s after the last controller event (raise seconds)")
+            try:
+                compiled, files, result, audio, rate, path = await render_timeline(
+                    host, config, session_id, timeline, seconds, sample_rate, buffer_size, reset_controllers,
+                    100, expected_revision, "render")
+            except TimelineError as exc:
+                raise ValueError(str(exc)) from exc
+            result = {**result, "path": str(path)}
+            extra = {"mid_path": files["mid_path"], "events": summarize(timeline, compiled)}
+        else:
+            config.audio_root.mkdir(parents=True, exist_ok=True)
+            path = config.audio_path(f"native-{uuid.uuid4().hex}.wav", must_exist=False)
+            result = await host.request(session_id, "render", {
+                "path": str(path), "seconds": seconds, "sample_rate": sample_rate,
+                "notes": [n.model_dump() for n in notes],
+                "expected_revision": expected_revision,
+            })
+            audio, rate = await asyncio.to_thread(read_audio, path)
         report = await asyncio.to_thread(diagnose, audio, rate)
         report.pop("envelope", None)
         # Single-pitch renders get tuning/ADSR context; chords and phrases get level/spectrum wording only.
-        single = len({n.note for n in notes}) == 1
+        # Pitch bend moves the pitch on purpose, so bent renders skip the tuning expectation.
+        bent = any(c.type == "pitch_bend" for c in controllers or [])
+        single = len({n.note for n in notes}) == 1 and not bent
         heard = await asyncio.to_thread(
             listen, audio, rate, notes[0].note if single else None,
             min(n.start_seconds for n in notes) if single else None,
             max(n.start_seconds + n.duration_seconds for n in notes) if single and len(notes) == 1 else None, False)
-        return {**result, "diagnostics": report, "listening": {
+        return {**result, **extra, "diagnostics": report, "listening": {
             "description": heard.get("description"), "findings": heard.get("findings"),
             "next": "falcon_listen(path) for ASCII views and full evidence; falcon_audio_diff to compare renders"}}
 

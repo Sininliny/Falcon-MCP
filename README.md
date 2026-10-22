@@ -134,7 +134,9 @@ The server exposes **56 tools**, structured schemas, the `falcon://capabilities`
 |---|---|
 | `falcon_status`, `falcon_setup`, `falcon_reconcile` | Connection, persistent deployment, uncertain-write recovery. |
 | `falcon_bind_instance`, `falcon_capture_status` | Pin inspected runtime/Program targets; observe recording readiness and completion. |
-| `falcon_native_host`, `falcon_native_file`, `falcon_native_edit`, `falcon_native_render`, `falcon_native_connections` | Own a separate VST3 session; native preset I/O, guarded parameter/connection edits and direct offline audio. |
+| `falcon_native_host`, `falcon_native_file`, `falcon_native_edit`, `falcon_native_render`, `falcon_native_connections` | Own a separate VST3 session; native preset I/O, guarded parameter/connection edits and direct offline audio (notes plus pedal/CC/bend controllers). |
+| `falcon_mix_context` | Render-over-backing check: per-band masking, presence, stereo position and levels. See [mix and capture](docs/mix-and-capture.md). |
+| `falcon_midi_capture`, `falcon_performance_profile` | Record the player's live MIDI in the open Falcon for offline replay (`falcon_native_perform(performance_path=...)`); velocity/pedal profile and touch curve. |
 | `falcon_build_instrument`, `falcon_accept_instrument`, `falcon_revision` | Controlled analog structures, role-specific acceptance, revision-bound publishing. |
 | `falcon_analyze_reference`, `falcon_compare_reference`, `falcon_audio_meter` | Import a reference time range, preserve the design goal, compare candidate evidence, inspect levels. |
 | `falcon_search_catalog`, `falcon_api_coverage` | Offline parameter/API indexes and runtime function probes. |
