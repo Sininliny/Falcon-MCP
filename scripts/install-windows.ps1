@@ -1,17 +1,18 @@
 <#
 .SYNOPSIS
-    Install or update Falcon MCP and its agent clients on Windows, best-effort and idempotent.
+    Install or update Falcon MCP and register it with the agent apps already on this PC, best-effort and
+    idempotent. The agent apps themselves (Claude Desktop, Claude Code, Codex) are never installed or updated.
 
 .DESCRIPTION
     Steps (each one is independent; a failure is reported and the next step still runs):
       1. Python 3.11+ (installed with winget only when none is found).
       2. Repository virtual environment .venv with falcon-mcp installed editable, plus extras.
       3. Runtime home <repo>\.runtime: FALCON_MCP_HOME user variable and "falcon_mcp prepare".
-      4. Codex CLI (npm package @openai/codex; Node.js LTS via winget when npm is missing).
-      5. Claude Code (claude update, or the official native installer when it is missing).
-      6. Agent skill skills\falcon-instrument-workflow: copied for Claude Code and Codex, and zipped
-         to .runtime\falcon-instrument-workflow.zip for upload in Claude Desktop.
-      7. MCP configuration for Claude Desktop, Claude Code and Codex (scripts\configure_clients.py).
+      4. Detect installed agents: Claude Desktop (profile folder), Claude Code (claude command,
+         ~/.claude.json or ~/.claude), Codex (codex command or ~/.codex). Missing agents are skipped.
+      5. Agent skill skills\falcon-instrument-workflow: copied for each detected Claude Code / Codex, and
+         zipped to .runtime\falcon-instrument-workflow.zip for upload in Claude Desktop.
+      6. MCP configuration for each detected agent (scripts\configure_clients.py).
     Every configuration file and replaced skill folder is backed up to .runtime\backups\<timestamp>
     before it changes. Run with -DryRun first to see what would happen without changing anything.
 
@@ -26,8 +27,9 @@ param(
     [string[]]$Extras = @('capture', 'host'),
     [string]$RuntimeHome,
     [switch]$SkipPython,
-    [switch]$SkipCodex,
+    [switch]$SkipClaudeDesktop,
     [switch]$SkipClaudeCode,
+    [switch]$SkipCodex,
     [switch]$SkipSkill,
     [switch]$SkipConfig,
     [switch]$NoWinget,
@@ -227,42 +229,39 @@ Invoke-Step 'Runtime home and bridge files' {
     'prepared'
 }
 
-if ($SkipCodex) { Skip-Step 'Codex CLI' '-SkipCodex' } else {
-    Invoke-Step 'Codex CLI' {
-        if (-not (Test-Command 'npm')) { Install-WithWinget 'OpenJS.NodeJS.LTS' }
-        if (-not $DryRun -and -not (Test-Command 'npm')) { throw 'npm is still not on PATH; open a new terminal and rerun' }
-        Invoke-Native 'npm' @('install', '--global', '@openai/codex@latest')
-        if (-not $DryRun) { Update-SessionPath; "codex $(Get-NativeText 'codex' @('--version'))" }
+$ClaudeRoot = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE '.claude' }
+$ClaudeJson = if ($env:CLAUDE_CONFIG_DIR) { Join-Path $env:CLAUDE_CONFIG_DIR '.claude.json' } else { Join-Path $env:USERPROFILE '.claude.json' }
+$CodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
+$DesktopConfigs = @()
+$HasClaudeCode = $false
+$HasCodex = $false
+Invoke-Step 'Detect installed agents' {
+    $found = @()
+    if (-not $SkipClaudeDesktop) {
+        $script:DesktopConfigs = @(Get-ClaudeDesktopConfigs)
+        if ($script:DesktopConfigs.Count -gt 0) { $found += "Claude Desktop ($($script:DesktopConfigs.Count) profile(s))" }
     }
-}
-
-if ($SkipClaudeCode) { Skip-Step 'Claude Code' '-SkipClaudeCode' } else {
-    Invoke-Step 'Claude Code' {
-        if (-not (Test-Command 'git')) {
-            Write-Info 'Git for Windows is missing; Claude Code uses its Bash tool when available.'
-            try { Install-WithWinget 'Git.Git' } catch { Write-Info "skipped Git install: $($_.Exception.Message)" }
-        }
-        if (Test-Command 'claude') {
-            Invoke-Native 'claude' @('update')
-        } else {
-            $installer = 'irm https://claude.ai/install.ps1 | iex'
-            Invoke-Native 'powershell.exe' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $installer)
-            if (-not $DryRun) {
-                Update-SessionPath
-                $local = Join-Path $env:USERPROFILE '.local\bin'
-                if ((Test-Path $local) -and ($env:Path -notlike "*$local*")) { $env:Path = "$env:Path;$local" }
-            }
-        }
-        if (-not $DryRun) { "claude $(Get-NativeText 'claude' @('--version'))" }
+    if (-not $SkipClaudeCode) {
+        # Claude Desktop's built-in Code mode also uses ~/.claude, so the folder counts without the CLI.
+        $script:HasClaudeCode = (Test-Command 'claude') -or (Test-Path $ClaudeJson) -or (Test-Path $ClaudeRoot)
+        if ($script:HasClaudeCode) { $found += 'Claude Code' }
     }
+    if (-not $SkipCodex) {
+        $script:HasCodex = (Test-Command 'codex') -or (Test-Path $CodexHome)
+        if ($script:HasCodex) { $found += 'Codex' }
+    }
+    foreach ($item in $found) { Write-Info "found: $item" }
+    if ($found.Count -eq 0) { Write-Info 'no supported agent found; only the server package was installed' }
+    $(if ($found.Count -gt 0) { $found -join ', ' } else { 'none' })
 }
 
 if ($SkipSkill) { Skip-Step 'Agent skill' '-SkipSkill' } else {
     Invoke-Step 'Agent skill' {
         if (-not (Test-Path (Join-Path $SkillSource 'SKILL.md'))) { throw "missing $SkillSource\SKILL.md" }
-        $claudeRoot = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE '.claude' }
-        Install-Skill (Join-Path $claudeRoot 'skills') 'claude-code'
-        Install-Skill (Join-Path $env:USERPROFILE '.agents\skills') 'codex'
+        $done = @()
+        if ($HasClaudeCode) { Install-Skill (Join-Path $ClaudeRoot 'skills') 'claude-code'; $done += 'Claude Code' }
+        if ($HasCodex) { Install-Skill (Join-Path $env:USERPROFILE '.agents\skills') 'codex'; $done += 'Codex' }
+        if ($DesktopConfigs.Count -eq 0) { return "$($done -join ', ')" }
         $zip = Join-Path $RuntimeHome "$SkillName.zip"
         if ($DryRun) { Write-Plan "build $zip for Claude Desktop upload"; return }
         if (-not (Test-Path $VenvPython)) { throw '.venv is missing; cannot build the skill ZIP' }
@@ -271,27 +270,24 @@ if ($SkipSkill) { Skip-Step 'Agent skill' '-SkipSkill' } else {
         # Python's zipfile writes forward-slash entry names; Windows PowerShell 5.1 Compress-Archive does not.
         Invoke-Native $VenvPython @('-m', 'zipfile', '-c', $zip, $SkillSource) -Always
         Write-Info "Claude Desktop: Customize > Skills > Add skill > Upload a skill, then pick $zip"
-        'copied for Claude Code and Codex; ZIP built for Claude Desktop'
+        (@($done) + @('ZIP for Claude Desktop')) -join ', '
     }
 }
 
 if ($SkipConfig) { Skip-Step 'MCP client configuration' '-SkipConfig' } else {
     Invoke-Step 'MCP client configuration' {
+        if (-not ($DesktopConfigs.Count -or $HasClaudeCode -or $HasCodex)) { return 'no agent to configure' }
         if ($DryRun -and -not (Test-Path $VenvPython)) { Write-Plan 'merge falcon entries once .venv exists'; return }
         if (-not (Test-Path $VenvPython)) { throw '.venv is missing; the package step must succeed first' }
         $arguments = @((Join-Path $Repo 'scripts\configure_clients.py'), '--python', $VenvPython, '--home', $RuntimeHome,
             '--repo', $Repo, '--backup-dir', $BackupDir)
         if (Test-Path $AudioPython) { $arguments += @('--audio-python', $AudioPython) }
-        $desktop = @(Get-ClaudeDesktopConfigs)
-        if ($desktop.Count -eq 0) { Write-Info 'Claude Desktop profile not found; skipping its config' }
-        foreach ($path in $desktop) { $arguments += @('--claude-desktop', $path) }
-        $claudeJson = if ($env:CLAUDE_CONFIG_DIR) { Join-Path $env:CLAUDE_CONFIG_DIR '.claude.json' } else { Join-Path $env:USERPROFILE '.claude.json' }
-        $arguments += @('--claude-code', $claudeJson)
-        $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
-        $arguments += @('--codex', (Join-Path $codexHome 'config.toml'))
+        foreach ($path in $DesktopConfigs) { $arguments += @('--claude-desktop', $path) }
+        if ($HasClaudeCode) { $arguments += @('--claude-code', $ClaudeJson) }
+        if ($HasCodex) { $arguments += @('--codex', (Join-Path $CodexHome 'config.toml')) }
         if ($DryRun) { $arguments += '--dry-run' }
         Invoke-Native $VenvPython $arguments -Always
-        'Claude Desktop, Claude Code and Codex entries checked'
+        'falcon entries merged for the detected agents'
     }
 }
 
@@ -299,7 +295,7 @@ Write-Host ''
 Write-Host 'Summary' -ForegroundColor Green
 $Results | Format-Table -AutoSize -Wrap | Out-String -Width 160 | Write-Host
 if (-not $DryRun -and (Test-Path $BackupDir)) { Write-Host "Backups: $BackupDir" }
-Write-Host 'Next: fully quit and reopen Claude Desktop, Codex and Claude Code, then call falcon_status.'
+Write-Host 'Next: fully quit and reopen the configured agent apps, then call falcon_status.'
 Write-Host 'The Master bridge inside Falcon is a one-time manual step: see docs/one-time-setup.md.'
 if (@($Results | Where-Object { $_.Status -eq 'failed' }).Count -gt 0) { exit 1 }
 exit 0

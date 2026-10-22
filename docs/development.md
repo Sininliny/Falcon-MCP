@@ -11,7 +11,7 @@ This guide is for people (and agents) changing Falcon MCP itself. Users installi
 | UVI Falcon | **27.0.2** (Falcon 2027), Windows standalone and VST3 | The only build with live acceptance records. Write it exactly `27.0.2`, as shown in Falcon's About box; `scripts/check_versions.py --strict` flags the misspelling with dots moved. |
 | Python | 3.11+ (CI and local use 3.12) | `tomllib` and modern typing are required. |
 | MCP SDK | `mcp>=1.26,<2` (FastMCP) | stdio transport only; the server opens no network listener. |
-| Clients | Claude Desktop, Claude Code, Codex CLI | All start their own stdio server from the repository `.venv`. |
+| Clients | Claude Desktop, Claude Code, Codex | All start their own stdio server from the repository `.venv`. |
 
 When a new Falcon build ships, treat it as unvalidated until the live checks in [Live validation](#live-validation) pass on it, then update this table, the README and [validation records](validation.md). The native state adapter (`native_state.py`) checks Falcon's version and is the most likely part to need changes.
 
@@ -121,12 +121,12 @@ Separate evidence levels. A passing unit test is not a live result, and a live r
 
 ## Windows installer
 
-`install-windows.cmd` (double-click, or run from a terminal with arguments) calls `scripts/install-windows.ps1`. It is best-effort and idempotent: each step reports `ok`, `failed`, `skipped` or `planned`, and rerunning it updates in place.
+`install-windows.cmd` (double-click, or run from a terminal with arguments) calls `scripts/install-windows.ps1`. It installs or updates Falcon MCP and registers it with the agent apps **already installed** on the PC; it never installs or updates Claude Desktop, Claude Code or Codex themselves. It is best-effort and idempotent: each step reports `ok`, `failed`, `skipped` or `planned`, and rerunning it updates in place.
 
 ```powershell
 .\install-windows.cmd -DryRun                  # show every action and config diff, change nothing
 .\install-windows.cmd                          # install or update everything
-.\install-windows.cmd -Extras capture,host,feedback -SkipCodex
+.\install-windows.cmd -Extras capture,host,feedback -SkipCodex   # -SkipClaudeDesktop / -SkipClaudeCode too
 ```
 
 | Step | What it does |
@@ -134,10 +134,9 @@ Separate evidence levels. A passing unit test is not a live result, and a live r
 | Python | Finds Python 3.11+ (`py` launcher or `python`); installs Python 3.12 with winget only if none is found. |
 | Package | Creates `.venv` if missing, then `pip install -e ".[capture,host]"` (change with `-Extras`). Satisfied dependencies are not upgraded, so a running server's DLLs stay untouched. |
 | Runtime home | Sets the user variable `FALCON_MCP_HOME=<repo>\.runtime` (skip with `-NoUserEnv`) and runs `falcon_mcp prepare`. |
-| Codex CLI | `npm install --global @openai/codex@latest`; installs Node.js LTS with winget if npm is missing. |
-| Claude Code | `claude update`, or the official native installer (`irm https://claude.ai/install.ps1 \| iex`) when `claude` is missing. Offers Git for Windows if absent. |
-| Skill | Copies `skills/falcon-instrument-workflow` to `%USERPROFILE%\.claude\skills` (Claude Code) and `%USERPROFILE%\.agents\skills` (Codex), and builds `.runtime\falcon-instrument-workflow.zip`. Claude Desktop account skills cannot be installed from disk: upload the ZIP under **Customize > Skills**. |
-| MCP config | `scripts/configure_clients.py` merges the `falcon` entry into every Claude Desktop profile found (`%APPDATA%\Claude` and Microsoft Store profiles), `%USERPROFILE%\.claude.json` (Claude Code user scope) and `%USERPROFILE%\.codex\config.toml`. Other servers and settings, and unmanaged env keys such as `FALCON_AUDIO_PYTHON`, are preserved. `.audio-venv` is used as `FALCON_AUDIO_PYTHON` when present and no value is set. |
+| Detect agents | Claude Desktop: a profile folder under `%APPDATA%\Claude` or a Microsoft Store `Claude_*` package. Claude Code: the `claude` command, `%USERPROFILE%\.claude.json` or `%USERPROFILE%\.claude` (Claude Desktop's built-in Code mode uses these too). Codex: the `codex` command or `%USERPROFILE%\.codex`. Agents not found are skipped. |
+| Skill | For each detected agent, copies `skills/falcon-instrument-workflow` to `%USERPROFILE%\.claude\skills` (Claude Code) or `%USERPROFILE%\.agents\skills` (Codex), and builds `.runtime\falcon-instrument-workflow.zip`. Claude Desktop account skills cannot be installed from disk: upload the ZIP under **Customize > Skills**. |
+| MCP config | `scripts/configure_clients.py` merges the `falcon` entry into each detected agent's config: every Claude Desktop profile, `%USERPROFILE%\.claude.json` (Claude Code user scope) and `%USERPROFILE%\.codex\config.toml`. Other servers and settings, and unmanaged env keys such as `FALCON_AUDIO_PYTHON`, are preserved. `.audio-venv` is used as `FALCON_AUDIO_PYTHON` when present and no value is set. |
 
 Before changing a config file or replacing a skill folder, the installer copies it to `.runtime\backups\<timestamp>\`; unchanged files are neither backed up nor rewritten. To roll back, copy the backup over the original. `CLAUDE_CONFIG_DIR` and `CODEX_HOME` are honored.
 

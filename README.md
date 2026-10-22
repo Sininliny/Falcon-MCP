@@ -6,7 +6,7 @@ Two explicit contexts: the Lua bridge controls an open standalone/DAW instance; 
 
 ## Installation
 
-On Windows, `install-windows.cmd` in the repository root installs or updates the server package, Codex CLI, Claude Code, the agent skill and the MCP entries for Claude Desktop, Claude Code and Codex in one run, with config backups; start with `install-windows.cmd -DryRun`. See the [developer guide](docs/development.md#windows-installer) for details. The Falcon-side Master bridge remains a one-time manual step.
+On Windows, `install-windows.cmd` in the repository root installs or updates the server package and registers the agent skill and MCP entry with whichever of Claude Desktop, Claude Code and Codex is already installed (it does not install those apps), with config backups; start with `install-windows.cmd -DryRun`. See the [developer guide](docs/development.md#windows-installer) for details. The Falcon-side Master bridge remains a one-time manual step.
 
 Use the [installation procedure and precautions](docs/one-time-setup.md) for dependencies, Codex configuration, migration, restart verification, updates, and recovery.
 
