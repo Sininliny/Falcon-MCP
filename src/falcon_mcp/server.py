@@ -593,6 +593,7 @@ def create_server(config: Config | None = None) -> FastMCP:
                 "realtime_performance": {"status": "implemented_unvalidated", "scope": "Owned-host block timing and static cost model (falcon_native_perf_benchmark, falcon_perf_static); not the standalone CPU meter"},
                 "ui_checks": {"status": "implemented_unvalidated", "scope": "Static control-tree/mouse-blocking/contrast checks, live probe and native save/reload round trip (falcon_ui_check, falcon_ui_live_probe, falcon_native_ui_roundtrip); real mouse input is not tested"},
                 "performance_rendering": {"status": "implemented_unvalidated", "scope": "Owned-host offline render of timestamped notes/CC64/CC/bend/pressure on channels 1..16, canned phrases and performance checks (falcon_native_perform, falcon_native_perform_suite, falcon_perform_analyze); not realtime, not external MIDI input"},
+                "sample_audit": {"status": "implemented_unvalidated", "scope": "Static preset mapping plus DSP on referenced sample files: sampling interval, velocity layers, per-layer normalization, truncation, channel layout, noise floor, recordings shared across presets (falcon_sample_audit); not loops, release samples or UFS soundbanks"},
                 "layer_stems": {"status": "implemented_unvalidated", "scope": "Owned-host per-layer solo/without/dry renders with guarded restore and contribution analysis (falcon_native_stems, falcon_stem_analyze)"},
                 "text_listening": {"status": "implemented", "scope": "Deterministic DSP reports for agents without audio input; heuristics, not perceptual verdicts"},
                 "reference_segments": {"status": "implemented", "scope": "Explicit local audio range, no source separation; level-normalized measurement hypotheses"},
@@ -630,6 +631,7 @@ def create_server(config: Config | None = None) -> FastMCP:
     from .perf_tools import register_perf
     from .perform_tools import register_perform
     from .reference_tools import register_reference
+    from .sample_audit_tools import register_sample_audit
     from .stem_tools import register_stems
     from .sweep_tools import register_sweeps
     from .ui_tools import register_ui_checks
@@ -644,6 +646,7 @@ def create_server(config: Config | None = None) -> FastMCP:
     register_sweeps(mcp, cfg, audit, native_host)
     register_perform(mcp, cfg, audit, native_host)
     register_perf(mcp, cfg, audit, native_host)
+    register_sample_audit(mcp, cfg)
     register_ui_checks(mcp, cfg, audit, bridge, native_host)
     register_stems(mcp, cfg, audit, native_host)
     register_workflows(mcp, cfg, audit)

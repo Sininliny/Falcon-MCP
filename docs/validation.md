@@ -117,3 +117,7 @@ With Watch off, a full Falcon restart required zero subsequent GUI input: Master
 `smoke_bootstrap.py` exercised extension publication, onSave/onLoad delegation, rejected-source fallback and recovery through real stdio; `finally` restored the extension and the model stayed unloaded. Evidence: `.runtime/acceptance-bootstrap-extension.json`.
 
 `smoke_v2.py` passed on the migrated project: 33 nodes, 269 parameters, six modulation connections, complete scans, UML, diagnostics, voices, MIDI and three log sources. This was a different project from the earlier Analog Poly test. State-file API version 23 was verified on Falcon 27.0.2; other hosts/versions remain unverified.
+
+## Sample audit analysis check (2026-10-22, unreleased)
+
+`falcon_sample_audit` analysis code (`sample_audit.py`) ran against the six Nordic November v3.0.3 `.uvip` presets (101 to 341 keygroups, 764 unique 48 kHz 24-bit WAVs, 1.2 GB) in a Linux shell on the user's machine, with a PCM WAV reader standing in for libsndfile. 25 s for the first call, about 21 KB of summary output. It reported, without manual help: the three grands share 248 identical sample files; the CP80 and Wurlitzer velocity layers are each normalized to full scale with no gain compensation; the Pianet T layers are level-matched; most "Modes" and grand samples end with a fade before their decay ends. Level: minimally verified for the analysis core. Not yet run through the MCP server on Windows, so tool registration, result scope and Windows path handling are covered by unit tests only.
