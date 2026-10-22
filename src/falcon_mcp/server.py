@@ -593,7 +593,7 @@ def create_server(config: Config | None = None) -> FastMCP:
                 "realtime_performance": {"status": "implemented_unvalidated", "scope": "Owned-host block timing and static cost model (falcon_native_perf_benchmark, falcon_perf_static); not the standalone CPU meter"},
                 "ui_checks": {"status": "implemented_unvalidated", "scope": "Static control-tree/mouse-blocking/contrast checks, live probe and native save/reload round trip (falcon_ui_check, falcon_ui_live_probe, falcon_native_ui_roundtrip); real mouse input is not tested"},
                 "performance_rendering": {"status": "implemented_unvalidated", "scope": "Owned-host offline render of timestamped notes/CC64/CC/bend/pressure on channels 1..16, canned phrases and performance checks (falcon_native_perform, falcon_native_perform_suite, falcon_perform_analyze); not realtime, not external MIDI input"},
-                "layer_stems": {"status": "implemented_unvalidated", "scope": "Owned-host per-layer solo/without/dry renders with guarded restore and contribution analysis (falcon_native_stems, falcon_stem_analyze)"},
+                "layer_stems": {"status": "implemented_unvalidated", "scope": "Owned-host per-layer solo/without/dry renders with guarded restore and contribution analysis (falcon_native_stems, falcon_native_stems_result, falcon_stem_analyze); long runs continue as background jobs"},
                 "text_listening": {"status": "implemented", "scope": "Deterministic DSP reports for agents without audio input; heuristics, not perceptual verdicts"},
                 "reference_segments": {"status": "implemented", "scope": "Explicit local audio range, no source separation; level-normalized measurement hypotheses"},
             },

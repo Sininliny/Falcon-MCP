@@ -1,4 +1,6 @@
+import asyncio
 import json
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -307,3 +309,97 @@ async def test_phrase_timeline_is_passed_through_and_unpatched_worker_is_refused
     with pytest.raises(RuntimeError, match="midi_sha256"):
         await tools(config, old)["falcon_native_stems"](session_id=SESSION, phrase="legato")
     assert old.revision() == before
+
+
+class SlowHost(FakeHost):
+    """Renders take wall-clock time, like a real Falcon render, so the run outlives a short wait."""
+
+    def __init__(self, delay=0.05, **kwargs):
+        super().__init__(**kwargs)
+        self.delay = delay
+
+    async def request(self, session_id, op, args):
+        if op == "render":
+            await asyncio.sleep(self.delay)
+        return await super().request(session_id, op, args)
+
+
+def stem_tools_with_result(config, host):
+    mcp = FastMCP("stem-test")
+    register_stems(mcp, config, AuditLog(config.log_root), host)
+    return {name: mcp._tool_manager.get_tool(name).fn
+            for name in ("falcon_native_stems", "falcon_native_stems_result")}
+
+
+# The user's call that hit "Request timed out": six overlapping notes in a 5 s render.
+TIMEOUT_NOTES = [{"note": 48, "velocity": 80, "start_seconds": 0.1, "duration_seconds": 1.6},
+                 {"note": 55, "velocity": 76, "start_seconds": 0.12, "duration_seconds": 1.6},
+                 {"note": 64, "velocity": 84, "start_seconds": 0.14, "duration_seconds": 1.6},
+                 {"note": 72, "velocity": 100, "start_seconds": 0.6, "duration_seconds": 0.35},
+                 {"note": 71, "velocity": 90, "start_seconds": 1.0, "duration_seconds": 0.35},
+                 {"note": 67, "velocity": 96, "start_seconds": 1.4, "duration_seconds": 0.9}]
+
+
+@pytest.mark.asyncio
+async def test_long_stems_run_returns_before_client_timeout_and_is_collectable(config):
+    from falcon_mcp.native_tools import RenderNote
+
+    host = SlowHost(delay=0.2)
+    before = host.revision()
+    fns = stem_tools_with_result(config, host)
+    started = time.monotonic()
+    first = await fns["falcon_native_stems"](session_id=SESSION, notes=[RenderNote(**n) for n in TIMEOUT_NOTES],
+                                             seconds=5, wait_seconds=0.3)
+    assert time.monotonic() - started < 2
+    assert first["status"] == "running" and first["job_id"].startswith("stems-")
+    assert first["renders_total"] == 10 and first["renders_done"] < 10
+    with pytest.raises(ValueError, match="already in progress"):
+        await fns["falcon_native_stems"](session_id=SESSION, notes=[RenderNote(**TIMEOUT_NOTES[0])])
+    result = first
+    for _ in range(100):
+        result = await fns["falcon_native_stems_result"](job_id=first["job_id"], wait_seconds=1)
+        if result["status"] == "done":
+            break
+    assert result["status"] == "done" and len(result["renders"]) == 10
+    assert result["scope"]["restored"] and result["scope"]["revision_unchanged"]
+    assert host.revision() == before
+
+
+@pytest.mark.asyncio
+async def test_client_timeout_does_not_cancel_the_run_or_skip_restore(config):
+    from falcon_mcp.native_tools import RenderNote
+
+    host = SlowHost(delay=0.1)
+    before = host.revision()
+    fns = stem_tools_with_result(config, host)
+    # A client that gives up cancels the request handler; the job must keep going and restore every edit.
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(fns["falcon_native_stems"](
+            session_id=SESSION, notes=[RenderNote(**n) for n in NOTES], seconds=3.5), timeout=0.35)
+    job_id = next(p.name for p in config.audio_root.resolve().iterdir() if p.name.startswith("stems-"))
+    result = await fns["falcon_native_stems_result"](job_id=job_id, wait_seconds=30)
+    assert result["status"] == "done" and result["scope"]["restored"]
+    assert host.revision() == before and all(host.attr(s, "Mute") == "0" for s in LAYERS)
+
+
+def test_stem_analysis_skips_pitch_and_analyses_the_full_mix_once(monkeypatch):
+    from falcon_mcp import listen
+    from falcon_mcp.stem_tools import analyze_set
+
+    def no_pitch(*args, **kwargs):
+        raise AssertionError("stems only use robust features; pitch tracking is the slow part")
+
+    calls = []
+    real = listen.listen
+    monkeypatch.setattr(listen, "pitch_analysis", no_pitch)
+    monkeypatch.setattr(listen, "listen", lambda audio, *a, **k: calls.append(id(audio)) or real(audio, *a, **k))
+    windows = stems.note_windows_from_notes(TIMEOUT_NOTES)
+    time_ = np.arange(int(5 * RATE)) / RATE
+    body, hammer, modes = layer_signals(time_, windows, 0.003)
+    full = np.stack([body + hammer + modes] * 2, axis=1)
+    targets = [{"name": n, "without": full - np.stack([x] * 2, axis=1), "solo": np.stack([x] * 2, axis=1)}
+               for n, x in (("Body", body), ("Hammer", hammer), ("Modes", modes))]
+    out = analyze_set(RATE, windows, full, targets, full.copy(), full * 0.8, full * 0.9)
+    assert [t["name"] for t in out["targets"]] == ["Body", "Hammer", "Modes"]
+    # One report per loudness-matched "without" render (3 targets + dry + no_space) plus the full mix once.
+    assert len(calls) == 5 + 1

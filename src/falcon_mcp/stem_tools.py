@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from typing import Annotated, Any
 
@@ -22,6 +23,10 @@ Selector = Annotated[str, Field(min_length=1, max_length=1024)]
 
 MAX_TARGETS = 10
 MAX_READS = 300
+# MCP clients abort a call after ~60 s ("Request timed out"); a stems run is 10-24 renders plus analysis and
+# often takes longer, so it runs as a background job and the call returns before the client gives up.
+DEFAULT_WAIT_SECONDS = 40.0
+MAX_FINISHED_JOBS = 8
 # Containers that never hold sound sources or insert effects worth silencing.
 SKIP_TAGS = {"Connections", "SignalConnection", "Properties", "ControlSignalSources", "EventProcessors",
              "script", "ScriptData", "Options", "Children"}
@@ -182,20 +187,21 @@ def analyze_set(rate: int, windows: list[dict], full, targets: list[dict], repea
     repeat_info = stems.repeatability(full, repeat, rate) if repeat is not None else {
         "deterministic": None, "note": "No repeat render; residual metrics assume a deterministic instrument"}
     assumed = repeat_info if repeat is not None else {"deterministic": True}
-    rows = []
+    rows, cache = [], {}
     for target in targets:
         result = stems.contribution(full, target.get("without"), rate, windows, solo=target.get("solo"),
-                                    repeat=assumed)
+                                    repeat=assumed, cache=cache)
         rows.append({**{k: v for k, v in target.items() if k not in ("without", "solo")}, "contribution": result})
     out = {"repeatability": repeat_info, "targets": [_summary(r) for r in rows],
            "table": stems.ascii_table(rows) if rows else None}
     if dry is not None:
         out["effects"] = _summary({"name": "all insert effects + sends",
-                                   "contribution": stems.contribution(full, dry, rate, windows, repeat=assumed)})
+                                   "contribution": stems.contribution(full, dry, rate, windows, repeat=assumed,
+                                                                      cache=cache)})
     if no_space is not None:
         out["space_effects"] = _summary({"name": "space effects + sends",
                                          "contribution": stems.contribution(full, no_space, rate, windows,
-                                                                            repeat=assumed)})
+                                                                            repeat=assumed, cache=cache)})
     solos = {t["name"]: t["solo"] for t in targets if t.get("solo") is not None}
     out["stereo_origin"] = stems.stereo_origin(full, rate, dry=dry, no_space=no_space, solos=solos, windows=windows)
     findings = []
@@ -228,6 +234,29 @@ LIMITS = ("Signal measurements with heuristic wording, not a perceptual verdict.
 
 
 def register_stems(mcp, config, audit, host):
+    JOBS: dict[str, dict] = {}
+
+    async def wait_for_job(job_id: str, wait_seconds: float) -> dict:
+        """Return the finished report (or raise its error); after wait_seconds return a running status instead.
+
+        The job is never cancelled here: a client that times out or disconnects leaves it running so it still
+        restores every edit, and its result stays collectable with falcon_native_stems_result."""
+        job = JOBS.get(job_id)
+        if job is None:
+            raise ValueError(f"Unknown stems job {job_id!r}; it may belong to an earlier server process. "
+                             "Finished reports are saved under <home>/reports/<job_id>.stems.json")
+        task = job["task"]
+        await asyncio.wait({task}, timeout=wait_seconds)
+        if not task.done():
+            return {"status": "running", "job_id": job_id, **job["progress"],
+                    "elapsed_seconds": round(time.monotonic() - job["started"], 1),
+                    "next": f'Call falcon_native_stems_result(job_id="{job_id}") to wait for the report. '
+                            "Do not edit this native session until it finishes."}
+        finished = [k for k, v in JOBS.items() if v["task"].done() and k != job_id]
+        for old in finished[:-MAX_FINISHED_JOBS]:
+            JOBS.pop(old)
+        return {"status": "done", "job_id": job_id, **task.result()}
+
     def save(report: dict, run: str) -> str:
         config.report_root.mkdir(parents=True, exist_ok=True)
         destination = config.report_root / f"{run}.stems.json"
@@ -253,6 +282,7 @@ def register_stems(mcp, config, audit, host):
         buffer_size: Annotated[int, Field(ge=32, le=4096)] = 512,
         expected_revision: Revision | None = None,
         keep_audio: bool = True,
+        wait_seconds: Annotated[float, Field(ge=0, le=50)] = DEFAULT_WAIT_SECONDS,
     ) -> dict[str, Any]:
         """Render ONE performance many times in the OWNED VST3 session to hear what each layer really adds.
 
@@ -269,6 +299,9 @@ def register_stems(mcp, config, audit, host):
         Performance: notes (as falcon_native_render), events (perform timeline) or a phrase name
         (legato, retrigger, sustain_pedal, pedal_wash, dense_chords, polyphony, cross_channel, expression).
         Keeps WAV stems under the audio root for falcon_listen; nothing plays through speakers.
+        Runs as a background job: if it is not finished within wait_seconds (default 40, below the usual
+        60 s client timeout) it returns status "running" with a job_id; collect the report with
+        falcon_native_stems_result(job_id).
         """
         if sample_rate not in (44100, 48000, 96000):
             raise ValueError("sample_rate must be 44100, 48000 or 96000")
@@ -296,144 +329,172 @@ def register_stems(mcp, config, audit, host):
                 raise ValueError("Allow the note sequence plus at least 0.5 seconds tail")
         windows = _windows(notes_payload, events, seconds)
 
-        tree = await discover(host, session_id, part, include_master)
-        status = await host.request(session_id, "status", {})
-        initial = status["revision"]
-        if expected_revision and expected_revision != initial:
-            raise ValueError("Native revision changed; inspect before retrying")
-        by_selector = {n["selector"]: n for n in tree["nodes"]}
+        if any(job["session_id"] == session_id and not job["task"].done() for job in JOBS.values()):
+            raise ValueError("A stems run is already in progress for this session; collect it with "
+                             "falcon_native_stems_result first")
+        progress = {"stage": "discovering targets", "renders_done": 0, "renders_total": None}
 
-        def node_for(selector):
-            if selector not in by_selector:
-                raise ValueError(f"{selector} was not found under Part {part}; browse with falcon_native_edit")
-            return by_selector[selector]
+        async def job():
+            tree = await discover(host, session_id, part, include_master)
+            status = await host.request(session_id, "status", {})
+            initial = status["revision"]
+            if expected_revision and expected_revision != initial:
+                raise ValueError("Native revision changed; inspect before retrying")
+            by_selector = {n["selector"]: n for n in tree["nodes"]}
 
-        units = []
-        for group in groups or []:
-            units.append({"name": group.name, "nodes": [node_for(s) for s in group.selectors], "group": True})
-        for selector in targets or ([] if groups else [n["selector"] for n in tree["layers"]]):
-            node = node_for(selector)
-            units.append({"name": node["name"] or selector, "nodes": [node], "group": False})
-        if not units:
-            raise ValueError("No Layers found; pass targets or groups")
-        if len(units) > MAX_TARGETS:
-            raise ValueError(f"At most {MAX_TARGETS} targets per run")
-        for unit in units:
-            unit["changes"] = []
-            for node in unit["nodes"]:
-                change = silence_change(node)
-                if change is None:
-                    raise ValueError(f"{node['selector']} ({node['type']}) has no writable Mute/Bypass/Gain")
-                kind = next(d["type"] for d in node["indexed_definitions"] if d["name"] == change[0])
-                unit["changes"].append((node["selector"], change[0], change[1], kind))
-            unit["is_effect"] = all(n["category"] in ("FX", "Legacy") for n in unit["nodes"])
-        sources = [{"selector": n["selector"], "change": silence_change(n), "node": n} for n in tree["layers"]]
+            def node_for(selector):
+                if selector not in by_selector:
+                    raise ValueError(f"{selector} was not found under Part {part}; browse with falcon_native_edit")
+                return by_selector[selector]
 
-        def solo_changes(unit):
-            own = [n["selector"] for n in unit["nodes"]]
-            out = []
-            for other in units:
-                if other is not unit and not other["is_effect"]:
-                    out += [c for c in other["changes"] if not any(_related(c[0], s) for s in own)]
-            for source in sources:
-                if source["change"] and not any(_related(source["selector"], s) for s in own) \
-                        and not any(c[0] == source["selector"] for c in out):
-                    kind = next(d["type"] for d in source["node"]["indexed_definitions"]
-                                if d["name"] == source["change"][0])
-                    out.append((source["selector"], *source["change"], kind))
-            return out
+            units = []
+            for group in groups or []:
+                units.append({"name": group.name, "nodes": [node_for(s) for s in group.selectors], "group": True})
+            for selector in targets or ([] if groups else [n["selector"] for n in tree["layers"]]):
+                node = node_for(selector)
+                units.append({"name": node["name"] or selector, "nodes": [node], "group": False})
+            if not units:
+                raise ValueError("No Layers found; pass targets or groups")
+            if len(units) > MAX_TARGETS:
+                raise ValueError(f"At most {MAX_TARGETS} targets per run")
+            for unit in units:
+                unit["changes"] = []
+                for node in unit["nodes"]:
+                    change = silence_change(node)
+                    if change is None:
+                        raise ValueError(f"{node['selector']} ({node['type']}) has no writable Mute/Bypass/Gain")
+                    kind = next(d["type"] for d in node["indexed_definitions"] if d["name"] == change[0])
+                    unit["changes"].append((node["selector"], change[0], change[1], kind))
+                unit["is_effect"] = all(n["category"] in ("FX", "Legacy") for n in unit["nodes"])
+            sources = [{"selector": n["selector"], "change": silence_change(n), "node": n} for n in tree["layers"]]
 
-        def defs(node, name):
-            return next((d["type"] for d in node["indexed_definitions"] if d["name"] == name and not d.get("readOnly")),
-                        None)
+            def solo_changes(unit):
+                own = [n["selector"] for n in unit["nodes"]]
+                out = []
+                for other in units:
+                    if other is not unit and not other["is_effect"]:
+                        out += [c for c in other["changes"] if not any(_related(c[0], s) for s in own)]
+                for source in sources:
+                    if source["change"] and not any(_related(source["selector"], s) for s in own) \
+                            and not any(c[0] == source["selector"] for c in out):
+                        kind = next(d["type"] for d in source["node"]["indexed_definitions"]
+                                    if d["name"] == source["change"][0])
+                        out.append((source["selector"], *source["change"], kind))
+                return out
 
-        sends = [(n["selector"], "Gain", 0, defs(n, "Gain")) for n in tree["sends"] if defs(n, "Gain")]
-        dry_changes = [(n["selector"], "BypassInsertFX", True, defs(n, "BypassInsertFX")) for n in tree["containers"]
-                       if "BypassInsertFX" in n["attributes"] and defs(n, "BypassInsertFX")] + sends
-        space_fx = [n for n in tree["effects"] if stems.is_space_fx(n["type"])]
-        space_changes = [(n["selector"], "Bypass", True, defs(n, "Bypass")) for n in space_fx if defs(n, "Bypass")] \
-            + sends + [(n["selector"], "Gain", 0, defs(n, "Gain")) for n in tree["aux_returns"] if defs(n, "Gain")]
+            def defs(node, name):
+                return next((d["type"] for d in node["indexed_definitions"] if d["name"] == name and not d.get("readOnly")),
+                            None)
 
-        plan = [("full", [])] + ([("repeat", [])] if check_repeat else [])
-        for i, unit in enumerate(units):
-            plan.append((f"without:{i}", unit["changes"]))
-            if not unit["is_effect"]:
-                plan.append((f"solo:{i}", solo_changes(unit)))
-        if include_dry:
-            plan.append(("dry", dry_changes))
-        if include_no_space:
-            plan.append(("no_space", space_changes))
-        if len(plan) > 2 + 2 * MAX_TARGETS + 2:
-            raise ValueError("Too many renders; reduce targets")
+            sends = [(n["selector"], "Gain", 0, defs(n, "Gain")) for n in tree["sends"] if defs(n, "Gain")]
+            dry_changes = [(n["selector"], "BypassInsertFX", True, defs(n, "BypassInsertFX")) for n in tree["containers"]
+                           if "BypassInsertFX" in n["attributes"] and defs(n, "BypassInsertFX")] + sends
+            space_fx = [n for n in tree["effects"] if stems.is_space_fx(n["type"])]
+            space_changes = [(n["selector"], "Bypass", True, defs(n, "Bypass")) for n in space_fx if defs(n, "Bypass")] \
+                + sends + [(n["selector"], "Gain", 0, defs(n, "Gain")) for n in tree["aux_returns"] if defs(n, "Gain")]
 
-        stem_dir.mkdir(parents=True, exist_ok=True)
-        audit.event("native_stems_start", session_id=session_id, run=run, renders=len(plan),
-                    targets=[u["name"] for u in units])
-        audio, rate, paths, renders, restore_log, failure = {}, None, {}, [], [], None
-        revision = initial
-        try:
-            for name, changes in plan:
-                patch = StatePatch(host, session_id, revision, audit)
-                try:
-                    applied = 0
-                    for selector, attribute, value, kind in changes:
-                        applied += await patch.set(selector, attribute, value, kind)
-                    path = stem_dir / f"{name.replace(':', '-')}.wav"
-                    result = await host.request(session_id, "render", {
-                        "path": str(path), "seconds": seconds, "sample_rate": sample_rate, "notes": notes_payload,
-                        **timeline, **({"buffer_size": buffer_size} if timeline else {}),
-                        "expected_revision": patch.revision})
-                    if timeline and result.get("midi_sha256") != timeline["midi_sha256"]:
-                        raise RuntimeError("The native worker did not confirm the event timeline (midi_sha256); "
-                                           "it predates event rendering. Use notes or update the worker")
-                    data, rate = await asyncio.to_thread(read_audio, path, 60)
-                    audio[name], paths[name] = data, str(path)
-                    renders.append({"render": name, "edits": applied, "peak": round(result.get("peak", 0.0), 5),
-                                    "path": str(path) if keep_audio else None})
-                finally:
-                    outcome = await patch.restore()
-                    revision = outcome["revision"]
-                    restore_log.append({"render": name, **outcome})
-                    if not keep_audio and name in paths:
-                        (stem_dir / f"{name.replace(':', '-')}.wav").unlink(missing_ok=True)
-                if not outcome["restored"]:
-                    raise RuntimeError(f"Restore failed after {name}: {outcome['errors']}")
-        except Exception as exc:  # noqa: BLE001 - report restore state with the failure
-            failure = exc
-        final = (await host.request(session_id, "status", {}))["revision"]
-        restored = all(r["restored"] for r in restore_log)
-        audit.event("native_stems_restore", session_id=session_id, run=run, restored=restored,
-                    revision_unchanged=final == initial)
-        if failure is not None:
-            raise RuntimeError(f"Stem run failed after {len(renders)} render(s): {failure}; restored: {restored}; "
-                               f"revision unchanged: {final == initial}") from failure
+            plan = [("full", [])] + ([("repeat", [])] if check_repeat else [])
+            for i, unit in enumerate(units):
+                plan.append((f"without:{i}", unit["changes"]))
+                if not unit["is_effect"]:
+                    plan.append((f"solo:{i}", solo_changes(unit)))
+            if include_dry:
+                plan.append(("dry", dry_changes))
+            if include_no_space:
+                plan.append(("no_space", space_changes))
+            if len(plan) > 2 + 2 * MAX_TARGETS + 2:
+                raise ValueError("Too many renders; reduce targets")
 
-        target_inputs = []
-        for i, unit in enumerate(units):
-            target_inputs.append({
-                "name": unit["name"], "selector": ", ".join(n["selector"] for n in unit["nodes"]),
-                "type": "group" if unit["group"] else unit["nodes"][0]["type"],
-                "silenced_with": [f"{c[1]}={c[2]}" for c in unit["changes"]],
-                "without": audio[f"without:{i}"], "solo": audio.get(f"solo:{i}"),
-                "paths": {k: paths[f"{k}:{i}"] for k in ("without", "solo") if f"{k}:{i}" in paths and keep_audio}})
-        analysis = await asyncio.to_thread(analyze_set, rate, windows, audio["full"], target_inputs,
-                                           audio.get("repeat"), audio.get("dry"), audio.get("no_space"))
-        report = {
-            "scope": {"environment": "Owned VST3 instance (not the standalone/DAW on screen)", "session_id": session_id,
-                      "part": part, "revision": initial, "revision_unchanged": final == initial,
-                      "restored": restored, "verified": "Stems rendered in this session; semantics of Mute/Bypass/"
-                      "BypassInsertFX taken from the official parameter index, not verified against live Falcon"},
-            "performance": {"seconds": seconds, "windows": windows[:32], "phrase": phrase,
-                            **({"midi_path": timeline["midi_path"]} if timeline else {})},
-            "renders": renders, "stem_dir": str(stem_dir) if keep_audio else None, **analysis,
-            "space_effects_found": [_describe(n) for n in space_fx],
-            "discovery": {"layers": [_describe(n) for n in tree["layers"]], "effects": [_describe(n) for n in tree["effects"]],
-                          "sends": len(tree["sends"]), "truncated": tree["truncated"]},
-            "restore_log": restore_log, "limitations": LIMITS,
-            "next": "falcon_listen(stem path) for one stem in detail; adjust one layer, then rerun to compare"}
-        report["report_path"] = save(report, run)
-        report.pop("restore_log")
-        return report
+            progress.update(stage="rendering", renders_total=len(plan))
+            stem_dir.mkdir(parents=True, exist_ok=True)
+            audit.event("native_stems_start", session_id=session_id, run=run, renders=len(plan),
+                        targets=[u["name"] for u in units])
+            audio, rate, paths, renders, restore_log, failure = {}, None, {}, [], [], None
+            revision = initial
+            try:
+                for name, changes in plan:
+                    progress["stage"] = f"rendering {name}"
+                    patch = StatePatch(host, session_id, revision, audit)
+                    try:
+                        applied = 0
+                        for selector, attribute, value, kind in changes:
+                            applied += await patch.set(selector, attribute, value, kind)
+                        path = stem_dir / f"{name.replace(':', '-')}.wav"
+                        result = await host.request(session_id, "render", {
+                            "path": str(path), "seconds": seconds, "sample_rate": sample_rate, "notes": notes_payload,
+                            **timeline, **({"buffer_size": buffer_size} if timeline else {}),
+                            "expected_revision": patch.revision})
+                        if timeline and result.get("midi_sha256") != timeline["midi_sha256"]:
+                            raise RuntimeError("The native worker did not confirm the event timeline (midi_sha256); "
+                                               "it predates event rendering. Use notes or update the worker")
+                        data, rate = await asyncio.to_thread(read_audio, path, 60)
+                        audio[name], paths[name] = data, str(path)
+                        renders.append({"render": name, "edits": applied, "peak": round(result.get("peak", 0.0), 5),
+                                        "path": str(path) if keep_audio else None})
+                        progress["renders_done"] = len(renders)
+                    finally:
+                        outcome = await patch.restore()
+                        revision = outcome["revision"]
+                        restore_log.append({"render": name, **outcome})
+                        if not keep_audio and name in paths:
+                            (stem_dir / f"{name.replace(':', '-')}.wav").unlink(missing_ok=True)
+                    if not outcome["restored"]:
+                        raise RuntimeError(f"Restore failed after {name}: {outcome['errors']}")
+            except Exception as exc:  # noqa: BLE001 - report restore state with the failure
+                failure = exc
+            final = (await host.request(session_id, "status", {}))["revision"]
+            restored = all(r["restored"] for r in restore_log)
+            audit.event("native_stems_restore", session_id=session_id, run=run, restored=restored,
+                        revision_unchanged=final == initial)
+            if failure is not None:
+                raise RuntimeError(f"Stem run failed after {len(renders)} render(s): {failure}; restored: {restored}; "
+                                   f"revision unchanged: {final == initial}") from failure
+
+            target_inputs = []
+            for i, unit in enumerate(units):
+                target_inputs.append({
+                    "name": unit["name"], "selector": ", ".join(n["selector"] for n in unit["nodes"]),
+                    "type": "group" if unit["group"] else unit["nodes"][0]["type"],
+                    "silenced_with": [f"{c[1]}={c[2]}" for c in unit["changes"]],
+                    "without": audio[f"without:{i}"], "solo": audio.get(f"solo:{i}"),
+                    "paths": {k: paths[f"{k}:{i}"] for k in ("without", "solo") if f"{k}:{i}" in paths and keep_audio}})
+            progress["stage"] = "analysing stems"
+            analysis = await asyncio.to_thread(analyze_set, rate, windows, audio["full"], target_inputs,
+                                               audio.get("repeat"), audio.get("dry"), audio.get("no_space"))
+            report = {
+                "scope": {"environment": "Owned VST3 instance (not the standalone/DAW on screen)", "session_id": session_id,
+                          "part": part, "revision": initial, "revision_unchanged": final == initial,
+                          "restored": restored, "verified": "Stems rendered in this session; semantics of Mute/Bypass/"
+                          "BypassInsertFX taken from the official parameter index, not verified against live Falcon"},
+                "performance": {"seconds": seconds, "windows": windows[:32], "phrase": phrase,
+                                **({"midi_path": timeline["midi_path"]} if timeline else {})},
+                "renders": renders, "stem_dir": str(stem_dir) if keep_audio else None, **analysis,
+                "space_effects_found": [_describe(n) for n in space_fx],
+                "discovery": {"layers": [_describe(n) for n in tree["layers"]], "effects": [_describe(n) for n in tree["effects"]],
+                              "sends": len(tree["sends"]), "truncated": tree["truncated"]},
+                "restore_log": restore_log, "limitations": LIMITS,
+                "next": "falcon_listen(stem path) for one stem in detail; adjust one layer, then rerun to compare"}
+            report["report_path"] = save(report, run)
+            report.pop("restore_log")
+            return report
+
+        task = asyncio.create_task(job())
+        JOBS[run] = {"task": task, "session_id": session_id, "progress": progress, "started": time.monotonic()}
+        return await wait_for_job(run, wait_seconds)
+
+
+    @mcp.tool(annotations=READ)
+    async def falcon_native_stems_result(
+        job_id: Annotated[str, Field(pattern=r"^stems-[a-f0-9]{12}$")],
+        wait_seconds: Annotated[float, Field(ge=0, le=50)] = DEFAULT_WAIT_SECONDS,
+    ) -> dict[str, Any]:
+        """Collect a falcon_native_stems run that returned status "running".
+
+        Waits up to wait_seconds (kept below the client's request timeout); returns the same report as
+        falcon_native_stems with status "done", raises the run's error if it failed, or returns status
+        "running" with progress (renders_done / renders_total) so you can call again.
+        """
+        return await wait_for_job(job_id, wait_seconds)
 
     @mcp.tool(annotations=READ)
     async def falcon_stem_analyze(

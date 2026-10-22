@@ -38,10 +38,10 @@ async def test_real_stdio_initialize_tools_resource_and_validation(config):
                 "falcon_param_lookup", "falcon_param_search", "falcon_param_value", "falcon_param_calibrate"} <= names
         assert {"falcon_native_perf_benchmark", "falcon_perf_static"} <= names
         assert {"falcon_ui_check", "falcon_ui_live_probe", "falcon_native_ui_roundtrip"} <= names
-        assert {"falcon_native_stems", "falcon_stem_analyze"} <= names
+        assert {"falcon_native_stems", "falcon_native_stems_result", "falcon_stem_analyze"} <= names
         assert {"falcon_perform_phrases", "falcon_native_perform", "falcon_native_perform_suite", "falcon_perform_analyze"} <= names
         assert "falcon_capabilities" in names
-        assert len(names) == 81
+        assert len(names) == 82
         assert (config.runtime / "falcon_bridge.lua").is_file()
         assert all(t.outputSchema is not None for t in tools.tools)
         capture = await client.call_tool("falcon_capture_status", {})
