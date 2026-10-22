@@ -6,6 +6,8 @@ Two explicit contexts: the Lua bridge controls an open standalone/DAW instance; 
 
 ## Installation
 
+On Windows, `install-windows.cmd` in the repository root installs or updates the server package, Codex CLI, Claude Code, the agent skill and the MCP entries for Claude Desktop, Claude Code and Codex in one run, with config backups; start with `install-windows.cmd -DryRun`. See the [developer guide](docs/development.md#windows-installer) for details. The Falcon-side Master bridge remains a one-time manual step.
+
 Use the [installation procedure and precautions](docs/one-time-setup.md) for dependencies, Codex configuration, migration, restart verification, updates, and recovery.
 
 Follow [manual initialization](docs/one-time-setup.md#manual-initialization) to load and start `falcon_bridge.lua` inside Falcon's Master Script Processor. After saving the Master launcher and configuring Codex, [automatic initialization](docs/one-time-setup.md#automatic-initialization) handles normal startup and runtime deployment.
@@ -195,6 +197,10 @@ Audit JSONL records include UTC timestamps, trace/session IDs, arguments/results
 See [0.3 validation and usage](docs/native-and-reference.md), [0.2.4 regression results](docs/changes-0.2.4.md), and [historical standalone acceptance](docs/validation.md). Automated tests, signature coverage and native compatibility remain separate evidence.
 
 License: [Apache-2.0](LICENSE).
+
+## Development
+
+Architecture, adding tools, versioning, tests/CI and live validation are described in the [developer guide](docs/development.md). The current target is Falcon 27.0.2.
 
 ## Agent skill and repository language
 
