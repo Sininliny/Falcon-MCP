@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, Stri
 
 from .audio import read_audio
 from .diagnostics import diagnose
+from .listen import listen
 from .native_host import NativeHost
 
 READ = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
@@ -162,6 +163,14 @@ def register_native(mcp, config, audit):
         audio, rate = await asyncio.to_thread(read_audio, path)
         report = await asyncio.to_thread(diagnose, audio, rate)
         report.pop("envelope", None)
-        return {**result, "diagnostics": report}
+        # Single-pitch renders get tuning/ADSR context; chords and phrases get level/spectrum wording only.
+        single = len({n.note for n in notes}) == 1
+        heard = await asyncio.to_thread(
+            listen, audio, rate, notes[0].note if single else None,
+            min(n.start_seconds for n in notes) if single else None,
+            max(n.start_seconds + n.duration_seconds for n in notes) if single and len(notes) == 1 else None, False)
+        return {**result, "diagnostics": report, "listening": {
+            "description": heard.get("description"), "findings": heard.get("findings"),
+            "next": "falcon_listen(path) for ASCII views and full evidence; falcon_audio_diff to compare renders"}}
 
     return host

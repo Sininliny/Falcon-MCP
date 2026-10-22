@@ -1,6 +1,8 @@
 # Installation and operating precautions
 
-Applies to Falcon MCP 0.4.0. This guide configures the open-instance Lua bridge. For the separate owned VST3 host and automated Program/Multi file operations, see [native hosting](native-and-reference.md). Persistent standalone startup was verified with 0.2.3; automatic bridge deployment passed with 0.4.0. Owned-host file I/O/rendering was verified with 0.3.0 and controlled build/acceptance/publishing with 0.4.0 on Windows Falcon 27.0.2. See [validation records](validation.md) for scope. Other versions/hosts require separate validation.
+Guide version: Falcon MCP server 0.5.0 (bridge 0.5.0).
+
+Applies to Falcon MCP 0.5.0; the setup steps are unchanged since 0.4.0. This guide configures the open-instance Lua bridge. For the separate owned VST3 host and automated Program/Multi file operations, see [native hosting](native-and-reference.md). Persistent standalone startup was verified with 0.2.3; automatic bridge deployment passed with 0.4.0. Owned-host file I/O/rendering was verified with 0.3.0 and controlled build/acceptance/publishing with 0.4.0 on Windows Falcon 27.0.2. See [validation records](validation.md) for scope. Other versions/hosts require separate validation.
 
 ## 1. Install the server
 

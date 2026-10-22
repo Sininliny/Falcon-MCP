@@ -203,13 +203,22 @@ local function forgetVoice(handle)
     for _,id in ipairs(voices) do if id~=entry.id then remaining[#remaining+1]=id end end
     voices=remaining;voiceHandles[handle]=nil
 end
-local function reserveVoice()
+local function pruneExpiredVoices()
     local expired={}
     for handle,entry in pairs(voiceHandles) do
         if entry.expires and getTime()>entry.expires then expired[#expired+1]=handle end
     end
     for _,handle in ipairs(expired) do forgetVoice(handle) end
+end
+local function reserveVoice()
+    pruneExpiredVoices()
     check(#voices<256,"Too many tracked voices; release handles or call panic")
+end
+-- Finished finite voices must not block runtime deployment until the next voice request.
+local coreCanReload=falcon_can_reload
+function falcon_can_reload()
+    pcall(pruneExpiredVoices) -- getTime can be unavailable outside the audio context
+    return coreCanReload()
 end
 local function storeVoice(id,duration)
     if id==nil then return nil end
@@ -268,7 +277,11 @@ function handlers.post_event(a)
     if not existing and a.event.type==144 then reserveVoice() end
     if existing~=nil then a.event.id=nativeVoice(existing) end
     local id=postEvent(a.event,a.delta)
-    if existing~=nil then return {posted=true,voice_id=existing} end
+    if existing~=nil then
+        -- A posted NoteOff ends the tracked voice; otherwise it blocks reload until panic.
+        if a.event.type==128 then forgetVoice(existing) end
+        return {posted=true,voice_id=existing}
+    end
     return {posted=true,voice_id=storeVoice(id,nil)}
 end
 mutations.post_event=true

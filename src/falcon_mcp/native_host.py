@@ -12,7 +12,14 @@ from pathlib import Path
 from .async_utils import join_cleanup
 
 
+class NativeProtocolError(RuntimeError):
+    """The reply stream no longer matches the request; the session state is unknown."""
+
+
 class NativeHost:
+    # Edit replies carry indexed definitions twice (read + readback); Arpeggiator alone is ~90 KB.
+    stream_limit = 16 * 1024 * 1024
+
     def __init__(self, config, audit):
         self.config, self.audit = config, audit
         self.process = None
@@ -47,6 +54,7 @@ class NativeHost:
                 sys.executable, "-m", "falcon_mcp.native_worker", "supervise",
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL, env=env, creationflags=0x08000000,
+                limit=self.stream_limit,
             ))
             try:
                 self.process = await asyncio.shield(launch)
@@ -100,12 +108,13 @@ class NativeHost:
                 line = await asyncio.wait_for(self.process.stdout.readline(), 120)
                 result = json.loads(line)
                 if result.get("id") != identifier or result.get("session_id") != session_id:
-                    raise RuntimeError("Native response identity mismatch")
+                    raise NativeProtocolError("Native response identity mismatch")
                 if not result.get("ok"):
                     raise RuntimeError(result.get("error", "Native operation failed"))
                 self.audit.event("native_result", request_id=identifier, result=result["result"])
                 return result["result"]
-            except (asyncio.CancelledError, TimeoutError, BrokenPipeError, json.JSONDecodeError):
+            # ValueError covers JSONDecodeError and an over-limit line; OSError covers broken/reset pipes.
+            except (asyncio.CancelledError, TimeoutError, OSError, ValueError, NativeProtocolError):
                 self.audit.event("native_outcome_unknown", request_id=identifier, op=op)
                 await join_cleanup(asyncio.create_task(self._close()))
                 raise  # Never retry a possibly completed save or edit automatically.

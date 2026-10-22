@@ -5,6 +5,8 @@ description: Build, edit, render, accept, and publish UVI Falcon instruments wit
 
 # Falcon instrument workflow
 
+Guide version: Falcon MCP server 0.5.0 (bridge 0.5.0). If `result_scope.versions.server` in a tool result differs, this guide may be stale.
+
 Keep four deliverables distinct: instrument sound, performance routing, library presentation, and the local MCP environment. A working Multi does not establish that each standalone Program or portable library is complete.
 
 ## Choose the execution context
@@ -12,6 +14,10 @@ Keep four deliverables distinct: instrument sound, performance routing, library 
 - For automated load/save and repeatable audio rendering, use `falcon_native_host`, `falcon_native_file`, `falcon_native_edit`, and `falcon_native_render`. They control a separate owned VST3 instance, guarded by its returned `session_id`, without opening an editor or driving the desktop. Read [native sessions and reference matching](references/native-and-reference.md) before using this path.
 - For the already-open standalone/DAW instance, use the Lua bridge workflow below. Native-host tools cannot capture its unsaved state. Never assume the two contexts contain the same Program. Public Lua Program/Multi save/load remains unavailable.
 - For an uploaded/local reference, `falcon_analyze_reference` selects exact timestamps and preserves the target instrument and requested changes. `falcon_compare_reference` compares subsequent renders/captures; `falcon_audio_meter` provides compact level evidence. These tools support agents without native audio input. Read the same reference for interpretation limits.
+
+## Read result_scope first
+
+Every tool result starts with `result_scope`. Read it before the payload: `env` says which Falcon (or none) the call touched, `target` names the instance/session, Programs and state or file hashes, `checked` says what was verified and `not_checked` what was not. A successful write with `not_checked: [audible_effect, ui_display, saved_to_file]` means exactly that. API items carry `status.level` (indexed < callable < minimal_behavior_verified < production_verified); parameter results carry `units` with encoding and an explicit `unbounded` flag; MIDI results carry `channel_base` and the injection point; acceptance results list per-scope pass/untested; native saves list referenced and unresolved resources. Codes are defined in `falcon://result-scope`.
 
 ## Connect to the intended instrument
 
@@ -32,7 +38,9 @@ For guarded modulation, template structure creation, audio acceptance and immuta
 - UI/event logic: use trusted Lua extensions within public API limits. Preserve saved control state; opening a panel must not reset a patch. Forward each incoming MIDI event once, preserving channel/port and note/release identity. Check repeated same-note presses, overlapping channels/ports, sustain, releases and All Notes Off.
 - Capability questions: read `falcon://capabilities` and `falcon_api_coverage`. Signature mappings/function existence, implemented tools, automated tests and native acceptance are different evidence.
 
-For sound design, macros and release packaging, read [production guidance](references/production.md) only when needed.
+For sound design, macros and release packaging, read [production guidance](references/production.md) only when needed. For new instruments or requests in sound words, read [sound design](references/sound-design.md). Before release or when chords stutter, read [realtime performance](references/realtime-performance.md). After building a performance UI, read [UI checks](references/ui-check.md). When a layered design does not sound layered, read [layer stems](references/stems.md). To test legato, repeated notes, sustain pedal, dense chords or expression, read [performance rendering](references/performance.md).
+
+Before writing any parameter, call `falcon_param_lookup`/`falcon_param_value`; record sweep findings with `falcon_param_calibrate` (see [parameter knowledge](references/parameter-knowledge.md)).
 
 ## Diagnose routing before changing the patch
 
@@ -46,8 +54,20 @@ If only one instrument or several instruments sound unexpectedly, resolve routin
 - Prefer `falcon_record_test` for a triggered demo. It waits for the first captured buffer before scheduling notes. `falcon_capture_status` exposes lifecycle/readiness; readiness proves buffer arrival, not audible Falcon signal. `record_audio` captures current output without triggering notes.
 - Check returned timing, `complete`, silence, clipping and mono compatibility. Scheduling latency can consume the capture window; increase duration when warned. Leave release/reverb tails. Retain raw recordings separately from trimmed, faded, normalized previews. Investigate low capture/output level before normalization.
 - Match MIDI, velocities, duration, macro positions and output routing for A/B. Lead phrases should test melody/legato/release; Keys chords/arpeggios; Pluck/Bell decay; Pad/Strings held movement; Bass its intended register.
-- Use `falcon_diagnose_audio`/`falcon_spectrum` for measurable findings; listen on headphones, speakers and in mono for perceptual findings. A long effect chain or high stereo correlation does not establish width or believable direction.
+- Use `falcon_listen`/`falcon_audio_diff` for text evidence and `falcon_diagnose_audio`/`falcon_spectrum` for plots and raw spectra; listen on headphones, speakers and in mono for perceptual findings. A long effect chain or high stereo correlation does not establish width or believable direction.
 - CLAP is local audio/text retrieval. Scores are relative, candidate-dependent similarities, not probabilities, patch quality or parameter estimates. Contradictory target/facet matches need listening judgment. Comfort, harshness and spatial credibility are not settled by labels. Verify model release after inference; this is per-call analysis, not continuous listening.
+
+## Hear without audio input
+
+Text-only agents must treat measured audio as their ears. Read [listening workflow](references/listening.md) before iterating on sound.
+
+1. Render a fixed test (same note, velocity, length, controls) with `falcon_native_render`, or capture with `falcon_record_test`. Their `listening` field is a first impression only.
+2. Call `falcon_listen` with `expected_note`, `note_on_seconds` and `note_off_seconds`. Read `description` and `findings` first, then the ASCII spectrogram/envelope and `features`. Every word is backed by a printed number; the wording is a steering heuristic, not a perceptual verdict.
+3. Change one parameter, render the identical test, and call `falcon_audio_diff`. Keep the change only if the ranked differences move toward the goal and no new finding (clicks, clipping, truncated tail, wrong octave) appears.
+4. State goals numerically with `falcon_match_target` (`attack_ms`, `sustain_level_db`, `release_ms`, `centroid_hz`, `harmonic_to_noise_db`, `vibrato_depth_cents`, `band_*_db`...), or derive them from a reference file. Iterate on `evaluation.next_step`; its parameter hints are hypotheses to verify against live definitions.
+5. Use `falcon_native_param_sweep` to learn what an unfamiliar parameter does before editing by hand; it restores the original value. Use `falcon_native_sweep` before release to find unmapped keys, zone seams, tuning errors and velocity-curve problems across the range.
+
+Use musical test material per role (see Capture and compare). Measurements of polyphonic, mixed or heavily modulated audio weaken pitch, harmonic and ADSR estimates; isolate single notes when a number matters. Report numbers and their limits; do not claim to have heard the sound.
 
 ## Save at the correct scope
 

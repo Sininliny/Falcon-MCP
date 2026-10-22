@@ -1,7 +1,7 @@
 -- UVI Falcon 2027 / UVIScript Lua 5.1. BRIDGE_ROOT and TOKEN are generated.
 -- Use documented asynchronous file I/O only. Never load/execute mailbox code.
 local json = require("uvi.json")
-local BRIDGE_VERSION="0.4.0"
+local BRIDGE_VERSION="0.5.0"
 local lastId = ""
 local lastMutation = {}
 local voices = {}
@@ -12,6 +12,9 @@ local sequenceError = ""
 -- Assigned from the first authenticated request's random host UUID. Lua table
 -- addresses and getTime can both repeat after a script reload.
 local bridgeInstance=nil
+-- Set when a mutation is refused for lacking this runtime's session. After a reload the
+-- previous runtime may already have executed the same request id, so this is no receipt.
+local sessionRejected=false
 local collections = {parts=true, layers=true, keygroups=true, oscillators=true,
     inserts=true, auxs=true, sends=true, mods=true, eventProcessors=true, children=true}
 local mutations = {set_parameters=true, edit_effect=true, load_sample=true,
@@ -449,8 +452,10 @@ local function process(req)
             "Bound instance changed; inspect status and bind the intended instance")
     end
     if isMutation(req) then
-        check(bridgeInstance~=nil and req.session==bridgeInstance,
-            "Bridge session changed; inspect state and reconnect before editing")
+        if not (bridgeInstance~=nil and req.session==bridgeInstance) then
+            sessionRejected=true
+            error("Bridge session changed; inspect state and reconnect before editing")
+        end
         for _,target in ipairs(req.expectedPrograms or {}) do
             local node=resolve(target.selector)
             check(safeProperty(node,"name")==target.name and
@@ -481,6 +486,7 @@ function onInit()
                 lastId = req.id
                 print("MCP request",req.id,req.op)
                 pending=nil
+                sessionRejected=false
                 local ok, result = pcall(process, req)
                 if ok and pending then
                     while not pending.done do wait(20) end
@@ -489,8 +495,10 @@ function onInit()
                 end
                 local response = {id=req.id, token=TOKEN, ok=ok, protocol=1,instance=bridgeInstance}
                 if ok then response.result=result else response.error=tostring(result) end
+                if sessionRejected then response.sessionRejected=true end
                 if isMutation(req) then
-                    lastMutation={id=req.id, op=req.op, ok=ok, result=response.result,error=response.error}
+                    lastMutation={id=req.id, op=req.op, ok=ok, result=response.result,error=response.error,
+                        sessionRejected=sessionRejected or nil}
                 end
                 local saved = false
                 saveData(response, BRIDGE_ROOT .. "/response.json",function(t)

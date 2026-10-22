@@ -23,6 +23,7 @@ from .audit import AuditLog, trace_id
 from .bridge import FalconBridge
 from .catalog import search_catalog
 from .config import Config
+from .listen import listen
 from .setup import installation_status, setup_bridge
 
 Selector = Annotated[
@@ -73,7 +74,7 @@ def create_server(config: Config | None = None) -> FastMCP:
     # A pending uncertain edit is left intact so reconciliation remains possible.
     try:
         bridge.prepare()
-    except RuntimeError as exc:
+    except (RuntimeError, OSError, ValueError) as exc:
         audit.error("bridge_prepare_deferred", exc)
     capture_lock = asyncio.Lock()
     capture_monitor = CaptureMonitor(audit)
@@ -90,6 +91,10 @@ def create_server(config: Config | None = None) -> FastMCP:
             "Timbre feedback is LOCAL CLAP descriptor matching with optional target text; it is subjective, "
             "not ground truth. Model is started per analysis and fully released after it. "
             "Compare identical notes/velocity/output when iterating. Inspect timeout outcomes via falcon_reconcile. "
+            "Agents without audio input: render (native_render) or record, then falcon_listen for text/ASCII evidence, "
+            "falcon_audio_diff after each single change, falcon_match_target for numeric goals, falcon_native_sweep "
+            "for key/velocity consistency, falcon_native_param_sweep to learn what one parameter does and falcon_native_stems "
+            "to hear what each layer contributes. "
             "For installation/build mismatch call falcon_setup(verify_watch=true) once when idle. "
             "Never repeatedly use computer-use/mouse tools to load or reload the bridge. "
             "A missing Master bridge requires the one-time user setup, which is returned by falcon_setup."
@@ -536,6 +541,10 @@ def create_server(config: Config | None = None) -> FastMCP:
                 else:
                     audio, rate = await asyncio.to_thread(read_audio, path)
                     result["measurements"] = await asyncio.to_thread(measurements, audio, rate)
+                audio, rate = await asyncio.to_thread(read_audio, path)
+                heard = await asyncio.to_thread(listen, audio, rate, None, None, None, False)
+                result["listening"] = {"description": heard.get("description"), "findings": heard.get("findings"),
+                                       "next": "falcon_listen(path, expected_note, note_on_seconds) for details"}
                 return result
             except BaseException as exc:
                 capture_monitor.fail(exc)
@@ -559,6 +568,10 @@ def create_server(config: Config | None = None) -> FastMCP:
             "project_parser": "All public nodes, parameters, connections, routes and sample metadata; completeness is reported",
             "project_formats": ["JSON", "PlantUML", "Mermaid", "SVG", "PNG"],
             "diagnostics": ["PSD", "spectrogram", "LUFS", "estimated true peak", "stereo", "envelope", "THD"],
+            "text_listening": ["falcon_listen: ADSR, pitch/vibrato, harmonics/HNR, clicks, width, ASCII views",
+                               "falcon_audio_diff: ranked feature changes", "falcon_match_target: numeric/reference goals",
+                               "falcon_native_sweep / falcon_native_param_sweep: owned-host render matrices",
+                               "falcon_native_perform / falcon_native_perform_suite: notes, CC64, CC, bend, pressure"],
             "logs": "Full MCP/bridge JSONL audit, engine print ring and native Falcon log",
             "program_save_load": False,
             "create_synthesis_nodes": False,
@@ -575,6 +588,13 @@ def create_server(config: Config | None = None) -> FastMCP:
                 "ufs_index_native_preview": {"status": "not_implemented", "validation": "No reliable native association workflow established"},
                 "continuous_model_listening": {"status": "not_implemented", "alternative": "One capture and one analysis per call"},
                 "owned_vst3_files": {"status": "implemented", "scope": "Separate owned Windows VST3 instance; native_file load/save, native_edit, native_render"},
+                "sound_design": {"status": "implemented", "scope": "Recipes, design checks, timbre vocabulary and measured verification (falcon_sound_recipe, falcon_design_check, falcon_timbre_vocabulary, falcon_design_verify)"},
+                "parameter_knowledge": {"status": "implemented", "scope": "Offline paraphrased UVI docs + per-machine measured calibrations (falcon_param_lookup, falcon_param_search, falcon_param_value, falcon_param_calibrate)"},
+                "realtime_performance": {"status": "implemented_unvalidated", "scope": "Owned-host block timing and static cost model (falcon_native_perf_benchmark, falcon_perf_static); not the standalone CPU meter"},
+                "ui_checks": {"status": "implemented_unvalidated", "scope": "Static control-tree/mouse-blocking/contrast checks, live probe and native save/reload round trip (falcon_ui_check, falcon_ui_live_probe, falcon_native_ui_roundtrip); real mouse input is not tested"},
+                "performance_rendering": {"status": "implemented_unvalidated", "scope": "Owned-host offline render of timestamped notes/CC64/CC/bend/pressure on channels 1..16, canned phrases and performance checks (falcon_native_perform, falcon_native_perform_suite, falcon_perform_analyze); not realtime, not external MIDI input"},
+                "layer_stems": {"status": "implemented_unvalidated", "scope": "Owned-host per-layer solo/without/dry renders with guarded restore and contribution analysis (falcon_native_stems, falcon_stem_analyze)"},
+                "text_listening": {"status": "implemented", "scope": "Deterministic DSP reports for agents without audio input; heuristics, not perceptual verdicts"},
                 "reference_segments": {"status": "implemented", "scope": "Explicit local audio range, no source separation; level-normalized measurement hypotheses"},
             },
             "model": feedback.status(),
@@ -589,22 +609,43 @@ def create_server(config: Config | None = None) -> FastMCP:
         return (
             f"Target timbre: {target}\nCall falcon_status; confirm runtime and target names, then falcon_bind_instance. "
             "Browse the selected Program and live parameters. "
-            "Record an identical test phrase and use falcon_describe_timbre with an English target. "
+            "Render or record an identical test phrase; read falcon_listen (pass the played note and note on/off), "
+            "optionally falcon_describe_timbre with an English target. "
             "Read existing values, change one or two parameters with expected old values, verify readback, "
-            "record again, and compare recordings. Report measured and subjective changes separately. "
+            "record again, and compare recordings with falcon_audio_diff or falcon_match_target. Report measured and subjective changes separately. "
             "Keep the original parameter values so changes can be reversed. Do not invent synth settings "
             "from model labels or claim CLAP similarity is a calibrated quality score."
         )
 
     from .advanced import register_advanced
+    from .design_tools import register_design
+    from .knowledge_tools import register_knowledge
+    from .listen_tools import register_listening
     from .native_tools import register_native
+    from .perf_tools import register_perf
+    from .perform_tools import register_perform
     from .reference_tools import register_reference
+    from .stem_tools import register_stems
+    from .sweep_tools import register_sweeps
+    from .ui_tools import register_ui_checks
     from .workflow_tools import register_workflows
 
     register_advanced(mcp, cfg, bridge, audit, capture_lock, capture_monitor)
     register_reference(mcp, cfg, feedback)
+    register_listening(mcp, cfg)
+    register_design(mcp, cfg)
+    register_knowledge(mcp, cfg, audit)
     native_host = register_native(mcp, cfg, audit)
+    register_sweeps(mcp, cfg, audit, native_host)
+    register_perform(mcp, cfg, audit, native_host)
+    register_perf(mcp, cfg, audit, native_host)
+    register_ui_checks(mcp, cfg, audit, bridge, native_host)
+    register_stems(mcp, cfg, audit, native_host)
     register_workflows(mcp, cfg, audit)
+    # Last: every registered tool gets a result_scope block (see docs/result-scope.md).
+    from .result_scope import install_result_scope
+
+    install_result_scope(mcp, cfg, bridge, native_host)
     # Audit at the protocol boundary, so rejected input/unknown tools are logged too.
     for request_type, original in list(mcp._mcp_server.request_handlers.items()):
 

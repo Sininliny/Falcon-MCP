@@ -1,0 +1,228 @@
+{
+  "schema": 1,
+  "template_id": "analog-v1",
+  "scope": "Conventions and measurable starting targets for steering edits. They are engineering heuristics from common synthesis and acoustics practice, not aesthetic verdicts; confirm by rendering and listening.",
+  "principles": [
+    {"id": "onset_click", "topic": "Envelope", "rule": "Amplitude attack shorter than about 2 ms on sustained or low-register sounds produces an audible onset click unless the transient is intended.", "check": "click_count == 0 on sustained recipes; attack_ms within the recipe range"},
+    {"id": "release_click", "topic": "Envelope", "rule": "A release shorter than one period of the lowest note (or under 10 ms) cuts the waveform mid-cycle and clicks at note-off.", "check": "ReleaseTime >= max(0.01 s, 1/f_low)"},
+    {"id": "release_mud", "topic": "Envelope", "rule": "Long releases on bass and low pads overlap consecutive notes and smear the low end; bass releases are usually 30-200 ms.", "check": "release_ms within the recipe range"},
+    {"id": "beating", "topic": "Detune", "rule": "Two oscillators d cents apart beat at f*(2^(d/1200)-1) Hz. About 0.5-8 Hz reads as chorus or movement; above about 15-20 Hz it turns into roughness. The same cents detune beats faster on higher keys.", "check": "beat rates at the top of the playable range stay below 20 Hz unless roughness is intended"},
+    {"id": "sub_mono", "topic": "Stereo", "rule": "Keep content below about 120 Hz centered and un-detuned: stereo or detuned sub content cancels on mono playback and pumps in level on sustained notes.", "check": "stereo_correlation >= 0.95 on bass recipes"},
+    {"id": "intervals", "topic": "Tuning", "rule": "Stacked oscillators at octaves (12, 24 semitones) and fifths (7, 19) reinforce the harmonic series; other fixed intervals sound as a chord on every key.", "check": "coarse offsets in {0, +-7, +-12, +-19, +-24} unless a chord is intended"},
+    {"id": "gain_staging", "topic": "Level", "rule": "Coherent oscillators add in amplitude (N*g), uncorrelated detuned voices add in power (sqrt(N)*g). Polyphonic roles need about 8-10 dB headroom per voice so a seven-note chord does not clip.", "check": "single-voice peak about -12 dBFS or lower for Keys/Pad, about -6 dBFS for mono Bass/Lead"},
+    {"id": "velocity_range", "topic": "Dynamics", "rule": "Velocity should change level monotonically. Typical velocity 40->120 level ranges: organ 0-2 dB, pads 4-10 dB, synth bass and leads 4-12 dB, plucks and keys 10-24 dB.", "check": "rms_dbfs rises with velocity within the recipe velocity_db range"},
+    {"id": "velocity_brightness", "topic": "Dynamics", "rule": "Acoustic and most expressive synth sounds also get brighter with velocity; level-only velocity sounds like a volume knob.", "check": "centroid_hz at high velocity / low velocity >= 1.05 when a velocity-to-cutoff route exists"},
+    {"id": "key_decay", "topic": "Keytracking", "rule": "Struck and plucked sources decay faster on higher notes (roughly 10-30 % shorter per octave). A constant decay across the keyboard sounds synthetic in the treble and short in the bass.", "check": "estimated_t60_seconds decreases with pitch on pluck/keys recipes (KeyToDecay < 0)"},
+    {"id": "register_balance", "topic": "Level", "rule": "Perceived loudness should stay roughly even across the playable range; equal-loudness contours make the lowest and highest notes sound quieter at equal RMS.", "check": "rms spread across test notes within about 6 dB, with no adjacent-zone jump above 3 dB"},
+    {"id": "zone_seams", "topic": "Mapping", "rule": "Adjacent key or velocity zones should be level and tone matched; hard switches without crossfades expose seams.", "check": "adjacent zone gain difference <= 3 dB; use Low/HighKeyFade or Low/HighVelocityFade for crossfades"},
+    {"id": "repetition", "topic": "Variation", "rule": "Identical retriggers (fixed phase, one sample) sound mechanical on repeated notes. Bass and plucks benefit from phase reset for consistent punch; pads benefit from free-running phase or round-robin variation.", "check": "repeat the same note 4 times and compare renders with falcon_audio_diff"},
+    {"id": "center_first", "topic": "Arrangement", "rule": "Build a stable center voice that carries pitch and identity first; add layers only with a stated job (body, air, transient, width).", "check": "each layer has a role; muting it changes a named feature"}
+  ],
+  "waveform_signatures": {
+    "sine": {"harmonics_within_40db": {"max": 2}},
+    "triangle": {"odd_minus_even_db": {"min": 20}, "tilt_db_per_octave": {"min": -15, "max": -9}},
+    "square": {"odd_minus_even_db": {"min": 20}, "tilt_db_per_octave": {"min": -8.5, "max": -3.5}},
+    "saw": {"odd_minus_even_db": {"min": -6, "max": 6}, "h2_db_re_h1": {"min": -9, "max": -3}, "tilt_db_per_octave": {"min": -8.5, "max": -3.5}}
+  },
+  "recipes": {
+    "sub_bass": {
+      "name": "Sub bass", "family": "bass", "role": "Bass",
+      "description": "Clean sine/triangle-like low end: stable pitch, mono, short release, modest velocity range.",
+      "register": {"low_key": 28, "high_key": 55, "reference_note": 36, "test_notes": [28, 36, 43, 48]},
+      "test_phrase": "Repeated 8th notes on E1-C3 at velocities 40/90/120 plus one held 2 s note; check low-end level, release overlap and mono.",
+      "blueprint": [{"name": "Sub", "gain": 1, "keygroups": [{"name": "Sub", "attack": 0.004, "decay": 0.3, "sustain": 0.9, "release": 0.06, "oscillators": [{"gain": 0.45}]}]}],
+      "waveform": "sine",
+      "envelope_ranges": {"attack": [0.002, 0.015], "release": [0.03, 0.2], "sustain": [0.7, 1]},
+      "velocity_db": [4, 12],
+      "native_edits": [
+        {"target": "oscillator", "name": "Waveform", "sweep": [1, 2, 3, 4, 5, 6], "expect_signature": "sine", "why": "Index values are not documented offline; pick the value whose render matches the sine signature."},
+        {"target": "envelope", "name": "DynamicRange", "value": 8, "why": "Bass velocity range 4-12 dB keeps the low end even in a mix."},
+        {"target": "layer", "name": "PortamentoTime", "value": 0.04, "why": "Short glide for legato bass lines once a mono/legato PlayMode is selected."},
+        {"target": "layer", "name": "PlayMode", "verify_live": true, "why": "Choose the mono/legato mode after reading the live definition; the offline index only gives 0..4."}
+      ],
+      "beyond_builder": ["Optional gentle saturation (Drive, Tube Amp) adds harmonics so the bass reads on small speakers; re-check stereo and level after inserting."],
+      "targets": {"attack_ms": {"max": 20}, "cents_error": {"min": -8, "max": 8}, "harmonics_within_40db": {"max": 6}, "stereo_correlation": {"min": 0.95}, "click_count": {"max": 0}, "release_ms": {"min": 25, "max": 220}, "band_bass_db": {"min": -3}},
+      "keytrack": {},
+      "pitfalls": ["Detuned or stereo sub content cancels in mono", "Release over 200 ms smears repeated notes", "Waveform with weak fundamental disappears on small speakers"]
+    },
+    "reese_bass": {
+      "name": "Reese bass", "family": "bass", "role": "Bass",
+      "description": "Two detuned saws for slow phasing movement over a centered un-detuned sub layer.",
+      "register": {"low_key": 28, "high_key": 55, "reference_note": 36, "test_notes": [28, 36, 43, 48]},
+      "test_phrase": "Held 2 s notes on E1, C2, G2 and a short riff; confirm slow phasing, solid sub and no level pumping in mono.",
+      "blueprint": [
+        {"name": "Reese", "gain": 1, "keygroups": [{"name": "Saws", "attack": 0.005, "decay": 0.4, "sustain": 0.85, "release": 0.08, "oscillators": [{"gain": 0.2, "fine_tune": -9}, {"gain": 0.2, "fine_tune": 9}]}]},
+        {"name": "Sub", "gain": 1, "keygroups": [{"name": "Sub", "attack": 0.005, "decay": 0.4, "sustain": 0.9, "release": 0.08, "oscillators": [{"gain": 0.3, "coarse_tune": 0}]}]}
+      ],
+      "waveform": "saw",
+      "waveform_by_layer": {"2": "sine"},
+      "allow_low_detune": true,
+      "envelope_ranges": {"attack": [0.002, 0.02], "release": [0.03, 0.2], "sustain": [0.7, 1]},
+      "velocity_db": [4, 12],
+      "native_edits": [
+        {"target": "oscillator", "layers": [1], "name": "Waveform", "sweep": [1, 2, 3, 4, 5, 6], "expect_signature": "saw", "why": "Saw layer supplies the harmonics that phase against each other."},
+        {"target": "oscillator", "layers": [2], "name": "Waveform", "sweep": [1, 2, 3, 4, 5, 6], "expect_signature": "sine", "why": "Sub layer must be a clean centered fundamental."},
+        {"target": "envelope", "name": "DynamicRange", "value": 8, "why": "Bass velocity range 4-12 dB."}
+      ],
+      "beyond_builder": ["A low-pass filter (Ladder or Analog Filter) on the saw layer around 300-800 Hz plus a slow LFO on cutoff is the usual Reese motion; a high-pass around 100 Hz on the saw layer keeps the sub clean."],
+      "targets": {"attack_ms": {"max": 25}, "cents_error": {"min": -12, "max": 12}, "harmonics_within_40db": {"min": 8}, "stereo_correlation": {"min": 0.9}, "click_count": {"max": 0}, "release_ms": {"min": 25, "max": 250}},
+      "keytrack": {},
+      "pitfalls": ["Detuning the sub layer makes the fundamental pump", "Too much detune (> 25 cents) reads as out of tune instead of moving"]
+    },
+    "analog_pluck": {
+      "name": "Analog pluck", "family": "pluck", "role": "Keys",
+      "description": "Fast attack, zero sustain, keytracked decay; level and brightness follow velocity.",
+      "register": {"low_key": 48, "high_key": 84, "reference_note": 60, "test_notes": [48, 60, 67, 76]},
+      "test_phrase": "16th-note arpeggio C3-C6 at mixed velocities plus single notes held past the decay; check decay keytracking and repeated-note consistency.",
+      "blueprint": [{"name": "Pluck", "gain": 1, "keygroups": [{"name": "Pluck", "attack": 0.002, "decay": 0.35, "sustain": 0, "release": 0.25, "oscillators": [{"gain": 0.18}]}]}],
+      "waveform": "saw",
+      "envelope_ranges": {"attack": [0.001, 0.008], "decay": [0.15, 1.2], "sustain": [0, 0.1], "release": [0.1, 0.6]},
+      "velocity_db": [10, 24],
+      "native_edits": [
+        {"target": "oscillator", "name": "Waveform", "sweep": [1, 2, 3, 4, 5, 6], "expect_signature": "saw", "why": "Bright harmonic-rich source for a pluck."},
+        {"target": "envelope", "name": "KeyToDecay", "value": -0.3, "why": "Higher notes decay faster, as on plucked strings."},
+        {"target": "envelope", "name": "DynamicRange", "value": 18, "why": "Plucks need a wide velocity response (10-24 dB)."}
+      ],
+      "beyond_builder": ["A filter envelope (Ladder/Analog Filter cutoff modulated by an envelope with about 0.1-0.4 s decay) gives the brightness decay that makes a pluck; target brightness_decay_ratio >= 1.3.", "Route velocity to that filter envelope amount so harder notes are brighter."],
+      "targets": {"attack_ms": {"max": 12}, "estimated_t60_seconds": {"min": 0.25, "max": 1.6}, "cents_error": {"min": -10, "max": 10}, "click_count": {"max": 0}},
+      "keytrack": {"estimated_t60_seconds": {"ratio_per_octave": 0.8}},
+      "pitfalls": ["Constant decay across the keyboard", "Level-only velocity response", "Attack under 1 ms clicks in the low register"]
+    },
+    "soft_keys": {
+      "name": "Soft synth keys", "family": "keys", "role": "Keys",
+      "description": "Triangle-like body with a quiet octave partial, piano-like decay to a low sustain.",
+      "register": {"low_key": 40, "high_key": 88, "reference_note": 60, "test_notes": [48, 60, 67, 76]},
+      "test_phrase": "Four-voice chord progression with sustained chords and a light melody on top; check chord headroom, decay and velocity response.",
+      "blueprint": [{"name": "Body", "gain": 1, "keygroups": [{"name": "Body", "attack": 0.003, "decay": 1.2, "sustain": 0.35, "release": 0.35, "oscillators": [{"gain": 0.12}, {"gain": 0.03, "coarse_tune": 12}]}]}],
+      "waveform": "triangle",
+      "envelope_ranges": {"attack": [0.001, 0.01], "decay": [0.5, 3], "sustain": [0.1, 0.6], "release": [0.15, 0.8]},
+      "velocity_db": [10, 24],
+      "native_edits": [
+        {"target": "oscillator", "name": "Waveform", "sweep": [1, 2, 3, 4, 5, 6], "expect_signature": "triangle", "why": "Mellow odd-harmonic body; the octave partial adds controlled brightness."},
+        {"target": "envelope", "name": "KeyToDecay", "value": -0.25, "why": "Treble decays faster than bass."},
+        {"target": "envelope", "name": "DynamicRange", "value": 18, "why": "Keys need a wide velocity response."}
+      ],
+      "beyond_builder": ["A gentle low-pass with velocity-to-cutoff makes soft notes darker; a short tine/contact transient layer can be added at high velocity only."],
+      "targets": {"attack_ms": {"max": 15}, "estimated_t60_seconds": {"min": 0.6, "max": 4}, "cents_error": {"min": -8, "max": 8}, "click_count": {"max": 0}},
+      "keytrack": {"estimated_t60_seconds": {"ratio_per_octave": 0.8}},
+      "pitfalls": ["Chords clip because single-voice level was set by ear on one note", "Octave partial too loud reads as organ"]
+    },
+    "warm_pad": {
+      "name": "Warm pad", "family": "pad", "role": "Keys",
+      "description": "Slow swell, detuned saws for chorus-rate beating, wide but mono-compatible, long release.",
+      "register": {"low_key": 36, "high_key": 84, "reference_note": 60, "test_notes": [48, 60, 67, 76]},
+      "test_phrase": "Held three- and four-note chords for 4 s with 3 s release; check swell, beating rate, width and mono fold-down.",
+      "blueprint": [{"name": "Pad", "gain": 1, "keygroups": [{"name": "Pad", "attack": 0.8, "decay": 1.0, "sustain": 0.8, "release": 1.8, "oscillators": [{"gain": 0.07, "fine_tune": -7}, {"gain": 0.07, "fine_tune": 7}]}]}],
+      "waveform": "saw",
+      "envelope_ranges": {"attack": [0.25, 2.5], "sustain": [0.6, 1], "release": [0.8, 4]},
+      "velocity_db": [3, 10],
+      "native_edits": [
+        {"target": "oscillator", "name": "Waveform", "sweep": [1, 2, 3, 4, 5, 6], "expect_signature": "saw", "why": "Rich source; warmth comes from filtering, not from a dull waveform."},
+        {"target": "oscillator", "name": "Stereo", "value": true, "why": "Spread the unison voices for width."},
+        {"target": "oscillator", "name": "StereoSpread", "value": 0.5, "why": "Moderate width keeps mono fold-down acceptable."},
+        {"target": "envelope", "name": "DynamicRange", "value": 6, "why": "Pads need a small velocity range."}
+      ],
+      "beyond_builder": ["Low-pass around 1.5-4 kHz with a slow LFO (0.1-0.3 Hz) on cutoff gives warmth and movement; chorus or reverb on an aux adds space without moving the center."],
+      "targets": {"attack_ms": {"min": 250, "max": 2500}, "cents_error": {"min": -12, "max": 12}, "click_count": {"max": 0}, "stereo_correlation": {"min": 0.3, "max": 0.97}, "release_ms": {"min": 600, "max": 4500}},
+      "keytrack": {},
+      "pitfalls": ["Attack under 100 ms turns a pad into keys", "Detune fixed in cents beats roughly in the top octave", "Width from antiphase content disappears in mono"]
+    },
+    "string_ensemble": {
+      "name": "String ensemble", "family": "pad", "role": "Keys",
+      "description": "Three detuned saws, medium bow-like attack, high sustain; vibrato and filtering added after building.",
+      "register": {"low_key": 36, "high_key": 91, "reference_note": 60, "test_notes": [48, 60, 67, 76]},
+      "test_phrase": "Slow legato melody and held chords; check attack, ensemble beating and release.",
+      "blueprint": [{"name": "Section", "gain": 1, "keygroups": [{"name": "Section", "attack": 0.25, "decay": 0.6, "sustain": 0.85, "release": 0.6, "oscillators": [{"gain": 0.06, "fine_tune": -10}, {"gain": 0.06}, {"gain": 0.06, "fine_tune": 10}]}]}],
+      "waveform": "saw",
+      "envelope_ranges": {"attack": [0.08, 0.8], "sustain": [0.7, 1], "release": [0.3, 1.5]},
+      "velocity_db": [4, 12],
+      "native_edits": [
+        {"target": "oscillator", "name": "Waveform", "sweep": [1, 2, 3, 4, 5, 6], "expect_signature": "saw", "why": "Bowed strings have saw-like spectra."},
+        {"target": "envelope", "name": "VelToAttack", "value": -0.3, "why": "Harder notes bow in faster."},
+        {"target": "envelope", "name": "DynamicRange", "value": 9, "why": "Moderate velocity range."}
+      ],
+      "beyond_builder": ["Delayed vibrato: LFO to pitch at 5-6 Hz, 10-25 cents, faded in over 0.3-0.6 s and/or on the mod wheel.", "Band-pass/low-pass around 3-5 kHz removes buzz; a formant-like peak near 1-3 kHz adds body."],
+      "targets": {"attack_ms": {"min": 60, "max": 900}, "cents_error": {"min": -12, "max": 12}, "click_count": {"max": 0}, "release_ms": {"min": 250, "max": 1800}},
+      "keytrack": {},
+      "pitfalls": ["Static unison without vibrato sounds like an organ", "Raw saw buzz above 5 kHz"]
+    },
+    "mono_lead": {
+      "name": "Mono lead", "family": "lead", "role": "Lead",
+      "description": "Saw plus slightly detuned saw, quick attack, high sustain, short release, glide.",
+      "register": {"low_key": 48, "high_key": 84, "reference_note": 67, "test_notes": [48, 60, 67, 72]},
+      "test_phrase": "Legato melody with overlapping notes, a few long held notes and repeated staccato notes; check glide, release and sustain stability.",
+      "blueprint": [{"name": "Lead", "gain": 1, "keygroups": [{"name": "Lead", "attack": 0.006, "decay": 0.4, "sustain": 0.8, "release": 0.12, "oscillators": [{"gain": 0.25}, {"gain": 0.15, "fine_tune": 5}]}]}],
+      "waveform": "saw",
+      "envelope_ranges": {"attack": [0.002, 0.03], "sustain": [0.5, 1], "release": [0.05, 0.4]},
+      "velocity_db": [4, 12],
+      "native_edits": [
+        {"target": "oscillator", "name": "Waveform", "sweep": [1, 2, 3, 4, 5, 6], "expect_signature": "saw", "why": "Cutting harmonic-rich lead source."},
+        {"target": "layer", "name": "PlayMode", "verify_live": true, "why": "Select the mono/legato mode after reading the live definition."},
+        {"target": "layer", "name": "PortamentoTime", "value": 0.06, "why": "30-100 ms glide for legato phrasing."},
+        {"target": "envelope", "name": "DynamicRange", "value": 9, "why": "Leads need moderate velocity range."}
+      ],
+      "beyond_builder": ["Vibrato via LFO to pitch at 5-6.5 Hz, 10-30 cents on the mod wheel (target vibrato_depth_cents 10-30 when engaged)."],
+      "targets": {"attack_ms": {"max": 30}, "sustain_level_db": {"min": -6}, "cents_error": {"min": -10, "max": 10}, "release_ms": {"min": 40, "max": 450}, "click_count": {"max": 0}, "stereo_correlation": {"min": 0.8}},
+      "keytrack": {},
+      "pitfalls": ["Poly mode loses legato/glide identity", "Release over 0.4 s blurs fast phrases", "Wide stereo moves the melody off center"]
+    },
+    "brass_synth": {
+      "name": "Synth brass", "family": "brass", "role": "Lead",
+      "description": "Saws with a swelling attack that speeds up with velocity, mid-high sustain.",
+      "register": {"low_key": 43, "high_key": 79, "reference_note": 60, "test_notes": [48, 60, 67, 72]},
+      "test_phrase": "Short stabs and held chords at velocities 50/90/127; check attack speed versus velocity and stab release.",
+      "blueprint": [{"name": "Brass", "gain": 1, "keygroups": [{"name": "Brass", "attack": 0.05, "decay": 0.4, "sustain": 0.75, "release": 0.2, "oscillators": [{"gain": 0.1, "fine_tune": -4}, {"gain": 0.1, "fine_tune": 4}]}]}],
+      "waveform": "saw",
+      "envelope_ranges": {"attack": [0.02, 0.15], "sustain": [0.5, 0.9], "release": [0.08, 0.4]},
+      "velocity_db": [6, 15],
+      "native_edits": [
+        {"target": "oscillator", "name": "Waveform", "sweep": [1, 2, 3, 4, 5, 6], "expect_signature": "saw", "why": "Brass spectra are saw-like."},
+        {"target": "envelope", "name": "VelToAttack", "value": -0.4, "why": "Harder notes speak faster."},
+        {"target": "envelope", "name": "DynamicRange", "value": 12, "why": "Brass needs a pronounced velocity response."}
+      ],
+      "beyond_builder": ["The defining brass cue is a filter envelope that opens with the attack (about 50-150 ms) and closes to a lower sustain; route velocity to its amount."],
+      "targets": {"attack_ms": {"min": 15, "max": 150}, "sustain_level_db": {"min": -8}, "cents_error": {"min": -10, "max": 10}, "click_count": {"max": 0}, "release_ms": {"min": 50, "max": 500}},
+      "keytrack": {},
+      "pitfalls": ["Instant attack reads as an organ stab", "No velocity-to-attack makes every stab identical"]
+    },
+    "drawbar_organ": {
+      "name": "Drawbar-style organ", "family": "organ", "role": "Keys",
+      "description": "Additive stack at unison, octave and octave-plus-fifth; full sustain, no velocity response.",
+      "register": {"low_key": 36, "high_key": 96, "reference_note": 60, "test_notes": [48, 60, 67, 76]},
+      "test_phrase": "Held chords and a fast run; check constant sustain, quick release and equal level at all velocities.",
+      "blueprint": [{"name": "Drawbars", "gain": 1, "keygroups": [{"name": "Drawbars", "attack": 0.004, "decay": 0.05, "sustain": 1, "release": 0.04, "oscillators": [{"gain": 0.1}, {"gain": 0.07, "coarse_tune": 12}, {"gain": 0.04, "coarse_tune": 19}]}]}],
+      "waveform": "sine",
+      "envelope_ranges": {"attack": [0.002, 0.01], "sustain": [0.95, 1], "release": [0.015, 0.12]},
+      "velocity_db": [0, 2],
+      "native_edits": [
+        {"target": "oscillator", "name": "Waveform", "sweep": [1, 2, 3, 4, 5, 6], "expect_signature": "sine", "why": "Drawbars are sine partials."},
+        {"target": "envelope", "name": "DynamicRange", "value": 0, "why": "Organs do not respond to velocity."}
+      ],
+      "beyond_builder": ["Rotary or chorus/vibrato effects (Rotary, Rotary Speaker) give the organ motion; key click is a short noise burst, not a 0 ms attack."],
+      "targets": {"attack_ms": {"max": 15}, "sustain_level_db": {"min": -2}, "cents_error": {"min": -8, "max": 8}, "click_count": {"max": 0}, "release_ms": {"min": 10, "max": 150}},
+      "keytrack": {},
+      "pitfalls": ["Velocity response makes it sound like a synth", "0 ms attack/release clicks"]
+    }
+  },
+  "vocabulary": {
+    "brighter": {"opposite": "darker", "increase": {"centroid_hz": {"relative": 0.12}, "rolloff_85_hz": {"relative": 0.12}}, "hold": ["rms_dbfs", "attack_ms"], "moves": ["Raise filter cutoff", "Switch toward a saw-like waveform (sine < triangle < square < saw)", "Add a quiet octave-up oscillator", "Increase velocity-to-cutoff"]},
+    "darker": {"opposite": "brighter", "decrease": {"centroid_hz": {"relative": 0.12}, "rolloff_85_hz": {"relative": 0.12}}, "hold": ["rms_dbfs", "attack_ms"], "moves": ["Lower filter cutoff", "Switch toward triangle/sine", "Lower octave-up oscillator gain"]},
+    "warmer": {"opposite": "thinner", "increase": {"band_low_mid_db": {"absolute": 1.5}}, "decrease": {"band_presence_db": {"absolute": 2}, "band_upper_mid_db": {"absolute": 1.5}}, "hold": ["rms_dbfs"], "moves": ["Lower cutoff slightly or add a gentle high shelf cut", "Add a low-gain octave-down or sub oscillator", "Reduce detune/brightness in the upper layers"]},
+    "fuller": {"opposite": "thinner", "increase": {"band_bass_db": {"absolute": 1.5}, "band_low_mid_db": {"absolute": 1.0}}, "hold": ["rms_dbfs"], "moves": ["Add a body layer an octave down", "Add a second slightly detuned oscillator"]},
+    "less_muddy": {"opposite": "fuller", "decrease": {"band_low_mid_db": {"absolute": 2}}, "hold": ["rms_dbfs"], "moves": ["High-pass or low-shelf cut on non-bass layers", "Shorten release on bass and low pads", "Reduce low-register layer gain"]},
+    "less_harsh": {"opposite": "brighter", "decrease": {"band_upper_mid_db": {"absolute": 2}, "band_presence_db": {"absolute": 2}}, "hold": ["rms_dbfs"], "moves": ["Lower filter cutoff or resonance", "Reduce drive", "Cut 2-6 kHz with EQ", "Reduce detune of bright layers in the top octave"]},
+    "airier": {"opposite": "darker", "increase": {"band_air_db": {"absolute": 2}, "band_brilliance_db": {"absolute": 1.5}}, "hold": ["rms_dbfs"], "moves": ["Add a quiet high-passed noise layer", "Open a high shelf above 10 kHz"]},
+    "cleaner": {"opposite": "airier", "increase": {"harmonic_to_noise_db": {"absolute": 3}}, "hold": ["rms_dbfs", "centroid_hz"], "moves": ["Lower noise layer gain", "Reduce drive/distortion"]},
+    "punchier": {"opposite": "softer_attack", "decrease": {"attack_ms": {"relative": 0.3}}, "increase": {"crest_db": {"absolute": 2}}, "hold": ["rms_dbfs"], "moves": ["Shorten attack (keep >= 1-2 ms)", "Raise envelope Punch", "Shorter decay to a lower sustain", "Add a transient layer at high velocity"]},
+    "softer_attack": {"opposite": "punchier", "increase": {"attack_ms": {"relative": 0.5}}, "hold": ["rms_dbfs"], "moves": ["Lengthen attack", "Positive VelToAttack inverted for soft notes", "Reduce transient layer"]},
+    "shorter": {"opposite": "longer", "decrease": {"estimated_t60_seconds": {"relative": 0.25}}, "hold": ["rms_dbfs", "attack_ms"], "moves": ["Shorten decay and lower sustain", "Shorten release", "Reduce reverb/delay sends"]},
+    "longer": {"opposite": "shorter", "increase": {"estimated_t60_seconds": {"relative": 0.25}}, "hold": ["rms_dbfs", "attack_ms"], "moves": ["Lengthen decay or raise sustain", "Lengthen release"]},
+    "wider": {"opposite": "narrower", "increase": {"side_minus_mid_db": {"absolute": 3}}, "decrease": {"stereo_correlation": {"absolute": 0.1}}, "hold": ["rms_dbfs"], "moves": ["Enable oscillator Stereo and raise StereoSpread", "Add unison voices", "Pan layers apart; keep bass/sub centered"]},
+    "narrower": {"opposite": "wider", "decrease": {"side_minus_mid_db": {"absolute": 3}}, "increase": {"stereo_correlation": {"absolute": 0.1}}, "hold": ["rms_dbfs"], "moves": ["Lower StereoSpread", "Disable Stereo on the core layer"]},
+    "thicker": {"opposite": "cleaner", "increase": {"harmonics_within_40db": {"absolute": 2}}, "hold": ["rms_dbfs", "cents_error"], "moves": ["Add a second oscillator 5-15 cents detuned (beating 1-7 Hz at mid keys)", "Raise NumOscillators/MultiOscSpread"]},
+    "more_vibrato": {"opposite": "steadier", "increase": {"vibrato_depth_cents": {"absolute": 8}}, "hold": ["rms_dbfs"], "moves": ["LFO to pitch at 5-6.5 Hz, 10-30 cents, delayed or on the mod wheel"]},
+    "steadier": {"opposite": "more_vibrato", "decrease": {"pitch_stability_cents": {"absolute": 5}, "tremolo_depth_db": {"absolute": 1}}, "hold": ["rms_dbfs"], "moves": ["Reduce LFO depths", "Reduce near-unison detune that causes slow level drift"]},
+    "no_clicks": {"opposite": null, "decrease": {"click_count": {"absolute": 1}}, "hold": ["rms_dbfs", "attack_ms"], "moves": ["Attack >= 2 ms on sustained/low sounds", "Release >= max(10 ms, one period of the lowest note)", "Check sample start/loop points"]},
+    "more_expressive": {"opposite": null, "increase": {}, "hold": [], "moves": ["Raise envelope DynamicRange", "Add velocity to filter cutoff", "Add VelToAttack so soft notes swell"], "cross_render": "Compare velocity 40 and 120 renders with falcon_design_verify: velocity level range and brightness ratio should grow"}
+  }
+}

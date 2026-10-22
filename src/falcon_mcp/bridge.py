@@ -20,6 +20,16 @@ class BridgeError(RuntimeError):
     pass
 
 
+def load_token(path: Path) -> str:
+    try:
+        token = json.loads(path.read_text(encoding="utf8"))["token"]
+    except (ValueError, KeyError, TypeError) as exc:
+        raise BridgeError(f"Unreadable bridge credential {path}; delete it and run falcon_setup") from exc
+    if not isinstance(token, str) or not token:
+        raise BridgeError(f"Unreadable bridge credential {path}; delete it and run falcon_setup")
+    return token
+
+
 @contextmanager
 def preparation_lock(root: Path, timeout: float):
     """Serialize startup publishers, including creation of the shared credential."""
@@ -97,11 +107,24 @@ async def mailbox_lock(root: Path, timeout: float):
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+def replace_file(source: Path, target: Path, timeout: float = 1.0) -> None:
+    """os.replace, retrying Windows sharing violations while Falcon/AV/indexers hold the target open."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.02)
+
+
 def atomic_json(path: Path, data: Any) -> None:
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         temporary.write_text(json.dumps(data, ensure_ascii=False, allow_nan=False), encoding="utf-8")
-        os.replace(temporary, path)
+        replace_file(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -113,7 +136,7 @@ def atomic_text(path: Path, content: str) -> bool:
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         temporary.write_text(content, encoding="utf8")
-        os.replace(temporary, path)
+        replace_file(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
     return True
@@ -192,7 +215,7 @@ class FalconBridge:
         root = self.config.runtime
         config_path = root / "connection.json"
         if config_path.exists():
-            self._token = json.loads(config_path.read_text(encoding="utf8"))["token"]
+            self._token = load_token(config_path)
         else:
             self._token = secrets.token_hex(32)
             atomic_json(config_path, {"protocol": 1, "token": self._token})
@@ -260,7 +283,7 @@ class FalconBridge:
             path = self.config.runtime / "connection.json"
             if not path.is_file():
                 raise BridgeError("Run falcon-mcp prepare, then load the generated Lua in Falcon.")
-            self._token = json.loads(path.read_text(encoding="utf8"))["token"]
+            self._token = load_token(path)
         return self._token
 
     async def request(
@@ -323,7 +346,13 @@ class FalconBridge:
         self.audit.event("bridge_dispatch", request_id=identifier, op=op, mutation=mutation)
         if mutation:
             atomic_json(uncertain_file, {"id": identifier, "op": op})
-        atomic_json(self.config.runtime / "request.json", request)
+        try:
+            atomic_json(self.config.runtime / "request.json", request)
+        except BaseException:
+            if mutation:
+                # The request file was never replaced, so Falcon cannot have seen this mutation.
+                uncertain_file.unlink(missing_ok=True)
+            raise
         deadline = time.monotonic() + (self.config.bridge_timeout if timeout is None else timeout)
         try:
             while time.monotonic() < deadline:
@@ -338,6 +367,12 @@ class FalconBridge:
                         # Another responder may overwrite the intended engine's receipt.
                         # Never clear a pending write on the strength of that response.
                         raise BridgeError("Response came from a different instance; inspect status and mailbox ownership before rebinding")
+                    if response.get("sessionRejected"):
+                        # A reloaded runtime refused a request id its predecessor may have run.
+                        raise BridgeError(
+                            "Bridge runtime changed while this mutation was pending; its outcome is unknown. "
+                            "Inspect state, then falcon_reconcile(acknowledge_unknown=true)."
+                        )
                     if mutation:
                         uncertain_file.unlink(missing_ok=True)
                     if not response.get("ok"):
@@ -376,6 +411,7 @@ class FalconBridge:
                         isinstance(receipt, dict)
                         and receipt.get("id") == identifier
                         and isinstance(receipt.get("ok"), bool)
+                        and not receipt.get("sessionRejected")
                     )
                     resolved = identifier is None or matched
                     acknowledged = bool(identifier and not resolved and acknowledge_unknown)

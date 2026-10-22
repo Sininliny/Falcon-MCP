@@ -29,6 +29,30 @@ from .native_state import (
 from .revisions import content_fingerprint, sha256
 
 
+def documents_dir() -> Path:
+    """The user's real Documents folder; Windows commonly redirects it to OneDrive."""
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class GUID(ctypes.Structure):
+                _fields_ = [("Data1", wintypes.DWORD), ("Data2", wintypes.WORD), ("Data3", wintypes.WORD),
+                            ("Data4", ctypes.c_ubyte * 8)]
+
+            # FOLDERID_Documents {FDD39AD0-238F-46AF-ADB4-6C85480369C7}
+            folder = GUID(0xFDD39AD0, 0x238F, 0x46AF, (ctypes.c_ubyte * 8)(0xAD, 0xB4, 0x6C, 0x85, 0x48, 0x03, 0x69, 0xC7))
+            pointer = ctypes.c_wchar_p()
+            if ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.byref(folder), 0, None, ctypes.byref(pointer)) == 0:
+                try:
+                    return Path(pointer.value)
+                finally:
+                    ctypes.windll.ole32.CoTaskMemFree(pointer)
+        except (OSError, AttributeError, ValueError):
+            pass
+    return Path.home() / "Documents"
+
+
 def write_bytes(path: Path, data: bytes):
     temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
@@ -44,7 +68,7 @@ def supervise(root: Path):
     incoming, outgoing = queue.Queue(), queue.Queue()
     child = None
     original = shadow = None
-    default = Path(os.environ.get("FALCON_DEFAULT_MULTI", Path.home() / "Documents/UVI/Falcon/Default Multi.uvim"))
+    default = Path(os.environ.get("FALCON_DEFAULT_MULTI", documents_dir() / "UVI/Falcon/Default Multi.uvim"))
     restored = False
 
     def restore():
@@ -267,16 +291,29 @@ def engine(root: Path):
                 import numpy as np
                 import soundfile as sf
 
+                from .perform import read_timeline
+
                 events = []
                 render_revision = content_fingerprint(current())
-                for note in args["notes"]:
+                for note in args.get("notes") or []:
                     channel = note.get("channel", 1) - 1
                     events += [(bytes([0x90 + channel, note["note"], note["velocity"]]), note["start_seconds"]),
                                (bytes([0x80 + channel, note["note"], 0]), note["start_seconds"] + note["duration_seconds"])]
+                # Timestamped performance timelines (CC64, CC, bend, pressure) travel as a hashed JSON file
+                # because they can exceed the 64 KiB request line. The stable sort keeps their order at equal times.
+                if args.get("midi_path"):
+                    events += read_timeline(Path(args["midi_path"]), args.get("midi_sha256"))
+                if not events:
+                    raise ValueError("Render needs notes or a midi_path timeline")
+                buffer_size = int(args.get("buffer_size") or 512)
+                if not 32 <= buffer_size <= 4096:
+                    raise ValueError("buffer_size must be 32..4096")
                 audio = plugin(sorted(events, key=lambda e: e[1]), duration=args["seconds"],
-                               sample_rate=args["sample_rate"], num_channels=2, buffer_size=512)
+                               sample_rate=args["sample_rate"], num_channels=2, buffer_size=buffer_size)
                 sf.write(args["path"], audio.T, args["sample_rate"], subtype="FLOAT")
                 result = {"path": args["path"], "frames": audio.shape[1], "peak": float(np.abs(audio).max()),
+                          "midi_events": len(events), "buffer_size": buffer_size,
+                          "midi_sha256": args.get("midi_sha256") if args.get("midi_path") else None,
                           "revision": render_revision, "revision_number": revision_number,
                           "scope": "Direct plugin render; no driver, loopback or other applications"}
                 write_bytes(root / "session.uvim", state_xml(plugin.raw_state))
@@ -328,6 +365,11 @@ def engine(root: Path):
                             connection_plans.clear()
                         connection_plans[result["plan_id"]] = copy.deepcopy(result)
                         result["applied"] = False
+            elif op == "benchmark":
+                from .native_perf import benchmark
+
+                result = benchmark(plugin, args)
+                result["revision_number"] = revision_number
             else:
                 raise ValueError("Unsupported native operation")
             reply = {"id": request["id"], "session_id": session_id, "ok": True, "result": result}
