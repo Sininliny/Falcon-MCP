@@ -64,6 +64,26 @@ means a hard cut reads as roughly 30 ms of release.
 | `tremolo` | `rate_hz` (2-15 Hz) and `depth_db`, the peak-to-peak level modulation of the held body, from the amplitude modulation index | Needs at least 0.6 s of body; reported only above 1 % modulation |
 | `tail_truncated` | Level in the last 50 ms is above max(peak - 50 dB, noise floor + 10 dB) | `noise_floor_dbfs` is the quietest 60 ms window (digital silence reads -120 dBFS), so a render with no quiet moment at all has no usable floor |
 
+### `polyphony`
+
+Runs before pitch tracking. When the caller rendered the notes itself (`falcon_native_render`,
+`falcon_native_perform`), the count of simultaneously sounding notes comes from the MIDI, extended to
+the pedal release (`source: midi_events`). Otherwise up to 40 frames of about 170 ms are analysed
+(`source: audio`): spectral peaks below 5 kHz, then an iterative harmonic sum picks a note, removes its
+whole partial series (with a fitted piano-style stretch `f_h = h*f0*sqrt(1+B*h^2)`), and repeats.
+Noise-like frames are skipped.
+
+| Field | Definition | Limits |
+| --- | --- | --- |
+| `polyphonic` | At least 2 frames and 25 % of frames hold two estimated notes whose ratio is not unison, octave, twelfth or fifth | Deliberately conservative: a single tone with a weak fundamental can produce exactly those ratios, so octave and fifth dyads, and chord notes that coincide with a bass note's partials, read as monophonic |
+| `detected_notes` | Estimated notes in chord frames, most frequent first | Octave placement can be off by one; treat as a hint, not a transcription |
+| `max_simultaneous_notes` | From MIDI, or the largest per-frame estimate | |
+
+When `polyphonic` is true, `pitch` and `harmonics` are `available: false` with a reason, no pitch,
+tuning or octave finding is emitted, and the description says the checks were withheld. A
+single-f0 tracker on a chord locks onto a common subharmonic or hops between voices, which used to
+surface as `pitch_wrong_octave` or `unstable_octave_tracking`.
+
 ### `pitch`
 
 Two-pass YIN f0 track: a first pass finds the register, a second pass at a 5 ms hop uses a frame
@@ -77,6 +97,7 @@ sized for it (about 10 ms at A4) so vibrato is not smeared. Only frames that are
 | `stability_cents_std`, `drift_cents_per_second`, `attack_pitch_offset_cents` | Spread, linear trend, and median offset of the first 80 ms | |
 | `vibrato` | `rate_hz` (3-10 Hz) and `depth_cents` (+/- amplitude) | Depth within about 15 % at 5-7 Hz in tests; `rate_hz` is reported only for depths of at least 1 cent. Very low notes use longer frames and read fast vibrato lower |
 | `track` | Up to about 24 `[time, cents_from_median]` points | |
+| `octave_jump_frames` | Frames an octave from the median of their neighbouring 21 frames | Legitimate note changes in a melody do not count; more than 3 gives `unstable_octave_tracking` |
 
 ### `harmonics`
 

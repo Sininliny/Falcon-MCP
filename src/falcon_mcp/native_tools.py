@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, Stri
 
 from .audio import read_audio
 from .diagnostics import diagnose
-from .listen import listen
+from .listen import listen, max_overlap
 from .native_host import NativeHost
 
 READ = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
@@ -171,7 +171,8 @@ def register_native(mcp, config, audit):
         heard = await asyncio.to_thread(
             listen, audio, rate, notes[0].note if single else None,
             min(n.start_seconds for n in notes) if single else None,
-            max(n.start_seconds + n.duration_seconds for n in notes) if single and len(notes) == 1 else None, False)
+            max(n.start_seconds + n.duration_seconds for n in notes) if single and len(notes) == 1 else None, False,
+            max_overlap([(n.start_seconds, n.start_seconds + n.duration_seconds) for n in notes]))
         return {**result, "diagnostics": report, "listening": {
             "description": heard.get("description"), "findings": heard.get("findings"),
             "next": "falcon_listen(path) for ASCII views and full evidence; falcon_audio_diff to compare renders"}}

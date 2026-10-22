@@ -5,18 +5,20 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import numpy as np
 from pydantic import Field
 
 from .audio import FeedbackRunner, read_audio
 from .bridge import atomic_json
+from .descriptors import descriptor_deltas, select_facets
 from .diagnostics import diagnose
 from .reference import compare_profiles, extract_segment, profile
 
 READ = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
 Target = Annotated[str, Field(min_length=1, max_length=500)]
+Bank = Literal["synth", "keys", "all"]
 
 
 def register_reference(mcp, config, feedback: FeedbackRunner):
@@ -29,12 +31,14 @@ def register_reference(mcp, config, feedback: FeedbackRunner):
         requested_changes: Annotated[str, Field(max_length=2000)] = "",
         describe: bool = False,
         targets: Annotated[list[Target], Field(max_length=20)] | None = None,
+        descriptor_bank: Bank = "synth",
     ) -> dict[str, Any]:
         """Import/analyze an explicit local audio attachment's 0.1..30 s reference segment.
 
         source may be outside the audio root; only this explicit audio file/selected frames are read.
         focus identifies the intended instrument, requested_changes preserves the user's design goal.
-        Does not isolate a source from a mix. describe optionally starts/releases local CLAP.
+        Does not isolate a source from a mix. describe optionally starts/releases local CLAP
+        (descriptor_bank keys for pianos and electric pianos).
         Returns level, spectral bands, stereo and envelope evidence plus a reference_id for A/B.
         """
         path, metadata = await asyncio.to_thread(extract_segment, config, source, start_seconds, end_seconds)
@@ -43,7 +47,8 @@ def register_reference(mcp, config, feedback: FeedbackRunner):
                   "limitations": ["No source separation: mixed instruments remain in the selected segment",
                                   "Measurements describe the recording; do not infer exact synth settings"]}
         if describe:
-            result["feedback"] = await feedback.analyze(path, targets)
+            result["feedback"] = await feedback.analyze(path, targets, select_facets(descriptor_bank),
+                                                        descriptor_bank)
         atomic_json(config.audio_root / f"reference-{metadata['reference_id']}.json", result)
         return result
 
@@ -51,12 +56,14 @@ def register_reference(mcp, config, feedback: FeedbackRunner):
     async def falcon_compare_reference(
         reference_id: str, candidate_path: str, describe: bool = False,
         targets: Annotated[list[Target], Field(max_length=20)] | None = None,
+        descriptor_bank: Bank = "synth",
     ) -> dict[str, Any]:
         """Compare a saved reference segment with a <=30 s candidate capture/render under the audio root.
 
         Returns level-independent band differences, envelope/stereo evidence and testable adjustment
         hypotheses. It does not edit Falcon or isolate a specified instrument from mixed music.
-        describe runs/reaps CLAP separately for each file using the same candidate text bank.
+        describe runs/reaps CLAP separately for each file using the same candidate text bank
+        (descriptor_bank keys for pianos and electric pianos) and lists the largest descriptor deltas.
         """
         if not re.fullmatch(r"[a-f0-9]{32}", reference_id):
             raise ValueError("Invalid reference_id")
@@ -68,8 +75,11 @@ def register_reference(mcp, config, feedback: FeedbackRunner):
                   "requested_changes": metadata.get("requested_changes"), "reference": r, "candidate": c,
                   "comparison": compare_profiles(r, c)}
         if describe:
-            result["reference_feedback"] = await feedback.analyze(reference, targets)
-            result["candidate_feedback"] = await feedback.analyze(candidate, targets)
+            facets = select_facets(descriptor_bank)
+            result["reference_feedback"] = await feedback.analyze(reference, targets, facets, descriptor_bank)
+            result["candidate_feedback"] = await feedback.analyze(candidate, targets, facets, descriptor_bank)
+            result["descriptor_deltas"] = descriptor_deltas(result["reference_feedback"],
+                                                            result["candidate_feedback"])
         return result
 
     @mcp.tool(annotations=READ)
