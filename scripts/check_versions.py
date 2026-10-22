@@ -13,7 +13,8 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-BOUND_GUIDES = ["skills/falcon-instrument-workflow/SKILL.md", "docs/one-time-setup.md", "docs/result-scope.md"]
+BOUND_GUIDES = ["skills/falcon-instrument-workflow/SKILL.md", "docs/one-time-setup.md", "docs/result-scope.md",
+                "docs/development.md"]
 SCANNED = ["docs", "skills", "src/falcon_mcp"]
 SUSPECT_PRODUCT = re.compile(r"Falcon\s*(?:v)?2\.7\.0|\b2\.7\.0\b")
 
