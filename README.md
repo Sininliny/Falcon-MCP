@@ -138,6 +138,7 @@ The server exposes **56 tools**, structured schemas, the `falcon://capabilities`
 | `falcon_build_instrument`, `falcon_accept_instrument`, `falcon_revision` | Controlled analog structures, role-specific acceptance, revision-bound publishing. |
 | `falcon_analyze_reference`, `falcon_compare_reference`, `falcon_audio_meter` | Import a reference time range, preserve the design goal, compare candidate evidence, inspect levels. |
 | `falcon_midi_compare`, `falcon_midi_compare_result` | Per-note comparison of a reference and a candidate playing the same MIDI: partials, attack, decay, release, velocity curves, voice balance. |
+| `falcon_rack_scan`, `falcon_rack_state`, `falcon_rack_render`, `falcon_rack_compare`, `falcon_rack_job` | Plugin rack: scan installed VST3 plugins, render any of them offline from the same MIDI or single notes, and compare with Falcon per note ([plugin rack](docs/plugin-rack.md)). |
 | `falcon_search_catalog`, `falcon_api_coverage` | Offline parameter/API indexes and runtime function probes. |
 | `falcon_list_children`, `falcon_list_parameters`, `falcon_get_parameters`, `falcon_set_parameters` | Browse and edit public state. |
 | `falcon_get_connections`, `falcon_set_connection_parameters`, `falcon_set_output` | Existing modulation and routing. |
