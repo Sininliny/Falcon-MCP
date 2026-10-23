@@ -139,6 +139,8 @@ The server exposes **56 tools**, structured schemas, the `falcon://capabilities`
 | `falcon_midi_capture`, `falcon_performance_profile` | Record the player's live MIDI in the open Falcon for offline replay (`falcon_native_perform(performance_path=...)`); velocity/pedal profile and touch curve. |
 | `falcon_build_instrument`, `falcon_accept_instrument`, `falcon_revision` | Controlled analog structures, role-specific acceptance, revision-bound publishing. |
 | `falcon_analyze_reference`, `falcon_compare_reference`, `falcon_audio_meter` | Import a reference time range, preserve the design goal, compare candidate evidence, inspect levels. |
+| `falcon_midi_compare`, `falcon_midi_compare_result` | Per-note comparison of a reference and a candidate playing the same MIDI: partials, attack, decay, release, velocity curves, voice balance. |
+| `falcon_rack_scan`, `falcon_rack_state`, `falcon_rack_render`, `falcon_rack_compare`, `falcon_rack_job` | Plugin rack: scan installed VST3 plugins, render any of them offline from the same MIDI or single notes, and compare with Falcon per note ([plugin rack](docs/plugin-rack.md)). |
 | `falcon_search_catalog`, `falcon_api_coverage` | Offline parameter/API indexes and runtime function probes. |
 | `falcon_list_children`, `falcon_list_parameters`, `falcon_get_parameters`, `falcon_set_parameters` | Browse and edit public state. |
 | `falcon_get_connections`, `falcon_set_connection_parameters`, `falcon_set_output` | Existing modulation and routing. |
@@ -178,7 +180,7 @@ Native extensions run inside Falcon's Lua sandbox. The stable launcher reads tru
 
 ## Audio feedback and diagnostics
 
-CLAP matches audio against English text descriptors; it is not a generative audio-question-answering model or an objective quality score. Compare identical notes, velocities, gains, targets, and capture conditions. Feedback does not infer Falcon parameter values or change patches automatically.
+CLAP matches audio against English text descriptors; it is not a generative audio-question-answering model or an objective quality score. Pick the descriptor bank that fits the instrument: `synth` (default), `keys` (concert grand, upright, felt and honky-tonk piano, Rhodes, Wurlitzer; hammer, mechanics, perspective, pedal, tremolo), `all`, or `custom`. Your own facets can be passed inline as `custom_descriptors` or as a `.json` file `descriptor_file` (under the audio root or assets, layout `[{"facet": ..., "items": [{"label": ..., "text": ...}]}]`). Similar instruments often share top labels, so `falcon_compare_audio` and `falcon_compare_reference` also list the largest per-descriptor score changes. Compare identical notes, velocities, gains, targets, and capture conditions. Feedback does not infer Falcon parameter values or change patches automatically.
 
 The server does not import the model runtime during startup/control. Each non-silent feedback call starts a worker, loads weights, returns results, and exits; timeout/cancellation terminates and reaps it. RAM/VRAM is released; cached weights remain on disk. The default model is Apache-2.0-licensed `laion/clap-htsat-unfused`; inference defaults to offline CPU execution.
 

@@ -11,9 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, Stri
 
 from .audio import read_audio
 from .diagnostics import diagnose
-from .listen import listen
+from .listen import listen, max_overlap
 from .native_host import NativeHost
-from .perform import TimelineError, summarize, timeline_end
+from .perform import TimelineError, sounding_windows, summarize, timeline_end
 from .perform_tools import ControllerEvent, render_timeline
 
 READ = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
@@ -180,6 +180,8 @@ def register_native(mcp, config, audit):
                 raise ValueError(str(exc)) from exc
             result = {**result, "path": str(path)}
             extra = {"mid_path": files["mid_path"], "events": summarize(timeline, compiled)}
+            # Pedal-extended note windows: held-pedal phrases are chords to a pitch tracker.
+            voice_windows = [(w["on"], w["sound_off"]) for w in sounding_windows(timeline, seconds)]
         else:
             config.audio_root.mkdir(parents=True, exist_ok=True)
             path = config.audio_path(f"native-{uuid.uuid4().hex}.wav", must_exist=False)
@@ -189,6 +191,7 @@ def register_native(mcp, config, audit):
                 "expected_revision": expected_revision,
             })
             audio, rate = await asyncio.to_thread(read_audio, path)
+            voice_windows = [(n.start_seconds, n.start_seconds + n.duration_seconds) for n in notes]
         report = await asyncio.to_thread(diagnose, audio, rate)
         report.pop("envelope", None)
         # Single-pitch renders get tuning/ADSR context; chords and phrases get level/spectrum wording only.
@@ -198,7 +201,8 @@ def register_native(mcp, config, audit):
         heard = await asyncio.to_thread(
             listen, audio, rate, notes[0].note if single else None,
             min(n.start_seconds for n in notes) if single else None,
-            max(n.start_seconds + n.duration_seconds for n in notes) if single and len(notes) == 1 else None, False)
+            max(n.start_seconds + n.duration_seconds for n in notes) if single and len(notes) == 1 else None, False,
+            max_overlap(voice_windows))
         return {**result, **extra, "diagnostics": report, "listening": {
             "description": heard.get("description"), "findings": heard.get("findings"),
             "next": "falcon_listen(path) for ASCII views and full evidence; falcon_audio_diff to compare renders"}}

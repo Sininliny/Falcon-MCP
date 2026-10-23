@@ -7,7 +7,7 @@ def test_audit_is_complete_paginated_and_redacts_credentials(config):
     log = AuditLog(config.log_root)
     token = trace_id.set("test-trace")
     try:
-        log.event("request", args={"token": "do-not-log", "nested": [{"password": "bad"}], "value": 0.123})
+        log.event("request", args={"token": "do-not-log", "nested": [{"password": "secret-pw"}], "value": 0.123})
         log.event("result", result={"verified": False, "before": 1, "after": 0.5})
     finally:
         trace_id.reset(token)
@@ -16,7 +16,7 @@ def test_audit_is_complete_paginated_and_redacts_credentials(config):
     assert records["items"][0]["trace_id"] == "test-trace"
     assert records["items"][0]["args"]["token"] == "[REDACTED]"
     raw = log.path.read_text(encoding="utf8")
-    assert "do-not-log" not in raw and "bad" not in raw
+    assert "do-not-log" not in raw and "secret-pw" not in raw
     log.event("malformed", value=float("nan"))
     for line in log.path.read_text().splitlines():
         json.loads(line)

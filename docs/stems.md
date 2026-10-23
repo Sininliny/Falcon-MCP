@@ -21,8 +21,22 @@ performance several ways and report, for each layer or group, what it actually c
   `falcon_record_test` captures or earlier native renders. All files must be renders of the same performance
   with the same start time and rate.
 
+- `falcon_native_stems_result` (read-only). Collects a `falcon_native_stems` run that returned
+  `status: "running"`.
+
 At most 10 targets per run (up to 24 renders). WAV stems stay under `<audio root>/stems-<id>/` for
 `falcon_listen`; the full JSON report goes to `<home>/reports/stems-<id>.stems.json`.
+
+## Long runs and client timeouts
+
+A run is 10-24 offline renders plus analysis, which can take longer than the roughly 60 s that MCP clients
+such as Claude Desktop and Codex allow for one tool call ("Request timed out"). The run therefore executes
+as a background job. `falcon_native_stems` waits up to `wait_seconds` (default 40, at most 50) and then
+returns either the report with `status: "done"` or `status: "running"` with `job_id`, `stage`,
+`renders_done` and `renders_total`. Call `falcon_native_stems_result(job_id)` until it returns the report
+(or raises the run's error). A client that gives up does not cancel the job, so it still restores every
+edit; do not edit the same native session while it runs, and only one stems run per session is allowed at
+a time. Jobs live in the server process; after a restart, read `<home>/reports/<job_id>.stems.json`.
 
 ## Silencing and restoring
 
@@ -57,7 +71,7 @@ least 30 % sits under held notes and it carries the held energy (share >= -6 dB,
 noise when spectral flatness >= 0.25; brightness / low_end when >= 40 % of its energy is above 4 kHz / >= 60 %
 below 250 Hz; level_only when removing it drops loudness >= 1 dB but no timbre feature moves one step after
 matching. Status inaudible: solo below -40 dB re full, or removal changes loudness < 0.5 dB with no feature
-step and < 5 % exposure. Masked: < 20 % exposure while the solo is louder than -20 dB re full.
+step and < 5 % exposure. Masked: < 20 % exposure while above the inaudible floor, however quiet. Silent: the solo render is silent (no roles are assigned).
 
 `effects` and `space_effects` apply the same analysis to full vs `dry` and full vs `no_space`.
 `stereo_origin` compares the width (side-minus-mid dB, floor -60 dB = mono) of full, dry and no_space and
