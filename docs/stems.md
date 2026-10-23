@@ -71,7 +71,7 @@ least 30 % sits under held notes and it carries the held energy (share >= -6 dB,
 noise when spectral flatness >= 0.25; brightness / low_end when >= 40 % of its energy is above 4 kHz / >= 60 %
 below 250 Hz; level_only when removing it drops loudness >= 1 dB but no timbre feature moves one step after
 matching. Status inaudible: solo below -40 dB re full, or removal changes loudness < 0.5 dB with no feature
-step and < 5 % exposure. Masked: < 20 % exposure while the solo is louder than -20 dB re full.
+step and < 5 % exposure. Masked: < 20 % exposure while above the inaudible floor, however quiet. Silent: the solo render is silent (no roles are assigned).
 
 `effects` and `space_effects` apply the same analysis to full vs `dry` and full vs `no_space`.
 `stereo_origin` compares the width (side-minus-mid dB, floor -60 dB = mono) of full, dry and no_space and
