@@ -40,7 +40,7 @@ class ScriptHost(FakeHost):
                 self.attributes["ScriptPan"] = "-0.2"
             changed = self.aliases.rendered(before, self.revision())
             result.update(revision=before, revision_after=self.revision(), state_changed_by_render=changed)
-        elif op == "edit" and args["changes"]:
+        elif op == "edit" and args["changes"] or op == "edit_batch" and any(e.get("changes") for e in args["edits"]):
             self.aliases.clear()
         return result
 
@@ -244,7 +244,8 @@ class AuxScriptHost(StemHost):
             aux.set("Gain", "0.99999994")
         if op == "render":
             self.aliases.rendered(before, self.revision())
-        elif op == "edit" and args.get("changes"):
+        elif op == "edit" and args.get("changes") or op == "edit_batch" and any(e.get("changes")
+                                                                                 for e in args["edits"]):
             self.aliases.clear()
         return result
 

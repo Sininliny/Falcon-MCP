@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import itertools
 import json
 import time
@@ -13,7 +14,7 @@ from scipy.signal import fftconvolve
 
 from falcon_mcp import stems
 from falcon_mcp.audit import AuditLog
-from falcon_mcp.native_edit import edit_node
+from falcon_mcp.native_edit import edit_batch, edit_node
 from falcon_mcp.revisions import content_fingerprint
 from falcon_mcp.stem_tools import register_stems
 
@@ -56,11 +57,12 @@ def layer_signals(time, windows, modes_gain):
 class FakeHost:
     """Native worker stand-in over real native_edit XML; renders three layers, a reverb insert and a send."""
 
-    def __init__(self, fail_render_after=None, events_supported=True):
+    def __init__(self, fail_render_after=None, events_supported=True, xml=XML):
         self.events_supported = events_supported
-        self.root = ET.fromstring(XML)
+        self.root = ET.fromstring(xml)
         self.renders = []
         self.fail_render_after = fail_render_after
+        self.ops = []
 
     def revision(self):
         return content_fingerprint(self.root)
@@ -74,10 +76,21 @@ class FakeHost:
             raise ValueError("Native revision changed; inspect before retrying")
         if op == "status":
             return {"revision": self.revision()}
+        self.ops.append(op)
         if op == "edit":
             result = edit_node(self.root, args["selector"], args.get("changes", []))
             if args.get("changes"):
                 result["readback"] = edit_node(self.root, args["selector"], [])
+            return {**result, "revision": self.revision()}
+        if op == "edit_batch":  # Mirrors native_worker: guards all, then applies all, then reads back.
+            assert len(json.dumps(args)) < 65536
+            work = copy.deepcopy(self.root)
+            result = edit_batch(work, args["edits"])
+            writes = [e for e in args["edits"] if e.get("changes")]
+            if writes:
+                self.root = work
+                result["readback"] = [{"selector": n["selector"], "attributes": n["attributes"]} for n in
+                                      edit_batch(self.root, [{"selector": e["selector"]} for e in writes])["nodes"]]
             return {**result, "revision": self.revision()}
         assert op == "render"
         if self.fail_render_after is not None and len(self.renders) >= self.fail_render_after:
@@ -404,6 +417,34 @@ def test_stem_analysis_skips_pitch_and_analyses_the_full_mix_once(monkeypatch):
     assert [t["name"] for t in out["targets"]] == ["Body", "Hammer", "Modes"]
     # One report per loudness-matched "without" render (3 targets + dry + no_space) plus the full mix once.
     assert len(calls) == 5 + 1
+
+
+def many_keygroups(count):
+    """The test multi with `count` keygroups per layer, each with its own insert (BypassInsertFX) chain."""
+    start = XML.index("<Keygroup ")
+    end = XML.index("</Keygroup>") + len("</Keygroup>")
+    return XML.replace(XML[start:end], XML[start:end] * count)
+
+
+@pytest.mark.asyncio
+async def test_native_requests_do_not_grow_with_the_number_of_keygroups(config):
+    """Every native edit re-serialises the whole Falcon state (~0.7 s live); the Glacier dry render alone
+    took 361 single edits (4 minutes). Silencing, restoring and discovery must be batched."""
+    from falcon_mcp.native_tools import RenderNote
+
+    counts = {}
+    for keygroups in (1, 40):
+        host = FakeHost(xml=many_keygroups(keygroups))
+        before = host.revision()
+        result = await tools(config, host)["falcon_native_stems"](
+            session_id=SESSION, notes=[RenderNote(**n) for n in NOTES], seconds=3.5, check_repeat=False)
+        assert result["scope"]["restored"] and host.revision() == before
+        assert "edit" not in host.ops
+        dry = next(r for r in result["renders"] if r["render"] == "dry")
+        assert dry["edits"] >= 3 * keygroups  # every keygroup's insert chain is bypassed
+        counts[keygroups] = len(host.ops)
+    assert counts[40] <= counts[1] + 4
+    assert counts[40] < 70  # ~4 requests per render plus one read per tree level
 
 
 def test_silent_target_gets_no_roles():

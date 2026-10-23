@@ -351,6 +351,23 @@ def engine(root: Path):
                     if not result["verified"]:
                         raise RuntimeError("Native edit readback mismatch; inspect the current state before retrying")
                 result.update(revision=content_fingerprint(current()), revision_number=revision_number)
+            elif op == "edit_batch":
+                # One state read and at most one state write for many nodes: every single edit re-serialises
+                # the whole Falcon state (~0.7 s on a large instrument), so stems/dry runs batch them.
+                from .native_edit import edit_batch, verify_changes
+
+                tree = current()
+                writes = [e for e in args["edits"] if e.get("changes")]
+                if writes and not args.get("expected_revision"):
+                    raise ValueError("Native writes require expected_revision from an inspected read")
+                result = edit_batch(tree, args["edits"])
+                if writes:
+                    apply(tree)
+                    readback = edit_batch(current(), [{"selector": e["selector"]} for e in writes])["nodes"]
+                    if not all(verify_changes(node, e["changes"]) for node, e in zip(readback, writes)):
+                        raise RuntimeError("Native edit readback mismatch; inspect the current state before retrying")
+                    result["readback"] = [{"selector": n["selector"], "attributes": n["attributes"]} for n in readback]
+                result.update(revision=content_fingerprint(current()), revision_number=revision_number)
             elif op == "connection":
                 from .connections import plan_connection
 

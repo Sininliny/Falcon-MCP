@@ -221,3 +221,27 @@ def test_revision_aliases_follow_render_chains_and_clear_on_real_edits():
     assert len(aliases.of(aliases.current)) == MAX_ALIASES and aliases.matches("a", aliases.current)
     aliases.clear()
     assert not aliases.matches("a", "c")
+
+
+def test_edit_batch_writes_many_nodes_with_one_state_load_and_applies_nothing_on_a_failed_guard(engine):
+    layers = "".join(f'<Layer Name="L{i}" DisplayName="L{i}" Gain="1" Mute="0"/>' for i in range(3))
+    path = engine.tmp / "layers.uvim"
+    path.write_bytes(f'<UVI4><Engine><Synth><Children><Part><Program DisplayName="Layers"><Layers>{layers}'
+                     f'</Layers></Program></Part></Children></Synth></Engine></UVI4>'.encode())
+    loaded = engine("load", kind="multi", path=str(path), part=1, settle_seconds=0)
+    base = "Engine/Synth/Children/Part[1]/Program[1]/Layers[1]/Layer"
+    read = engine("edit_batch", edits=[{"selector": f"{base}[{i}]"} for i in (1, 2, 3)], expected_revision=None)
+    assert [n["attributes"]["Gain"] for n in read["nodes"]] == ["1", "1", "1"]
+    assert list(read["definitions"]) == ["Layer"] and "indexed_definitions" not in read["nodes"][0]
+    number = read["revision_number"]
+    written = engine("edit_batch", expected_revision=read["revision"], edits=[
+        {"selector": f"{base}[{i}]", "changes": [{"name": "Mute", "value": True, "expected": "0"}]} for i in (1, 3)])
+    assert written["revision_number"] == number + 1  # one state load for the whole batch
+    assert [r["attributes"]["Mute"] for r in written["readback"]] == ["1", "1"]
+    with pytest.raises(ValueError, match="expected-value guard"):
+        engine("edit_batch", expected_revision=written["revision"], edits=[
+            {"selector": f"{base}[2]", "changes": [{"name": "Mute", "value": True, "expected": "0"}]},
+            {"selector": f"{base}[3]", "changes": [{"name": "Mute", "value": False, "expected": "0"}]}])
+    after = engine("edit_batch", edits=[{"selector": f"{base}[{i}]"} for i in (1, 2, 3)], expected_revision=None)
+    assert [n["attributes"]["Mute"] for n in after["nodes"]] == ["1", "0", "1"]
+    assert after["revision"] == written["revision"] and loaded["revision"] != written["revision"]
