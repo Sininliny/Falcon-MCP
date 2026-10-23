@@ -57,27 +57,31 @@ def _describe(plugin) -> dict:
 def probe(request: dict, result_path: Path):
     from pedalboard import VST3Plugin
 
+    from .rack import binary_path
+
     with result_path.open("a", encoding="utf-8") as out:
         for bundle in request["bundles"]:
             out.write(json.dumps({"start": bundle}) + "\n")
             out.flush()
             started = time.monotonic()
+            loaded = []
             try:
-                from .rack import binary_path
-
                 module = str(binary_path(Path(bundle)))
-                names = list(VST3Plugin.get_plugin_names_for_file(module))
-                plugins = []
+                try:
+                    names = list(VST3Plugin.get_plugin_names_for_file(module))
+                except Exception:  # noqa: BLE001 - e.g. a non-UTF-8 error text; loading directly may still work
+                    names = [None]
                 for name in names:
-                    plugin = _load(bundle, name if len(names) > 1 else None)
-                    plugins.append(_describe(plugin))
-                    del plugin
-                row = {"done": bundle, "plugins": plugins}
+                    loaded.append(_load(bundle, name if len(names) > 1 else None))
+                row = {"done": bundle, "plugins": [_describe(plugin) for plugin in loaded]}
             except Exception as exc:  # noqa: BLE001 - recorded per bundle; the scan continues
                 row = {"done": bundle, "error": f"{type(exc).__name__}: {exc}"[:400]}
             row["seconds"] = round(time.monotonic() - started, 2)
             out.write(json.dumps(row) + "\n")
             out.flush()
+            # Unload after reporting: some plugins hang in their unload code, and the parent then restarts
+            # the scan without blaming the next plugin.
+            del loaded
 
 
 def _apply_state(plugin, state: str | None):
@@ -102,10 +106,18 @@ def _apply_parameters(plugin, parameters: dict) -> dict:
 
 def editor(request: dict, result_path: Path):
     """Show the plugin window; when the user closes it, save the state as .vstpreset (raw state fallback)."""
+    import threading
+
     plugin = _load(request["bundle"], request.get("plugin_name"))
     _apply_state(plugin, request.get("state"))
     opened = time.time()
-    plugin.show_editor()
+    # Close the window ourselves before the parent's timeout, so what the user set up so far is still saved.
+    close = threading.Event()
+    timer = threading.Timer(request["close_after_seconds"], close.set)
+    timer.daemon = True
+    timer.start()
+    plugin.show_editor(close)
+    timer.cancel()
     target = Path(request["output"])
     target.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -118,7 +130,9 @@ def editor(request: dict, result_path: Path):
     os.replace(temp, target)
     result_path.write_text(json.dumps({"ok": True, "result": {
         "state_path": str(target), "format": kind, "bytes": len(data),
-        "editor_open_seconds": round(time.time() - opened, 1), "plugin": _describe(plugin)}}), encoding="utf-8")
+        "editor_open_seconds": round(time.time() - opened, 1), "closed_by_timeout": close.is_set(),
+        "plugin": _describe(plugin)}}), encoding="utf-8")
+    _terminate()  # while the plugin is still referenced, so its destructor never runs
 
 
 def _level_db(audio) -> float:
@@ -126,6 +140,13 @@ def _level_db(audio) -> float:
 
     rms = float(np.sqrt(np.mean(np.square(audio, dtype=np.float64)))) if audio.size else 0.0
     return round(20 * np.log10(max(rms, 1e-12)), 2)
+
+
+def _reset(plugin, rate: int, block: int):
+    """reset() plus 1 s of silence: some instruments (UADx Ravel) ignore notes that arrive right after a reset,
+    which dropped the first note of every timeline and every settle probe."""
+    plugin.reset()
+    plugin([], duration=1.0, sample_rate=rate, num_channels=2, buffer_size=block, reset=False)
 
 
 def settle(plugin, request: dict) -> dict:
@@ -140,7 +161,8 @@ def settle(plugin, request: dict) -> dict:
     messages = [(bytes([0x90 + channel, note, velocity]), 0.0), (bytes([0x80 + channel, note, 0]), 0.6)]
     levels, stable = [], False
     while True:
-        audio = plugin(messages, duration=1.2, sample_rate=rate, num_channels=2, buffer_size=block, reset=True)
+        _reset(plugin, rate, block)
+        audio = plugin(messages, duration=1.2, sample_rate=rate, num_channels=2, buffer_size=block, reset=False)
         levels.append(_level_db(audio))
         if len(levels) >= 2 and levels[-1] > -80 and abs(levels[-1] - levels[-2]) <= 0.5:
             stable = True
@@ -148,7 +170,6 @@ def settle(plugin, request: dict) -> dict:
         if time.monotonic() > deadline:
             break
         time.sleep(0.5)
-    plugin.reset()
     return {"stable": stable, "probe": {"channel": channel + 1, "note": note, "velocity": velocity},
             "probe_levels_db": levels, "silent": bool(levels and max(levels) <= -80),
             "peak_probe_db": float(np.max(levels)) if levels else None}
@@ -177,7 +198,7 @@ def render(request: dict, result_path: Path):
         target.parent.mkdir(parents=True, exist_ok=True)
         peak, energy, frames, started = 0.0, 0.0, 0, time.monotonic()
         onset = None
-        plugin.reset()
+        _reset(plugin, rate, block)
         with sf.SoundFile(str(target), "w", samplerate=rate, channels=2, subtype="FLOAT") as out:
             start = 0.0
             while start < length - 1e-9:
@@ -204,6 +225,7 @@ def render(request: dict, result_path: Path):
     result_path.write_text(json.dumps({"ok": True, "result": {
         "plugin": _describe(plugin), "load_seconds": round(load_seconds, 2), "settle": settled,
         "parameters_applied": applied, "renders": renders}}, allow_nan=False), encoding="utf-8")
+    _terminate()  # while the plugin is still referenced, so its destructor never runs
 
 
 def main(argv: list[str]):
@@ -219,6 +241,18 @@ def main(argv: list[str]):
                                    encoding="utf-8")
         else:
             raise
+    _terminate()
+
+
+def _terminate():
+    """Exit without running plugin unload code: some plugins hang in DLL detach after the work is done."""
+    sys.stdout.flush()
+    if os.name == "nt":
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        kernel32.TerminateProcess(kernel32.GetCurrentProcess(), 0)
+    os._exit(0)
 
 
 if __name__ == "__main__":

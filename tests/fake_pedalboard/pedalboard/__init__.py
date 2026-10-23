@@ -2,7 +2,9 @@
 
 Behaviour follows the plugin file name: Crash* exits during load, Hang* never finishes loading, Shell*
 holds two plugins, Fx* is an effect, Slow* is silent for its first three renders (background loading),
-Bright* has stronger upper partials. State files are JSON ({"gain": ...}); show_editor sets gain 0.25.
+Bright* has stronger upper partials, Deaf* ignores notes in the first 0.5 s after a reset, Sticky* hangs
+while unloading, Patient* keeps its window open until the close event. State files are JSON
+({"gain": ...}); show_editor sets gain 0.25.
 """
 
 import json
@@ -50,6 +52,12 @@ class _Plugin:
 
     def show_editor(self, close_event=None):
         self.gain = 0.25
+        if self.base.startswith("Patient"):
+            close_event.wait()
+
+    def __del__(self):
+        if getattr(self, "base", "").startswith("Sticky"):
+            time.sleep(3600)
 
     def reset(self):
         self.voices, self.position = [], 0
@@ -63,6 +71,8 @@ class _Plugin:
             status, note, velocity = data[0] & 0xF0, data[1], data[2] if len(data) > 2 else 0
             at = self.position + round(at * sample_rate)
             if status == 0x90 and velocity > 0:
+                if self.base.startswith("Deaf") and at < 0.5 * sample_rate:
+                    continue
                 self.voices.append([note, velocity, at, None])
             elif status in (0x80, 0x90):
                 for voice in self.voices:
