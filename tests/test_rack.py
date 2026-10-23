@@ -283,3 +283,26 @@ async def test_switch_sound_by_preset_name_or_program(tools):
     assert program["render"]["peak_dbfs"] == pytest.approx(base["render"]["peak_dbfs"] - 12.04, abs=0.2)
     with pytest.raises(ValueError, match="No preset"):
         await tools["falcon_rack_render"](plugin="Good", state="nothing", sweep=rack_sweep(notes=[60]))
+
+
+async def test_instrument_file_loads_without_user(tools, tmp_path, monkeypatch):
+    # Live 2026-10-23: NOIRE Felt.nki dropped onto Kontakt 8's window rendered bit-identical to a hand-loaded state.
+    monkeypatch.setenv("FALCON_RACK_TEST_DROP", "1")
+    nki = tmp_path / "NOIRE Felt.nki"
+    nki.write_text("noire felt", encoding="utf-8")
+    await _finish(tools, await tools["falcon_rack_scan"](probe_timeout_seconds=4, wait_seconds=0))
+    base = await _finish(tools, await tools["falcon_rack_render"](
+        plugin="Good", sweep=rack_sweep(notes=[60]), warmup_seconds=0, settle_seconds=5))
+    dropped = await _finish(tools, await tools["falcon_rack_render"](
+        plugin="Good", instrument=str(nki), sweep=rack_sweep(notes=[60]), warmup_seconds=0, settle_seconds=5))
+    assert dropped["render"]["instrument"]["file"] == str(nki.resolve())
+    assert dropped["render"]["peak_dbfs"] == pytest.approx(base["render"]["peak_dbfs"] - 6.02, abs=0.2)
+    saved = await _finish(tools, await tools["falcon_rack_state"](plugin="Good", name="felt", instrument=str(nki)))
+    assert saved["instrument"]["file"] == str(nki.resolve())
+    assert json.loads(Path(saved["state_path"]).read_text())["instrument"] == "noire felt"
+    again = await _finish(tools, await tools["falcon_rack_render"](
+        plugin="Good", state="felt", sweep=rack_sweep(notes=[60]), warmup_seconds=0, settle_seconds=5))
+    assert again["render"]["peak_dbfs"] == pytest.approx(dropped["render"]["peak_dbfs"], abs=0.01)
+    with pytest.raises(ValueError, match="Instrument file not found"):
+        await tools["falcon_rack_render"](plugin="Good", instrument=str(tmp_path / "missing.nki"),
+                                          sweep=rack_sweep(notes=[60]))
