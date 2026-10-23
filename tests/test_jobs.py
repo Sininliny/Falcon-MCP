@@ -189,3 +189,74 @@ async def test_failed_stems_run_resumes_from_saved_renders(config):
     assert len(host.renders) == len(result["renders"])  # the first three were not rendered twice
     assert result["scope"]["restored"] and result["scope"]["revision_unchanged"]
     assert {t["name"]: t["status"] for t in result["targets"]}["Body"] == "audible"
+
+
+class SessionSwap:
+    """The same instrument reloaded in a new owned-host session after a crash: a new session id."""
+
+    def __init__(self, host, session_id):
+        self.host, self.session_id = host, session_id
+
+    async def request(self, session_id, op, args, **kwargs):
+        assert session_id == self.session_id
+        return await self.host.request(SESSION, op, args, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_sweep_resumes_in_a_new_host_session_after_a_crash(config):
+    host = FakeHost()
+    original = host.request
+
+    async def crash(session_id, op, args, **kwargs):
+        if op == "render" and len(host.renders) == 3:
+            raise RuntimeError("Native worker exited")
+        return await original(session_id, op, args, **kwargs)
+
+    host.request = crash
+    with pytest.raises(RuntimeError) as err:
+        await sweep_tools(config, host)["falcon_native_sweep"](session_id=SESSION, **SWEEP)
+    job_id = str(err.value).rsplit('resume_job_id="', 1)[1].split('"')[0]
+    host.request = original
+    restarted = "c" * 32
+    # A new server process: a fresh tool registry and a new session id, same state on disk.
+    result = await sweep_tools(config, SessionSwap(host, restarted))["falcon_native_sweep"](
+        session_id=restarted, resume_job_id=job_id, **SWEEP)
+    assert result["status"] == "done" and result["resumed_cells"] == 3 and len(host.renders) == 6
+
+
+class AuxScriptHost(StemHost):
+    """Glacier: the instrument script rewrites the Aux return gain during a render, to a float32 neighbour of
+    its original value, so the no_space render's "Gain 0" does not hold."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.aliases = RevisionAliases()
+
+    async def request(self, session_id, op, args, **kwargs):
+        # The worker's guard: a render-only change keeps the revision the render started from valid.
+        expected = args.get("expected_revision")
+        if expected and not self.aliases.matches(expected, self.revision()):
+            raise ValueError("Native revision changed; inspect before retrying")
+        before = self.revision()
+        result = await super().request(session_id, op, {**args, "expected_revision": None}, **kwargs)
+        aux = self.root.find("Engine/Synth/Auxs/AuxEffect")
+        if op == "render" and aux.get("Gain") != "1":
+            aux.set("Gain", "0.99999994")
+        if op == "render":
+            self.aliases.rendered(before, self.revision())
+        elif op == "edit" and args.get("changes"):
+            self.aliases.clear()
+        return result
+
+
+@pytest.mark.asyncio
+async def test_stems_restore_accepts_a_value_the_script_rewrote_and_flags_the_render(config):
+    host = AuxScriptHost()
+    before = host.revision()
+    result = await stem_tools(config, host)["falcon_native_stems"](
+        session_id=STEM_SESSION, notes=[RenderNote(**n) for n in NOTES], seconds=3.5)
+    assert result["status"] == "done" and result["scope"]["restored"] and result["scope"]["revision_unchanged"]
+    assert host.revision() == before and host.root.find("Engine/Synth/Auxs/AuxEffect").get("Gain") == "1"
+    no_space = next(r for r in result["renders"] if r["render"] == "no_space")
+    assert "AuxEffect" in no_space["silencing_overridden"][0]
+    assert any(f.startswith("silencing_overridden: the no_space render") for f in result["findings"])

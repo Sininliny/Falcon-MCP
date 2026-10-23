@@ -88,22 +88,43 @@ class StatePatch:
         return True
 
     async def restore(self) -> dict:
-        errors = []
+        """Write every original value back. Reads first: an instrument script may have rewritten the value
+        during the render (back to the original, or to a float32 neighbour of it), which an expected-value
+        guard on the value this patch wrote would refuse."""
+        errors, overridden = [], []
         while self.applied:
             item = self.applied.pop()
+            label = f"{item['selector']}.{item['name']}"
             try:
+                read = await self.host.request(self.session_id, "edit", {
+                    "selector": item["selector"], "changes": [], "expected_revision": self.revision})
+                raw = read["attributes"][item["name"]]
+                if raw != item["current"]:
+                    overridden.append(f"{label}: set to {item['current']}, script wrote {raw} during the render")
+                if raw == item["original"]:
+                    continue
                 result = await self.host.request(self.session_id, "edit", {
                     "selector": item["selector"],
                     "changes": [{"name": item["name"], "value": _cast(item["original"], item["kind"]),
-                                 "expected": item["current"]}],
+                                 "expected": raw}],
                     "expected_revision": self.revision})
                 self.revision = result["revision"]
-                if result["readback"]["attributes"][item["name"]] != item["original"]:
-                    errors.append(f"{item['selector']}.{item['name']} reads back "
-                                  f"{result['readback']['attributes'][item['name']]}, expected {item['original']}")
+                readback = result["readback"]["attributes"][item["name"]]
+                if readback != item["original"] and not _same_number(readback, item["original"]):
+                    errors.append(f"{label} reads back {readback}, expected {item['original']}")
             except Exception as exc:  # noqa: BLE001 - keep restoring the rest, report every failure.
-                errors.append(f"{item['selector']}.{item['name']}={item['original']}: {exc}")
-        return {"restored": not errors, "errors": errors, "revision": self.revision}
+                errors.append(f"{label}={item['original']}: {exc}")
+        return {"restored": not errors, "errors": errors, "revision": self.revision,
+                "overridden_during_render": overridden}
+
+
+def _same_number(a: str, b: str) -> bool:
+    """Equal within float32 precision, as Falcon stores parameter values."""
+    try:
+        x, y = float(a), float(b)
+    except ValueError:
+        return False
+    return abs(x - y) <= 1e-6 * max(1.0, abs(x), abs(y))
 
 
 async def discover(host, session_id: str, part: int, include_master: bool) -> dict:
@@ -306,7 +327,7 @@ def register_stems(mcp, config, audit, host):
                 raise ValueError("Allow the note sequence plus at least 0.5 seconds tail")
         windows = _windows(notes_payload, events, seconds)
         timeout = {"timeout": render_timeout_seconds} if render_timeout_seconds else {}
-        key = {"session_id": session_id, "part": part, "notes": notes_payload, "events": events, "phrase": phrase,
+        key = {"part": part, "notes": notes_payload, "events": events, "phrase": phrase,
                "phrase_root": phrase_root, "seconds": seconds, "targets": targets,
                "groups": [g.model_dump() for g in groups or []], "dry": include_dry, "no_space": include_no_space,
                "master": include_master, "repeat": check_repeat, "rate": sample_rate, "buffer": buffer_size}
@@ -426,6 +447,8 @@ def register_stems(mcp, config, audit, host):
                         outcome = await patch.restore()
                         revision = outcome["revision"]
                         restore_log.append({"render": name, **outcome})
+                        if outcome["overridden_during_render"] and renders and renders[-1]["render"] == name:
+                            renders[-1]["silencing_overridden"] = outcome["overridden_during_render"]
                     if not outcome["restored"]:
                         raise RuntimeError(f"Restore failed after {name}: {outcome['errors']}")
                     # Saved only once the edits are restored: a resume starts from the unpatched state.
@@ -456,6 +479,12 @@ def register_stems(mcp, config, audit, host):
             progress["stage"] = "analysing stems"
             analysis = await asyncio.to_thread(analyze_set, rate, windows, audio["full"], target_inputs,
                                                audio.get("repeat"), audio.get("dry"), audio.get("no_space"))
+            unreliable = [f"silencing_overridden: the {r['render']} render did not stay silenced ("
+                          + "; ".join(r["silencing_overridden"][:3]) + "); the instrument script rewrote it, so that "
+                          "comparison understates the target" for r in renders if r.get("silencing_overridden")]
+            if unreliable:
+                analysis["findings"] = unreliable + [f for f in analysis["findings"]
+                                                     if not f.startswith("every target is audible")]
             report = {
                 "scope": {"environment": "Owned VST3 instance (not the standalone/DAW on screen)", "session_id": session_id,
                           "part": part, "revision": initial, "revision_unchanged": unchanged,

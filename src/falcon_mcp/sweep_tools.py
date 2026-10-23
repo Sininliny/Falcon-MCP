@@ -240,7 +240,7 @@ def register_sweeps(mcp, config, audit, host):
             raise ValueError(f"At most {MAX_CELLS} cells per sweep; split keys or velocities")
         seconds = max(1.0, START_SECONDS + hold_seconds + tail_seconds)
         grid = [(note, velocity) for note in sorted(notes) for velocity in sorted(velocities)]
-        key = {"session_id": session_id, "notes": sorted(notes), "velocities": sorted(velocities), "channel": channel,
+        key = {"notes": sorted(notes), "velocities": sorted(velocities), "channel": channel,
                "hold": hold_seconds, "tail": tail_seconds, "rate": sample_rate, "keep_audio": keep_audio}
 
         async def work(job_id, progress, checkpoint):
@@ -339,7 +339,7 @@ def register_sweeps(mcp, config, audit, host):
         render_note = [{"note": note, "velocity": velocity, "channel": channel, "start_seconds": START_SECONDS,
                         "duration_seconds": hold_seconds}]
         spec = {name: s.model_dump(exclude_none=True) for name, s in target.items()} if target else None
-        key = {"session_id": session_id, "selector": selector, "parameter": parameter,
+        key = {"selector": selector, "parameter": parameter,
                "values": [[type(v).__name__, v] for v in values], "note": note, "velocity": velocity,
                "channel": channel, "hold": hold_seconds, "tail": tail_seconds, "rate": sample_rate, "target": spec}
 
