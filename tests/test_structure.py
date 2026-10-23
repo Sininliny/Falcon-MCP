@@ -298,7 +298,7 @@ def test_state_comparison_tolerates_falcon_round_trip_drift():
 
 
 class DriftingFalcon(FakeFalcon):
-    """Like Falcon 27.0.2: every setState nudges a float's last digits."""
+    """Like Falcon 28.0.2: every setState nudges a float's last digits."""
 
     @FakeFalcon.raw_state.setter
     def raw_state(self, value):

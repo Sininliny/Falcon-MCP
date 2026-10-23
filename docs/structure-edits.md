@@ -14,7 +14,7 @@ with per-voice modulation. It never removes, rewires, adds scripts or changes sa
 | tremolo | `Tremolo`, `Autopan` |
 | saturation | `Drive`, `SmoothOverdrive`, `TSDrive`, `DiodeClipper` |
 
-Parameter names and ranges come from the bundled Falcon 27.0.2 index (`action=modules` lists them).
+Parameter names and ranges come from the bundled Falcon 28.0.2 index (`action=modules` lists them).
 Unspecified parameters get the indexed default. Modulation sources:
 
 | Source | Serialized as | Allowed targets |
@@ -23,7 +23,7 @@ Unspecified parameters get the indexed default. Modulation sources:
 | `keyfollow` | `@VoiceParam KeyFollow` | Keygroup inserts only (per voice) |
 | `modwheel` | `@MIDI CC 1` | Program, Layer or Keygroup inserts |
 
-The connection is written inside the new module's own `<Connections>`, exactly as Falcon 27.0.2 saved a
+The connection is written inside the new module's own `<Connections>`, exactly as Falcon 28.0.2 saved a
 user-made DigitalFilter with velocity on `Freq`. Ratio is limited to -1..1. How a ratio maps to Hz or
 octaves per destination is not documented offline: read it from the mandatory render evidence.
 
@@ -75,7 +75,7 @@ to soft ones at key 60. That is a DSP measurement, not a listening verdict.
 - Verification renders use channel 1 and fixed probe notes; key ranges or Part MIDI filters that exclude
   them make the comparison empty, not wrong. Choose `probe_notes_midi` inside the instrument's range.
 
-## Live check (Windows Falcon 27.0.2, owned VST3, 2026-10-23)
+## Live check (Windows Falcon 28.0.2, owned VST3, 2026-10-23)
 
 `scripts/smoke_structure.py` on two sampled keyboard Programs; no timeouts, nothing saved.
 

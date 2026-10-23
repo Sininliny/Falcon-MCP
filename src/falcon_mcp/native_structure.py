@@ -3,7 +3,7 @@
 Only one structural operation exists: insert a new effect from a short whitelist into the Inserts chain of
 a Program, Layer or Keygroup (optionally every Keygroup below the target), with indexed parameter values
 and per-voice modulations from velocity, key follow or the mod wheel. The serialized form was read from
-Falcon 27.0.2 session files, e.g. a DigitalFilter insert with
+Falcon 28.0.2 session files, e.g. a DigitalFilter insert with
 ``<SignalConnection Source="@VoiceParam Velocity" Destination="Freq" .../>`` in its own Connections.
 
 Flow: preview (no state change, returns plan_id) -> apply (same spec + plan_id + expected_revision;
@@ -27,7 +27,7 @@ from .native_edit import edit_node
 from .native_state import parse_xml
 from .revisions import content_fingerprint
 
-# Role -> module types. Every entry exists in data/parameters.json (Falcon 27.0.2 element index).
+# Role -> module types. Every entry exists in data/parameters.json (Falcon 28.0.2 element index).
 WHITELIST = {
     "filter": ["MoogFilter", "IIRLFOFilter", "SVF", "BiquadFilter", "OnePole"],
     "chorus": ["AnalogChorus", "ChorusBBD", "WhiteChorus", "Ensemble"],
@@ -225,7 +225,7 @@ def _same_value(a: str | None, b: str | None) -> bool:
 def state_differences(a, b, limit: int = 10, path: str = "UVI4") -> list[str]:
     """Paths where two states differ beyond Falcon's serialization drift.
 
-    Falcon 27.0.2 re-serializes some floats with last-digit drift on every setState round trip
+    Falcon 28.0.2 re-serializes some floats with last-digit drift on every setState round trip
     (a SparkVerb PreDelay went 31.0000057 -> 31.0000076) and reorders keys in script state JSON.
     """
     found = []
