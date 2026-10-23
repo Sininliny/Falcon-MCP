@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import time
 import uuid
+from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import stems
 from .audio import read_audio
 from .bridge import atomic_json
+from .jobs import DEFAULT_WAIT_SECONDS, MAX_WAIT_SECONDS, jobs_for
 from .native_tools import RenderNote
 from .sweep_tools import _cast
 
@@ -23,10 +24,6 @@ Selector = Annotated[str, Field(min_length=1, max_length=1024)]
 
 MAX_TARGETS = 10
 MAX_READS = 300
-# MCP clients abort a call after ~60 s ("Request timed out"); a stems run is 10-24 renders plus analysis and
-# often takes longer, so it runs as a background job and the call returns before the client gives up.
-DEFAULT_WAIT_SECONDS = 40.0
-MAX_FINISHED_JOBS = 8
 # Containers that never hold sound sources or insert effects worth silencing.
 SKIP_TAGS = {"Connections", "SignalConnection", "Properties", "ControlSignalSources", "EventProcessors",
              "script", "ScriptData", "Options", "Children"}
@@ -91,22 +88,43 @@ class StatePatch:
         return True
 
     async def restore(self) -> dict:
-        errors = []
+        """Write every original value back. Reads first: an instrument script may have rewritten the value
+        during the render (back to the original, or to a float32 neighbour of it), which an expected-value
+        guard on the value this patch wrote would refuse."""
+        errors, overridden = [], []
         while self.applied:
             item = self.applied.pop()
+            label = f"{item['selector']}.{item['name']}"
             try:
+                read = await self.host.request(self.session_id, "edit", {
+                    "selector": item["selector"], "changes": [], "expected_revision": self.revision})
+                raw = read["attributes"][item["name"]]
+                if raw != item["current"]:
+                    overridden.append(f"{label}: set to {item['current']}, script wrote {raw} during the render")
+                if raw == item["original"]:
+                    continue
                 result = await self.host.request(self.session_id, "edit", {
                     "selector": item["selector"],
                     "changes": [{"name": item["name"], "value": _cast(item["original"], item["kind"]),
-                                 "expected": item["current"]}],
+                                 "expected": raw}],
                     "expected_revision": self.revision})
                 self.revision = result["revision"]
-                if result["readback"]["attributes"][item["name"]] != item["original"]:
-                    errors.append(f"{item['selector']}.{item['name']} reads back "
-                                  f"{result['readback']['attributes'][item['name']]}, expected {item['original']}")
+                readback = result["readback"]["attributes"][item["name"]]
+                if readback != item["original"] and not _same_number(readback, item["original"]):
+                    errors.append(f"{label} reads back {readback}, expected {item['original']}")
             except Exception as exc:  # noqa: BLE001 - keep restoring the rest, report every failure.
-                errors.append(f"{item['selector']}.{item['name']}={item['original']}: {exc}")
-        return {"restored": not errors, "errors": errors, "revision": self.revision}
+                errors.append(f"{label}={item['original']}: {exc}")
+        return {"restored": not errors, "errors": errors, "revision": self.revision,
+                "overridden_during_render": overridden}
+
+
+def _same_number(a: str, b: str) -> bool:
+    """Equal within float32 precision, as Falcon stores parameter values."""
+    try:
+        x, y = float(a), float(b)
+    except ValueError:
+        return False
+    return abs(x - y) <= 1e-6 * max(1.0, abs(x), abs(y))
 
 
 async def discover(host, session_id: str, part: int, include_master: bool) -> dict:
@@ -234,28 +252,7 @@ LIMITS = ("Signal measurements with heuristic wording, not a perceptual verdict.
 
 
 def register_stems(mcp, config, audit, host):
-    JOBS: dict[str, dict] = {}
-
-    async def wait_for_job(job_id: str, wait_seconds: float) -> dict:
-        """Return the finished report (or raise its error); after wait_seconds return a running status instead.
-
-        The job is never cancelled here: a client that times out or disconnects leaves it running so it still
-        restores every edit, and its result stays collectable with falcon_native_stems_result."""
-        job = JOBS.get(job_id)
-        if job is None:
-            raise ValueError(f"Unknown stems job {job_id!r}; it may belong to an earlier server process. "
-                             "Finished reports are saved under <home>/reports/<job_id>.stems.json")
-        task = job["task"]
-        await asyncio.wait({task}, timeout=wait_seconds)
-        if not task.done():
-            return {"status": "running", "job_id": job_id, **job["progress"],
-                    "elapsed_seconds": round(time.monotonic() - job["started"], 1),
-                    "next": f'Call falcon_native_stems_result(job_id="{job_id}") to wait for the report. '
-                            "Do not edit this native session until it finishes."}
-        finished = [k for k, v in JOBS.items() if v["task"].done() and k != job_id]
-        for old in finished[:-MAX_FINISHED_JOBS]:
-            JOBS.pop(old)
-        return {"status": "done", "job_id": job_id, **task.result()}
+    jobs = jobs_for(host, config, audit)
 
     def save(report: dict, run: str) -> str:
         config.report_root.mkdir(parents=True, exist_ok=True)
@@ -282,7 +279,9 @@ def register_stems(mcp, config, audit, host):
         buffer_size: Annotated[int, Field(ge=32, le=4096)] = 512,
         expected_revision: Revision | None = None,
         keep_audio: bool = True,
-        wait_seconds: Annotated[float, Field(ge=0, le=50)] = DEFAULT_WAIT_SECONDS,
+        wait_seconds: Annotated[float, Field(ge=0, le=MAX_WAIT_SECONDS)] = DEFAULT_WAIT_SECONDS,
+        render_timeout_seconds: Annotated[float, Field(ge=10, le=1800)] | None = None,
+        resume_job_id: Annotated[str, Field(pattern=r"^stems-[a-f0-9]{12}$")] | None = None,
     ) -> dict[str, Any]:
         """Render ONE performance many times in the OWNED VST3 session to hear what each layer really adds.
 
@@ -301,14 +300,14 @@ def register_stems(mcp, config, audit, host):
         Keeps WAV stems under the audio root for falcon_listen; nothing plays through speakers.
         Runs as a background job: if it is not finished within wait_seconds (default 40, below the usual
         60 s client timeout) it returns status "running" with a job_id; collect the report with
-        falcon_native_stems_result(job_id).
+        falcon_native_stems_result(job_id) or falcon_native_job_result(job_id). Every finished render is
+        saved as a WAV plus checkpoint, so a failed run continues with the same arguments plus resume_job_id.
+        render_timeout_seconds raises the per-render limit (default 120 s) for very large instruments.
         """
         if sample_rate not in (44100, 48000, 96000):
             raise ValueError("sample_rate must be 44100, 48000 or 96000")
         if sum(x is not None for x in (notes, events, phrase)) > 1:
             raise ValueError("Pass only one of notes, events or phrase")
-        run = f"stems-{uuid.uuid4().hex[:12]}"
-        stem_dir = config.audio_root.resolve() / run  # WAV stems and the event file of this run.
         timeline = {}
         if phrase or events:
             from . import perform
@@ -317,8 +316,7 @@ def register_stems(mcp, config, audit, host):
                 built = perform.phrase(phrase, root=phrase_root)
                 events, seconds = built["events"], seconds or built["seconds"] + 1.5
             seconds = seconds or perform.timeline_end(events) + 1.5
-            stem_dir.mkdir(parents=True, exist_ok=True)
-            timeline = perform.write_timeline(perform.compile_events(events), stem_dir / "events.json")
+            compiled = perform.compile_events(events)
             notes_payload = []
         else:
             notes = notes or [RenderNote(note=60, velocity=100, start_seconds=0.1, duration_seconds=1.5)]
@@ -328,18 +326,26 @@ def register_stems(mcp, config, audit, host):
             if end + 0.5 > seconds:
                 raise ValueError("Allow the note sequence plus at least 0.5 seconds tail")
         windows = _windows(notes_payload, events, seconds)
+        timeout = {"timeout": render_timeout_seconds} if render_timeout_seconds else {}
+        key = {"part": part, "notes": notes_payload, "events": events, "phrase": phrase,
+               "phrase_root": phrase_root, "seconds": seconds, "targets": targets,
+               "groups": [g.model_dump() for g in groups or []], "dry": include_dry, "no_space": include_no_space,
+               "master": include_master, "repeat": check_repeat, "rate": sample_rate, "buffer": buffer_size}
 
-        if any(job["session_id"] == session_id and not job["task"].done() for job in JOBS.values()):
-            raise ValueError("A stems run is already in progress for this session; collect it with "
-                             "falcon_native_stems_result first")
-        progress = {"stage": "discovering targets", "renders_done": 0, "renders_total": None}
-
-        async def job():
+        async def job(run, progress, checkpoint):
+            stem_dir = config.audio_root.resolve() / run  # WAV stems and the event file of this run.
+            stem_dir.mkdir(parents=True, exist_ok=True)
+            nonlocal timeline
+            if events:
+                timeline = perform.write_timeline(compiled, stem_dir / "events.json")
+            progress.update(stage="discovering targets", renders_done=len(checkpoint.completed), renders_total=None)
+            # The worker refuses a status read guarded by a revision the session no longer has.
+            status = await host.request(session_id, "status",
+                                        {"expected_revision": checkpoint.revision or expected_revision})
             tree = await discover(host, session_id, part, include_master)
-            status = await host.request(session_id, "status", {})
             initial = status["revision"]
-            if expected_revision and expected_revision != initial:
-                raise ValueError("Native revision changed; inspect before retrying")
+            if checkpoint.revision is None:
+                checkpoint.revision = initial
             by_selector = {n["selector"]: n for n in tree["nodes"]}
 
             def node_for(selector):
@@ -405,14 +411,19 @@ def register_stems(mcp, config, audit, host):
             if len(plan) > 2 + 2 * MAX_TARGETS + 2:
                 raise ValueError("Too many renders; reduce targets")
 
-            progress.update(stage="rendering", renders_total=len(plan))
-            stem_dir.mkdir(parents=True, exist_ok=True)
+            progress.update(stage="rendering", renders_total=len(plan), total=len(plan))
             audit.event("native_stems_start", session_id=session_id, run=run, renders=len(plan),
                         targets=[u["name"] for u in units])
             audio, rate, paths, renders, restore_log, failure = {}, None, {}, [], [], None
             revision = initial
             try:
                 for name, changes in plan:
+                    if name in checkpoint:
+                        saved = checkpoint.completed[name]
+                        audio[name], rate = await asyncio.to_thread(read_audio, Path(saved["path"]), 60)
+                        paths[name] = saved["path"]
+                        renders.append({**saved["render"], "resumed": True})
+                        continue
                     progress["stage"] = f"rendering {name}"
                     patch = StatePatch(host, session_id, revision, audit)
                     try:
@@ -423,32 +434,39 @@ def register_stems(mcp, config, audit, host):
                         result = await host.request(session_id, "render", {
                             "path": str(path), "seconds": seconds, "sample_rate": sample_rate, "notes": notes_payload,
                             **timeline, **({"buffer_size": buffer_size} if timeline else {}),
-                            "expected_revision": patch.revision})
+                            "expected_revision": patch.revision}, **timeout)
                         if timeline and result.get("midi_sha256") != timeline["midi_sha256"]:
                             raise RuntimeError("The native worker did not confirm the event timeline (midi_sha256); "
                                                "it predates event rendering. Use notes or update the worker")
                         data, rate = await asyncio.to_thread(read_audio, path, 60)
                         audio[name], paths[name] = data, str(path)
                         renders.append({"render": name, "edits": applied, "peak": round(result.get("peak", 0.0), 5),
-                                        "path": str(path) if keep_audio else None})
-                        progress["renders_done"] = len(renders)
+                                        "path": str(path) if keep_audio else None,
+                                        "state_changed_by_render": bool(result.get("state_changed_by_render"))})
                     finally:
                         outcome = await patch.restore()
                         revision = outcome["revision"]
                         restore_log.append({"render": name, **outcome})
-                        if not keep_audio and name in paths:
-                            (stem_dir / f"{name.replace(':', '-')}.wav").unlink(missing_ok=True)
+                        if outcome["overridden_during_render"] and renders and renders[-1]["render"] == name:
+                            renders[-1]["silencing_overridden"] = outcome["overridden_during_render"]
                     if not outcome["restored"]:
                         raise RuntimeError(f"Restore failed after {name}: {outcome['errors']}")
+                    # Saved only once the edits are restored: a resume starts from the unpatched state.
+                    checkpoint.record(name, {"path": paths[name], "render": renders[-1]})
+                    progress["renders_done"] = progress["done"] = len(renders)
             except Exception as exc:  # noqa: BLE001 - report restore state with the failure
                 failure = exc
-            final = (await host.request(session_id, "status", {}))["revision"]
+            final_status = await host.request(session_id, "status", {})
+            final = final_status["revision"]
+            unchanged = final == initial or initial in final_status.get("equivalent_revisions", [])
             restored = all(r["restored"] for r in restore_log)
+            if restored and not unchanged and checkpoint.revision != final:
+                checkpoint.revision = final  # Restored edits give a new revision number with the same edits undone.
             audit.event("native_stems_restore", session_id=session_id, run=run, restored=restored,
-                        revision_unchanged=final == initial)
+                        revision_unchanged=unchanged)
             if failure is not None:
                 raise RuntimeError(f"Stem run failed after {len(renders)} render(s): {failure}; restored: {restored}; "
-                                   f"revision unchanged: {final == initial}") from failure
+                                   f"revision unchanged: {unchanged}") from failure
 
             target_inputs = []
             for i, unit in enumerate(units):
@@ -461,9 +479,15 @@ def register_stems(mcp, config, audit, host):
             progress["stage"] = "analysing stems"
             analysis = await asyncio.to_thread(analyze_set, rate, windows, audio["full"], target_inputs,
                                                audio.get("repeat"), audio.get("dry"), audio.get("no_space"))
+            unreliable = [f"silencing_overridden: the {r['render']} render did not stay silenced ("
+                          + "; ".join(r["silencing_overridden"][:3]) + "); the instrument script rewrote it, so that "
+                          "comparison understates the target" for r in renders if r.get("silencing_overridden")]
+            if unreliable:
+                analysis["findings"] = unreliable + [f for f in analysis["findings"]
+                                                     if not f.startswith("every target is audible")]
             report = {
                 "scope": {"environment": "Owned VST3 instance (not the standalone/DAW on screen)", "session_id": session_id,
-                          "part": part, "revision": initial, "revision_unchanged": final == initial,
+                          "part": part, "revision": initial, "revision_unchanged": unchanged,
                           "restored": restored, "verified": "Stems rendered in this session; semantics of Mute/Bypass/"
                           "BypassInsertFX taken from the official parameter index, not verified against live Falcon"},
                 "performance": {"seconds": seconds, "windows": windows[:32], "phrase": phrase,
@@ -474,19 +498,24 @@ def register_stems(mcp, config, audit, host):
                               "sends": len(tree["sends"]), "truncated": tree["truncated"]},
                 "restore_log": restore_log, "limitations": LIMITS,
                 "next": "falcon_listen(stem path) for one stem in detail; adjust one layer, then rerun to compare"}
+            report["resumed_renders"] = progress["resumed_units"]
             report["report_path"] = save(report, run)
             report.pop("restore_log")
+            if not keep_audio:
+                for path in paths.values():
+                    Path(path).unlink(missing_ok=True)
             return report
 
-        task = asyncio.create_task(job())
-        JOBS[run] = {"task": task, "session_id": session_id, "progress": progress, "started": time.monotonic()}
-        return await wait_for_job(run, wait_seconds)
+        job_id = jobs.submit("stems", session_id, key, job, resume_job_id,
+                             busy_message="A stems run is already in progress for this session; collect it with "
+                                          "falcon_native_stems_result first")
+        return await jobs.wait(job_id, wait_seconds)
 
 
     @mcp.tool(annotations=READ)
     async def falcon_native_stems_result(
         job_id: Annotated[str, Field(pattern=r"^stems-[a-f0-9]{12}$")],
-        wait_seconds: Annotated[float, Field(ge=0, le=50)] = DEFAULT_WAIT_SECONDS,
+        wait_seconds: Annotated[float, Field(ge=0, le=MAX_WAIT_SECONDS)] = DEFAULT_WAIT_SECONDS,
     ) -> dict[str, Any]:
         """Collect a falcon_native_stems run that returned status "running".
 
@@ -494,7 +523,7 @@ def register_stems(mcp, config, audit, host):
         falcon_native_stems with status "done", raises the run's error if it failed, or returns status
         "running" with progress (renders_done / renders_total) so you can call again.
         """
-        return await wait_for_job(job_id, wait_seconds)
+        return await jobs.wait(job_id, wait_seconds)
 
     @mcp.tool(annotations=READ)
     async def falcon_stem_analyze(

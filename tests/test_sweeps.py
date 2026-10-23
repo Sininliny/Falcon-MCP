@@ -31,7 +31,7 @@ class FakeHost:
                 "indexed_definitions": [{"name": "Cutoff", "type": "float", "min": 20, "max": 20000},
                                         {"name": "Gain", "type": "float", "min": 0, "max": 4}]}
 
-    async def request(self, session_id, op, args):
+    async def request(self, session_id, op, args, **kwargs):
         assert session_id == SESSION
         if args.get("expected_revision") and args["expected_revision"] != self.revision():
             raise ValueError("Native revision changed; inspect before retrying")
@@ -45,6 +45,8 @@ class FakeHost:
                 self.edits += 1
                 result["readback"] = self.read(args["selector"])
             return {**result, "revision": self.revision()}
+        if op == "status":
+            return {"revision": self.revision()}
         assert op == "render"
         if self.fail_after_edits is not None and self.edits >= self.fail_after_edits:
             raise RuntimeError("worker crashed during render")
