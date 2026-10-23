@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import collection
 from .audio import read_audio
 from .bridge import atomic_json
-from .jobs import JobRegistry
+from .jobs import jobs_for
 
 WRITE = {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False}
 READ = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
@@ -41,7 +41,7 @@ LIMITS = ("Signal measurements with heuristic thresholds, not a perceptual verdi
 
 
 def register_collection(mcp, config, audit, host):
-    jobs = JobRegistry("collection", "falcon_native_collection_result")
+    jobs = jobs_for(host, config, audit)
 
     def save(report: dict, run: str) -> str:
         config.report_root.mkdir(parents=True, exist_ok=True)
@@ -98,15 +98,8 @@ def register_collection(mcp, config, audit, host):
         total = len(instruments) * (len(cells) + 1 + bool(check_repeat))
         if total > MAX_RENDERS:
             raise ValueError(f"{total} renders exceed {MAX_RENDERS}; reduce instruments, keys or velocities")
-        if jobs.busy(session_id):
-            raise ValueError("A collection run is already in progress for this session; collect it with "
-                             "falcon_native_collection_result first")
         seconds = round(START_SECONDS + hold_seconds + tail_seconds, 3)
         release = START_SECONDS + hold_seconds
-        run = jobs.new_id()
-        render_dir = config.audio_root.resolve() / run
-        progress = {"stage": "saving the current session", "instrument": None, "renders_done": 0,
-                    "renders_total": total}
 
         async def render(path: Path, note: int, velocity: int, render_seconds: float, hold: float):
             await host.request(session_id, "render", {
@@ -118,7 +111,10 @@ def register_collection(mcp, config, audit, host):
                 path.unlink(missing_ok=True)
             return data, rate
 
-        async def job():
+        async def job(run, progress, _checkpoint):
+            render_dir = config.audio_root.resolve() / run
+            progress.update(stage="saving the current session", instrument=None, renders_done=0,
+                            renders_total=total)
             preset_root = (config.runtime.parent / "presets").resolve()
             backup = preset_root / run / "before.uvim"
             initial = (await host.request(session_id, "status", {}))["revision"]
@@ -210,8 +206,13 @@ def register_collection(mcp, config, audit, host):
             report["report_path"] = save(report, run)
             return report
 
-        jobs.start(run, session_id, progress, job)
-        return await jobs.wait(run, wait_seconds, "Finished reports are saved under <home>/reports/<job_id>.collection.json")
+        args = {"instruments": [(i.name, str(p), i.part) for i, p, _ in sources], "keys": keys,
+                "velocities": velocities, "hold_seconds": hold_seconds, "tail_seconds": tail_seconds,
+                "check_repeat": check_repeat, "sample_rate": sample_rate}
+        run = jobs.submit("collection", session_id, args, job,
+                          busy_message="A background job is already in progress for this session; collect it with "
+                                       "falcon_native_collection_result or falcon_native_job_result first")
+        return await jobs.wait(run, wait_seconds)
 
     @mcp.tool(annotations=READ)
     async def falcon_native_collection_result(
@@ -224,5 +225,4 @@ def register_collection(mcp, config, audit, host):
         status "done", raises the run's error if it failed, or returns status "running" with progress
         (instrument, renders_done / renders_total) so you can call again.
         """
-        return await jobs.wait(job_id, wait_seconds, "Finished reports are saved under "
-                               "<home>/reports/<job_id>.collection.json")
+        return await jobs.wait(job_id, wait_seconds)

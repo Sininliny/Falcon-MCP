@@ -33,7 +33,7 @@ async def test_real_stdio_initialize_tools_resource_and_validation(config):
                 "falcon_analyze_reference", "falcon_compare_reference", "falcon_audio_meter"} <= names
         assert {"falcon_native_connections", "falcon_revision", "falcon_accept_instrument", "falcon_build_instrument"} <= names
         assert {"falcon_listen", "falcon_audio_diff", "falcon_match_target",
-                "falcon_native_sweep", "falcon_native_param_sweep"} <= names
+                "falcon_native_sweep", "falcon_native_param_sweep", "falcon_native_job_result"} <= names
         assert {"falcon_sound_recipe", "falcon_design_check", "falcon_timbre_vocabulary", "falcon_design_verify",
                 "falcon_param_lookup", "falcon_param_search", "falcon_param_value", "falcon_param_calibrate"} <= names
         assert {"falcon_native_perf_benchmark", "falcon_perf_static"} <= names
@@ -42,7 +42,7 @@ async def test_real_stdio_initialize_tools_resource_and_validation(config):
         assert {"falcon_native_collection", "falcon_native_collection_result"} <= names
         assert {"falcon_perform_phrases", "falcon_native_perform", "falcon_native_perform_suite", "falcon_perform_analyze"} <= names
         assert "falcon_capabilities" in names
-        assert len(names) == 84
+        assert len(names) == 85
         assert (config.runtime / "falcon_bridge.lua").is_file()
         assert all(t.outputSchema is not None for t in tools.tools)
         capture = await client.call_tool("falcon_capture_status", {})
