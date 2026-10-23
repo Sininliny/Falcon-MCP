@@ -30,6 +30,8 @@ ENVIRONMENTS = {
     "audio_file_analysis": "DSP on existing audio files only; no Falcon instance is contacted.",
     "system_audio_capture": "Records the selected Windows output endpoint: everything audible there, not only Falcon.",
     "preset_file_analysis": "Offline analysis of a preset or script file in an emulated runtime; no Falcon instance runs it.",
+    "rack_plugin_host": "A short-lived MCP-owned process hosting an installed third-party VST3 (plugin rack); "
+                        "not the plugin open in a DAW. A Falcon side named by session uses the owned VST3 host.",
     "offline_reference": "Bundled documentation/catalog snapshot; says nothing about the installed Falcon.",
     "unclassified": "No scope profile was declared for this tool; treat environment and verification as unknown.",
 }
@@ -90,6 +92,10 @@ CODES = {
     "browser_preview": "Falcon browser preview association.",
     "relocated_reload": "Reload after copying to a different folder/machine.",
     "mouse_interaction": "Real mouse dragging of UI controls.",
+    "plugin_probe": "Each plugin was loaded once in its own process to read name, vendor and type.",
+    "plugin_settled": "A probe note was repeated until its level stopped changing (background loading done).",
+    "third_party_state": "Which instrument/preset the third-party plugin played; only the state file hash is known.",
+    "plugin_license": "Whether the plugin is licensed/activated beyond loading without an error.",
 }
 
 TRANSPORT_UNCHECKED = ["external_midi_input", "part_routing", "audible_effect"]

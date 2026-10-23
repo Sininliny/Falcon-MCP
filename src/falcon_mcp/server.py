@@ -676,7 +676,7 @@ def create_server(config: Config | None = None) -> FastMCP:
     register_advanced(mcp, cfg, bridge, audit, capture_lock, capture_monitor)
     register_reference(mcp, cfg, feedback)
     register_listening(mcp, cfg)
-    register_midi_compare(mcp, cfg, audit)
+    midi_compare_run = register_midi_compare(mcp, cfg, audit)
     register_design(mcp, cfg)
     register_knowledge(mcp, cfg, audit)
     native_host = register_native(mcp, cfg, audit)
@@ -687,6 +687,9 @@ def create_server(config: Config | None = None) -> FastMCP:
     register_stems(mcp, cfg, audit, native_host)
     register_structure(mcp, cfg, audit, native_host)
     register_collection(mcp, cfg, audit, native_host)
+    from .rack_tools import register_rack
+
+    register_rack(mcp, cfg, audit, native_host, midi_compare_run)
     register_workflows(mcp, cfg, audit)
     # Last: every registered tool gets a result_scope block (see docs/result-scope.md).
     from .result_scope import install_result_scope

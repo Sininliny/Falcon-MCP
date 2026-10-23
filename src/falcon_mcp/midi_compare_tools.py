@@ -173,3 +173,6 @@ def register_midi_compare(mcp, config, audit):
     ) -> dict[str, Any]:
         """Wait for (or collect) a falcon_midi_compare job; returns status "running" with progress or the report."""
         return await wait_for(job_id, wait_seconds)
+
+    # The plugin rack chains its renders into the same comparison (falcon_rack_compare).
+    return run_compare
