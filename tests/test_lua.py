@@ -14,6 +14,7 @@ def dispatcher():
     lua = LuaRuntime(unpack_returned_tuples=True)
     source = files("falcon_mcp").joinpath("lua/bridge.lua").read_text(encoding="utf8")
     source += "\n" + files("falcon_mcp").joinpath("lua/extended.lua").read_text(encoding="utf8")
+    source += "\n" + files("falcon_mcp").joinpath("lua/capture.lua").read_text(encoding="utf8")
     # The return is only appended in tests; production exposes no arbitrary code tool.
     setup = """
     package.preload["uvi.json"] = function() return {} end

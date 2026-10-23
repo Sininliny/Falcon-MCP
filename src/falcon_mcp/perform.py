@@ -243,7 +243,8 @@ def write_timeline(compiled: list[list], json_path: Path, mid_path: Path | None 
     return out
 
 
-def read_timeline(path: Path, expected_sha256: str | None = None) -> list[tuple[bytes, float]]:
+def read_timeline(path: Path, expected_sha256: str | None = None,
+                  max_seconds: float = MAX_SECONDS) -> list[tuple[bytes, float]]:
     """Worker side: validated (bytes, seconds) pairs for pedalboard."""
     data = Path(path).read_bytes()
     if expected_sha256 and hashlib.sha256(data).hexdigest() != expected_sha256:
@@ -252,11 +253,11 @@ def read_timeline(path: Path, expected_sha256: str | None = None) -> list[tuple[
     if payload.get("format") != TIMELINE_FORMAT:
         raise ValueError("Unknown timeline format")
     events = payload["events"]
-    if len(events) > MAX_COMPILED_EVENTS:
+    if len(events) > max(MAX_COMPILED_EVENTS, int(max_seconds * 400)):
         raise ValueError("Timeline has too many events")
     out = []
     for time, status, d1, d2 in events:
-        if not (0x80 <= status <= 0xEF and 0 <= d1 <= 127 and 0 <= d2 <= 127 and 0 <= time <= MAX_SECONDS):
+        if not (0x80 <= status <= 0xEF and 0 <= d1 <= 127 and 0 <= d2 <= 127 and 0 <= time <= max_seconds):
             raise ValueError("Timeline contains an invalid MIDI message")
         out.append((bytes([status, d1]) if status & 0xF0 == 0xD0 else bytes([status, d1, d2]), float(time)))
     return out

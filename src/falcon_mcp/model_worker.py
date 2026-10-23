@@ -30,7 +30,10 @@ def infer(request: dict) -> dict:
     # The upstream LAION checkpoint uses pytorch_model.bin; Torch >=2.6 uses
     # weights_only loading. Prefer safetensors automatically when supplied locally.
     model = ClapModel.from_pretrained(request["model_id"], **model_options).to(device).eval()
-    bank = json.loads(files("falcon_mcp").joinpath("data/timbre_descriptors.json").read_text(encoding="utf8"))
+    bank = request.get("facets") or [
+        group for group in json.loads(
+            files("falcon_mcp").joinpath("data/timbre_descriptors.json").read_text(encoding="utf8"))
+        if "synth" in group.get("banks", ["synth"])]
     descriptors = [item for group in bank for item in group["items"]]
     targets = request.get("targets", [])
     texts = [item["text"] for item in descriptors] + targets
@@ -69,7 +72,7 @@ def infer(request: dict) -> dict:
             features = functional.normalize(features, dim=-1)
             all_scores.append((features @ text_features.T)[0].float().cpu().numpy())
         scores = np.average(all_scores, axis=0, weights=weights)
-    facets, cursor = [], 0
+    facets, cursor, all_scores = [], 0, []
     for group in bank:
         length = len(group["items"])
         indices = np.argsort(scores[cursor : cursor + length])[::-1]
@@ -81,6 +84,8 @@ def infer(request: dict) -> dict:
         facets.append(
             {"facet": group["facet"], "top_matches": ranked, "margin": margin, "ambiguous": margin < 0.02}
         )
+        all_scores += [{"facet": group["facet"], "label": item["label"], "cosine_similarity": float(scores[cursor + i])}
+                       for i, item in enumerate(group["items"])]
         cursor += length
     summary = "; ".join(
         f"{facet['facet']}: {facet['top_matches'][0]['label']}"
@@ -95,19 +100,22 @@ def infer(request: dict) -> dict:
         "method": "CLAP audio/text descriptor retrieval",
         "model_id": request["model_id"],
         "device": device,
+        "descriptor_bank": request.get("bank", "synth"),
         "facets": facets,
+        "scores": all_scores,
         "target_matches": target_scores,
         "windows_analyzed": len(windows),
         "limitations": [
             "Similarity is relative, not a calibrated probability or a free-form caption.",
             "Descriptors depend on the candidate bank. Use identical notes, velocity and recording conditions for A/B.",
+            "Similar instruments often share top labels; compare per-descriptor scores, not only the summary.",
             "The model does not infer Falcon parameter values or automatically apply changes.",
         ],
     }
 
 
 def main():
-    request = json.loads(sys.stdin.buffer.read(65537))
+    request = json.loads(sys.stdin.buffer.read(1 << 20))
     # Libraries sometimes print progress to stdout; preserve stdout for a single JSON response.
     with contextlib.redirect_stdout(sys.stderr):
         result = infer(request)
