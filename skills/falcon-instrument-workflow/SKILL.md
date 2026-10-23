@@ -5,7 +5,7 @@ description: Build, edit, render, accept, and publish UVI Falcon instruments wit
 
 # Falcon instrument workflow
 
-Guide version: Falcon MCP server 0.5.0 (bridge 0.5.0). If `result_scope.versions.server` in a tool result differs, this guide may be stale.
+Guide version: Falcon MCP server 0.6.0 (bridge 0.6.0). If `result_scope.versions.server` in a tool result differs, this guide may be stale.
 
 Keep four deliverables distinct: instrument sound, performance routing, library presentation, and the local MCP environment. A working Multi does not establish that each standalone Program or portable library is complete.
 

@@ -1,6 +1,6 @@
 # Sample audit
 
-Guide version: Falcon MCP server 0.5.0 (bridge 0.5.0).
+Guide version: Falcon MCP server 0.6.0 (bridge 0.6.0).
 
 `falcon_sample_audit` reports, without Falcon, the facts about an instrument's recorded samples that
 otherwise take an afternoon of manual checking: how far apart the sampled notes are, how many velocity
