@@ -13,6 +13,7 @@ from . import stems
 from .audio import read_audio
 from .bridge import atomic_json
 from .jobs import DEFAULT_WAIT_SECONDS, MAX_WAIT_SECONDS, jobs_for
+from .native_edit import BATCH_LIMIT
 from .native_tools import RenderNote
 from .sweep_tools import _cast
 
@@ -66,54 +67,115 @@ def silence_change(node: dict) -> tuple[str, Any] | None:
     return None
 
 
-class StatePatch:
-    """Applies guarded native edits and restores every touched attribute, newest first."""
+async def read_nodes(host, session_id: str, selectors: list[str], revision: str | None) -> dict[str, dict]:
+    """Batched read-only edit_batch; returns {selector: node} with indexed_definitions filled per type."""
+    out = {}
+    for i in range(0, len(selectors), BATCH_LIMIT):
+        reply = await host.request(session_id, "edit_batch", {
+            "edits": [{"selector": s} for s in selectors[i:i + BATCH_LIMIT]], "expected_revision": revision})
+        for node in reply["nodes"]:
+            out[node["selector"]] = {**node, "indexed_definitions": reply["definitions"].get(node["type"], [])}
+    return out
 
-    def __init__(self, host, session_id: str, revision: str, audit):
+
+class StatePatch:
+    """Applies guarded native edits in batches and restores every touched attribute.
+
+    Each native edit re-serialises the whole Falcon state, so one render's silencing (up to hundreds of
+    BypassInsertFX/Gain writes for a dry render) is one batched read plus one batched write per chunk."""
+
+    def __init__(self, host, session_id: str, revision: str, audit, progress: dict | None = None):
         self.host, self.session_id, self.revision, self.audit = host, session_id, revision, audit
+        self.progress = progress if progress is not None else {}
         self.applied: list[dict] = []
 
+    async def _write(self, items: list[dict], value_key: str, expected_key: str) -> dict[tuple, str]:
+        """Batched guarded writes; returns {(selector, name): readback}. Raises on the first failed chunk."""
+        by_selector: dict[str, list[dict]] = {}
+        for item in items:
+            by_selector.setdefault(item["selector"], []).append(item)
+        edits = [{"selector": selector, "changes": [
+            {"name": i["name"], "value": i[value_key], "expected": i[expected_key]} for i in group]}
+            for selector, group in by_selector.items()]
+        readback, done = {}, 0
+        for start in range(0, len(edits), BATCH_LIMIT):
+            chunk = edits[start:start + BATCH_LIMIT]
+            result = await self.host.request(self.session_id, "edit_batch", {
+                "edits": chunk, "expected_revision": self.revision})
+            self.revision = result["revision"]
+            for node, edit in zip(result["readback"], chunk):
+                for change in edit["changes"]:
+                    readback[(node["selector"], change["name"])] = node["attributes"][change["name"]]
+            done += sum(len(e["changes"]) for e in chunk)
+            self.progress["edits_done"] = done
+        return readback
+
+    async def set_many(self, changes: list[tuple]) -> int:
+        """changes: [(selector, attribute, value, kind)]. Returns how many attributes were actually changed."""
+        unique = list(dict.fromkeys((c[0], c[1]) for c in changes))
+        wanted = {(c[0], c[1]): c for c in changes}
+        nodes = await read_nodes(self.host, self.session_id, list(dict.fromkeys(c[0] for c in changes)),
+                                 self.revision)
+        pending = []
+        for key in unique:
+            selector, name, value, kind = wanted[key]
+            raw = nodes[selector]["attributes"][name]
+            if _cast(raw, kind) != value:
+                pending.append({"selector": selector, "name": name, "value": value, "kind": kind, "original": raw})
+        self.progress.update(edits_total=len(pending), edits_done=0)
+        if not pending:
+            return 0
+        try:
+            readback = await self._write(pending, "value", "original")
+        except Exception:
+            # A failed chunk applied nothing; earlier chunks did. Find out which by reading back.
+            current = await read_nodes(self.host, self.session_id, list(dict.fromkeys(p["selector"] for p in pending)),
+                                       None)
+            readback = {(p["selector"], p["name"]): current[p["selector"]]["attributes"][p["name"]]
+                        for p in pending if current[p["selector"]]["attributes"][p["name"]] != p["original"]}
+            self.applied += [{**p, "current": readback[(p["selector"], p["name"])]} for p in pending
+                             if (p["selector"], p["name"]) in readback]
+            raise
+        self.applied += [{**p, "current": readback[(p["selector"], p["name"])]} for p in pending]
+        return len(pending)
+
     async def set(self, selector: str, name: str, value, kind: str):
-        read = await self.host.request(self.session_id, "edit", {
-            "selector": selector, "changes": [], "expected_revision": self.revision})
-        raw = read["attributes"][name]
-        if _cast(raw, kind) == value:
-            return False
-        result = await self.host.request(self.session_id, "edit", {
-            "selector": selector, "changes": [{"name": name, "value": value, "expected": raw}],
-            "expected_revision": self.revision})
-        self.revision = result["revision"]
-        self.applied.append({"selector": selector, "name": name, "original": raw, "kind": kind,
-                             "current": result["readback"]["attributes"][name]})
-        return True
+        return bool(await self.set_many([(selector, name, value, kind)]))
 
     async def restore(self) -> dict:
         """Write every original value back. Reads first: an instrument script may have rewritten the value
         during the render (back to the original, or to a float32 neighbour of it), which an expected-value
         guard on the value this patch wrote would refuse."""
         errors, overridden = [], []
-        while self.applied:
-            item = self.applied.pop()
+        if not self.applied:
+            return {"restored": True, "errors": errors, "revision": self.revision, "overridden_during_render": []}
+        items, self.applied = self.applied, []
+        try:
+            nodes = await read_nodes(self.host, self.session_id, list(dict.fromkeys(i["selector"] for i in items)),
+                                     self.revision)
+        except Exception as exc:  # noqa: BLE001 - report instead of raising from a finally block
+            return {"restored": False, "errors": [f"restore read failed: {exc}"], "revision": self.revision,
+                    "overridden_during_render": []}
+        todo = []
+        for item in items:
             label = f"{item['selector']}.{item['name']}"
+            raw = nodes[item["selector"]]["attributes"][item["name"]]
+            if raw != item["current"]:
+                overridden.append(f"{label}: set to {item['current']}, script wrote {raw} during the render")
+            if raw != item["original"]:
+                todo.append({**item, "now": raw, "back": _cast(item["original"], item["kind"])})
+        self.progress.update(stage=f"{self.progress.get('stage', '')} (restoring)".strip(),
+                             edits_total=len(todo), edits_done=0)
+        if todo:
             try:
-                read = await self.host.request(self.session_id, "edit", {
-                    "selector": item["selector"], "changes": [], "expected_revision": self.revision})
-                raw = read["attributes"][item["name"]]
-                if raw != item["current"]:
-                    overridden.append(f"{label}: set to {item['current']}, script wrote {raw} during the render")
-                if raw == item["original"]:
-                    continue
-                result = await self.host.request(self.session_id, "edit", {
-                    "selector": item["selector"],
-                    "changes": [{"name": item["name"], "value": _cast(item["original"], item["kind"]),
-                                 "expected": raw}],
-                    "expected_revision": self.revision})
-                self.revision = result["revision"]
-                readback = result["readback"]["attributes"][item["name"]]
-                if readback != item["original"] and not _same_number(readback, item["original"]):
-                    errors.append(f"{label} reads back {readback}, expected {item['original']}")
-            except Exception as exc:  # noqa: BLE001 - keep restoring the rest, report every failure.
-                errors.append(f"{label}={item['original']}: {exc}")
+                readback = await self._write(todo, "back", "now")
+                for item in todo:
+                    value = readback[(item["selector"], item["name"])]
+                    if value != item["original"] and not _same_number(value, item["original"]):
+                        errors.append(f"{item['selector']}.{item['name']} reads back {value}, "
+                                      f"expected {item['original']}")
+            except Exception as exc:  # noqa: BLE001 - report every failure with its attribute
+                errors += [f"{i['selector']}.{i['name']}={i['original']}: {exc}" for i in todo]
         return {"restored": not errors, "errors": errors, "revision": self.revision,
                 "overridden_during_render": overridden}
 
@@ -135,25 +197,28 @@ async def discover(host, session_id: str, part: int, include_master: bool) -> di
         roots.append("Engine/Synth")
     found, queue, reads, seen = [], list(roots), 0, set()
     while queue and reads < MAX_READS:
-        selector = queue.pop(0)
-        if selector in seen:
-            continue
-        seen.add(selector)
-        node = await host.request(session_id, "edit", {"selector": selector, "changes": [], "expected_revision": None})
-        reads += 1
-        node = {"selector": selector, "type": node["type"], "name": node["attributes"].get("DisplayName",
-                node["attributes"].get("Name")), "attributes": node["attributes"],
-                "indexed_definitions": node.get("indexed_definitions", []), "children": node.get("children", []),
-                "category": categories.get(node["type"])}
-        found.append(node)
-        for child in node["children"]:
-            tag = child["type"]
-            if tag in SKIP_TAGS:
-                continue  # Parts are walked from their own root; Synth only adds master inserts and aux returns.
-            category = categories.get(tag)
-            if category in ("Modulation", "Event Processor", "Oscillator"):
-                continue
-            queue.append(child["selector"])
+        # One batched read per tree level instead of one native request per node.
+        level = [s for s in dict.fromkeys(queue) if s not in seen][:MAX_READS - reads]
+        seen.update(level)
+        queue = [s for s in queue if s not in seen]
+        reads += len(level)
+        nodes = await read_nodes(host, session_id, level, None)
+        for selector in level:
+            raw = nodes[selector]
+            node = {"selector": selector, "type": raw["type"], "name": raw["attributes"].get(
+                    "DisplayName", raw["attributes"].get("Name")), "attributes": raw["attributes"],
+                    "indexed_definitions": raw["indexed_definitions"], "children": raw.get("children", []),
+                    "category": categories.get(raw["type"])}
+            found.append(node)
+            for child in node["children"]:
+                tag = child["type"]
+                if tag in SKIP_TAGS:
+                    continue  # Parts are walked from their own root; Synth only adds master inserts and aux returns.
+                category = categories.get(tag)
+                if category in ("Modulation", "Event Processor", "Oscillator"):
+                    continue
+                if child["selector"] not in seen:
+                    queue.append(child["selector"])
 
     def pick(pred):
         return [n for n in found if pred(n)]
@@ -424,12 +489,11 @@ def register_stems(mcp, config, audit, host):
                         paths[name] = saved["path"]
                         renders.append({**saved["render"], "resumed": True})
                         continue
-                    progress["stage"] = f"rendering {name}"
-                    patch = StatePatch(host, session_id, revision, audit)
+                    progress["stage"] = f"silencing for {name}"
+                    patch = StatePatch(host, session_id, revision, audit, progress)
                     try:
-                        applied = 0
-                        for selector, attribute, value, kind in changes:
-                            applied += await patch.set(selector, attribute, value, kind)
+                        applied = await patch.set_many(changes) if changes else 0
+                        progress["stage"] = f"rendering {name}"
                         path = stem_dir / f"{name.replace(':', '-')}.wav"
                         result = await host.request(session_id, "render", {
                             "path": str(path), "seconds": seconds, "sample_rate": sample_rate, "notes": notes_payload,

@@ -38,6 +38,11 @@ returns either the report with `status: "done"` or `status: "running"` with `job
 edit; do not edit the same native session while it runs, and only one stems run per session is allowed at
 a time. Jobs live in the server process; after a restart, read `<home>/reports/<job_id>.stems.json`.
 
+Every native edit re-serialises the whole Falcon state (about 0.7 s on a large instrument such as Glacier
+Duplex Piano), so discovery reads one tree level per request and each render's silencing and restore are
+batched (`edit_batch`: one state load per batch of up to 120 nodes). While a large `dry` render is being
+prepared, `stage` reads `silencing for dry` and `edits_done`/`edits_total` show progress.
+
 ## Silencing and restoring
 
 Each render applies guarded `falcon_native_edit` writes (expected attribute and revision), renders, then

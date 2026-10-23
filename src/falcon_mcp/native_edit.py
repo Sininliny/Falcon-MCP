@@ -2,10 +2,21 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import math
 import re
 from importlib.resources import files
+
+# Edits per edit_batch request: keeps each JSON request well under the 64 KiB native protocol cap.
+BATCH_LIMIT = 120
+
+
+@functools.lru_cache(maxsize=1)
+def _module_definitions() -> dict[str, dict[str, dict]]:
+    """Parameter definitions by module type, parsed once (the index is ~400 KB of JSON)."""
+    catalog = json.loads(files("falcon_mcp").joinpath("data/parameters.json").read_text(encoding="utf-8"))
+    return {m["type"]: {d["name"]: d for d in m.get("parameters", [])} for m in catalog["modules"]}
 
 
 def verify_changes(readback: dict, changes: list[dict]) -> bool:
@@ -34,9 +45,7 @@ def edit_node(root, selector: str, changes: list[dict], *, connection_guarded: b
         raise ValueError("Native selector not found; browse again")
     if changes and node.tag == "SignalConnection" and not connection_guarded:
         raise ValueError("Use native_connections with identity/revision guards and a diff preview")
-    catalog = json.loads(files("falcon_mcp").joinpath("data/parameters.json").read_text(encoding="utf-8"))
-    module = next((m for m in catalog["modules"] if m["type"] == node.tag), {})
-    definitions = {d["name"]: d for d in module.get("parameters", [])}
+    definitions = _module_definitions().get(node.tag, {})
     # SignalConnection is omitted from the generated _elements catalog. These two settings
     # were separately read from live Falcon 27.0.2; keep the native adapter deliberately narrow.
     if node.tag == "SignalConnection":
@@ -85,3 +94,21 @@ def edit_node(root, selector: str, changes: list[dict], *, connection_guarded: b
             "validation": ("Native XML + separately observed Falcon 27.0.2 connection definitions"
                            if node.tag == "SignalConnection" else
                            "Native XML + official offline index, not live UVIScript parameter definitions")}
+
+
+def edit_batch(root, edits: list[dict]) -> dict:
+    """Read or edit many nodes of one state tree; each entry is {"selector", "changes"} as for edit_node.
+
+    Every guard is checked in order and the first failure raises, so a caller that applies the tree only
+    after this returns never applies a partial batch. Definitions are returned once per module type.
+    """
+    if len(edits) > BATCH_LIMIT * 4:
+        raise ValueError("Too many nodes in one native batch")
+    nodes, definitions = [], {}
+    for entry in edits:
+        result = edit_node(root, entry["selector"], entry.get("changes", []))
+        definitions.setdefault(result["type"], result.pop("indexed_definitions"))
+        result.pop("validation")
+        nodes.append(result)
+    return {"nodes": nodes, "definitions": definitions,
+            "validation": "Native XML + official offline index, not live UVIScript parameter definitions"}
