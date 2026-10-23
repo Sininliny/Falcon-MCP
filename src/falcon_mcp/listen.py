@@ -630,7 +630,9 @@ def findings(report: dict) -> list[str]:
 
 def listen(audio: np.ndarray, rate: int, expected_note: float | None = None,
            note_on_seconds: float | None = None, note_off_seconds: float | None = None,
-           include_ascii: bool = True) -> dict:
+           include_ascii: bool = True, light: bool = False) -> dict:
+    """Full listening report. light=True skips pitch, harmonics, brightness-over-time and click analysis
+    (the slow, single-note parts) for callers that only compare level, envelope, spectrum and stereo."""
     data = audio.astype(np.float64)
     peak = float(np.max(np.abs(data))) if data.size else 0.0
     rms = math.sqrt(float(np.mean(data**2))) if data.size else 0.0
@@ -658,6 +660,11 @@ def listen(audio: np.ndarray, rate: int, expected_note: float | None = None,
     mono = analysis_mono(data)
     end = note_off_seconds if note_off_seconds else (envelope["release"]["start_seconds"] or len(data) / rate)
     region = (envelope["onset_seconds"], max(end, envelope["onset_seconds"] + 0.1))
+    if light:
+        report.update(envelope=envelope, pitch={"available": False, "reason": "skipped (light analysis)"},
+                      spectrum=spectral_bands(data, rate), clicks={"count": 0, "skipped": True},
+                      stereo=stereo_analysis(data, rate))
+        return report
     pitch = pitch_analysis(mono, rate, expected_note, region)
     report.update(envelope=envelope, pitch=pitch, spectrum=spectral_bands(data, rate))
     f0 = pitch["median_f0_hz"] if pitch.get("available") else (midi_to_hz(expected_note) if expected_note is not None else None)

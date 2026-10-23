@@ -162,7 +162,7 @@ def stereo_summary(audio: np.ndarray, rate: int, windows: list[dict] | None = No
 
 
 def exposure(target: np.ndarray, rest: np.ndarray, full: np.ndarray, rate: int,
-             windows: list[dict] | None = None) -> dict:
+             windows: list[dict] | None = None, full_power=None) -> dict:
     """Glimpse-style audibility proxy: share of the target's energy in cells where the rest does not cover it.
 
     exposed_energy_fraction: target energy in TF cells where target >= rest - 3 dB, over all of the target's
@@ -171,7 +171,7 @@ def exposure(target: np.ndarray, rest: np.ndarray, full: np.ndarray, rate: int,
     """
     freqs, times, pt = tf_power(target, rate)
     _, _, pr = tf_power(rest, rate)
-    _, _, pf = tf_power(full, rate)
+    _, _, pf = full_power if full_power is not None else tf_power(full, rate)
     frames = min(pt.shape[1], pr.shape[1], pf.shape[1])
     pt, pr, pf, times = pt[:, :frames], pr[:, :frames], pf[:, :frames], times[:frames]
     floor = float(pf.max()) * 10 ** (ACTIVE_FLOOR_DB / 10) if pf.size else 0.0
@@ -213,13 +213,17 @@ def repeatability(full: np.ndarray, repeat: np.ndarray, rate: int) -> dict:
     deterministic = null is None or null <= DETERMINISTIC_NULL_DB
     out = {"null_residual_db": null, "deterministic": deterministic}
     if not deterministic:
-        heard = listen.diff_reports(listen.listen(repeat, rate, include_ascii=False),
-                                    listen.listen(full, rate, include_ascii=False))
+        heard = listen.diff_reports(_report(repeat, rate), _report(full, rate))
         out["repeat_noticeable_steps"] = max((abs(r["noticeable_steps"]) for r in heard.get("all_features", [])),
                                              default=0.0)
         out["note"] = ("Renders differ run to run (random/round-robin/free-running modulation); residual metrics "
                        "are disabled and changes within repeat_noticeable_steps are treated as noise")
     return out
+
+
+def _report(audio: np.ndarray, rate: int) -> dict:
+    """Light listen report (no pitch/harmonics/clicks): stems compare only robust whole-phrase features."""
+    return listen.listen(audio, rate, include_ascii=False, light=True)
 
 
 def _fractions(energies: dict) -> dict:
@@ -235,16 +239,28 @@ def _flatness(audio: np.ndarray, rate: int) -> float | None:
 
 
 def contribution(full: np.ndarray, without: np.ndarray | None, rate: int, windows: list[dict] | None = None,
-                 solo: np.ndarray | None = None, repeat: dict | None = None) -> dict:
-    """How one target changes the full mix: level, regions, bands, exposure, stereo and roles."""
+                 solo: np.ndarray | None = None, repeat: dict | None = None, cache: dict | None = None) -> dict:
+    """How one target changes the full mix: level, regions, bands, exposure, stereo and roles.
+
+    cache (optional, shared across targets of one run) memoises analysis of the unchanged full mix."""
     windows = windows or []
+    original_full = full
     aligned = iter(align(*[x for x in (full, without, solo) if x is not None]))
     full = next(aligned)
     without = next(aligned) if without is not None else None
     solo = next(aligned) if solo is not None else None
+
+    def of_full(name, fn):
+        """fn(full), computed once per run when the full mix is not trimmed by alignment."""
+        if cache is None or len(full) != len(original_full):
+            return fn(full)
+        key = (name, id(original_full))
+        if key not in cache:
+            cache[key] = fn(full)
+        return cache[key]
     repeat = repeat or {"deterministic": True}
     out: dict = {}
-    full_regions = region_levels(full, rate, windows)
+    full_regions = of_full("regions", lambda a: region_levels(a, rate, windows))
     out["full_energy_by_region"] = _fractions(full_regions)
     if solo is not None:
         lf, ls, method = _loudness_pair(full, solo, rate)
@@ -255,7 +271,7 @@ def contribution(full: np.ndarray, without: np.ndarray | None, rate: int, window
         # Share of each region's energy that the target alone carries (dB re full in that region).
         out["solo"]["share_by_region_db"] = {k: _db_ratio(solo_regions[k], full_regions[k])
                                              for k in full_regions if full_regions[k] > 0}
-        bands_s, bands_f = band_energies(solo, rate), band_energies(full, rate)
+        bands_s, bands_f = band_energies(solo, rate), of_full("bands", lambda a: band_energies(a, rate))
         out["solo"]["share_by_band_db"] = {k: _db_ratio(bands_s[k], bands_f[k]) for k in bands_f if bands_f[k] > 0}
         out["solo"]["energy_by_region"] = _fractions(solo_regions)
         out["solo"]["energy_by_band"] = _fractions(bands_s)
@@ -277,16 +293,15 @@ def contribution(full: np.ndarray, without: np.ndarray | None, rate: int, window
         if lw is not None and lf is not None:
             gain = 10 ** ((lf - lw) / 20)
             matched = without * gain
-            bands_m, bands_f = band_energies(matched, rate), band_energies(full, rate)
+            bands_m, bands_f = band_energies(matched, rate), of_full("bands", lambda a: band_energies(a, rate))
             out["matched"] = {
                 "gain_applied_db": round(lf - lw, 2),
                 "band_change_db": {k: _db_ratio(bands_f[k], bands_m[k]) for k in bands_f
                                    if bands_f[k] + bands_m[k] > 0},
-                "stereo_width_change_db": round(stereo_summary(full, rate)["side_minus_mid_db"]
+                "stereo_width_change_db": round(of_full("stereo", lambda a: stereo_summary(a, rate))["side_minus_mid_db"]
                                                 - stereo_summary(matched, rate)["side_minus_mid_db"], 1),
             }
-            diff = listen.diff_reports(listen.listen(matched, rate, include_ascii=False),
-                                       listen.listen(full, rate, include_ascii=False))
+            diff = listen.diff_reports(_report(matched, rate), of_full("report", lambda a: _report(a, rate)))
             if diff.get("available"):
                 floor = repeat.get("repeat_noticeable_steps", 0.0)
                 rows = [r for r in diff["significant_changes"] if abs(r["noticeable_steps"]) > max(floor, 1.0)
@@ -308,7 +323,8 @@ def contribution(full: np.ndarray, without: np.ndarray | None, rate: int, window
         rest = without
         target = solo if solo is not None else (full - without if repeat.get("deterministic") else None)
         if target is not None:
-            out["exposure"] = exposure(target, rest, full, rate, windows)
+            out["exposure"] = exposure(target, rest, full, rate, windows,
+                                       full_power=of_full("tf_power", lambda a: tf_power(a, rate)))
     out["roles"], out["status"], out["evidence"] = classify(out, repeat)
     return out
 
