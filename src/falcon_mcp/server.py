@@ -23,6 +23,7 @@ from .audit import AuditLog, trace_id
 from .bridge import FalconBridge
 from .catalog import search_catalog
 from .config import Config
+from .descriptors import descriptor_deltas, resolve_facets
 from .listen import listen
 from .setup import installation_status, setup_bridge
 
@@ -38,6 +39,22 @@ Name = Annotated[str, Field(min_length=1, max_length=128)]
 Offset = Annotated[int, Field(ge=0, le=100000)]
 Limit = Annotated[int, Field(ge=1, le=100)]
 Value = StrictBool | StrictInt | StrictFloat | StrictStr
+
+
+class DescriptorItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    label: str = Field(min_length=1, max_length=60)
+    text: str = Field(min_length=1, max_length=300, description="English CLAP prompt, e.g. 'A felt piano ...'")
+
+
+class DescriptorFacet(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    facet: str = Field(min_length=1, max_length=60)
+    items: list[DescriptorItem] = Field(min_length=2, max_length=16)
+
+
+DescriptorBank = Literal["synth", "keys", "all", "custom"]
+CustomDescriptors = Annotated[list[DescriptorFacet], Field(max_length=8)]
 READ = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
 WRITE = {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False}
 
@@ -94,7 +111,7 @@ def create_server(config: Config | None = None) -> FastMCP:
             "Agents without audio input: render (native_render) or record, then falcon_listen for text/ASCII evidence, "
             "falcon_audio_diff after each single change, falcon_match_target for numeric goals, falcon_native_sweep "
             "for key/velocity consistency, falcon_native_param_sweep to learn what one parameter does and falcon_native_stems "
-            "to hear what each layer contributes. "
+            "to hear what each layer contributes, falcon_native_collection to find instruments that share recordings. "
             "For installation/build mismatch call falcon_setup(verify_watch=true) once when idle. "
             "Never repeatedly use computer-use/mouse tools to load or reload the bridge. "
             "A missing Master bridge requires the one-time user setup, which is returned by falcon_setup."
@@ -420,14 +437,22 @@ def create_server(config: Config | None = None) -> FastMCP:
         path: str,
         targets: Annotated[list[Annotated[str, Field(min_length=1, max_length=500)]], Field(max_length=16)]
         | None = None,
+        descriptor_bank: DescriptorBank = "synth",
+        custom_descriptors: CustomDescriptors | None = None,
+        descriptor_file: str | None = None,
     ) -> dict[str, Any]:
         """Describe <=30 s audio using local open-source CLAP; load ONLY for this call, then release.
 
-        Returns English facet descriptions, relative similarities, ambiguity, and measurements.
-        targets may contain English desired-sound descriptions for A/B comparisons. No cloud inference.
-        First download weights using 'falcon-mcp download-model'; inference is offline by default.
+        Returns English facet descriptions, relative similarities, ambiguity, per-descriptor scores and
+        measurements. targets may contain English desired-sound descriptions for A/B comparisons.
+        descriptor_bank: synth (default), keys (acoustic/felt/upright piano, Rhodes, Wurlitzer: hammer,
+        mechanics, perspective, pedal, tremolo), all, or custom. custom_descriptors / descriptor_file
+        (.json under the audio root or assets, same layout) add facets [{facet, items: [{label, text}]}].
+        No cloud inference. First download weights using 'falcon-mcp download-model'; offline by default.
         """
-        return await feedback.analyze(cfg.audio_path(path), targets)
+        custom = [facet.model_dump() for facet in custom_descriptors or []]
+        facets = resolve_facets(cfg, descriptor_bank, custom, descriptor_file)
+        return await feedback.analyze(cfg.audio_path(path), targets, facets, descriptor_bank)
 
     @mcp.tool(annotations=READ)
     async def falcon_compare_audio(
@@ -435,14 +460,21 @@ def create_server(config: Config | None = None) -> FastMCP:
         after_path: str,
         targets: Annotated[list[Annotated[str, Field(min_length=1, max_length=500)]], Field(max_length=16)]
         | None = None,
+        descriptor_bank: DescriptorBank = "synth",
+        custom_descriptors: CustomDescriptors | None = None,
+        descriptor_file: str | None = None,
     ) -> dict[str, Any]:
         """Compare two recordings with the same descriptor bank and optional target text.
 
-        Reports measured differences and target similarity deltas; does not claim which sound is better.
+        Reports measured differences, target similarity deltas and the largest per-descriptor deltas
+        (useful when both share top labels); does not claim which sound is better. descriptor_bank and
+        custom descriptors work as in falcon_describe_timbre (use keys for pianos and electric pianos).
         Each inference worker exits after its call. Keep note, velocity and gain identical.
         """
-        before = await feedback.analyze(cfg.audio_path(before_path), targets)
-        after = await feedback.analyze(cfg.audio_path(after_path), targets)
+        custom = [facet.model_dump() for facet in custom_descriptors or []]
+        facets = resolve_facets(cfg, descriptor_bank, custom, descriptor_file)
+        before = await feedback.analyze(cfg.audio_path(before_path), targets, facets, descriptor_bank)
+        after = await feedback.analyze(cfg.audio_path(after_path), targets, facets, descriptor_bank)
         keys = ["rms_dbfs", "peak_dbfs", "spectral_centroid_hz", "spectral_flatness", "crest_db"]
         deltas = {key: after["measurements"][key] - before["measurements"][key] for key in keys}
         target_deltas = [
@@ -454,6 +486,7 @@ def create_server(config: Config | None = None) -> FastMCP:
             "after": after,
             "measurement_deltas": deltas,
             "target_deltas": target_deltas,
+            "descriptor_deltas": descriptor_deltas(before, after),
         }
 
     @mcp.tool(annotations=READ)
@@ -593,7 +626,9 @@ def create_server(config: Config | None = None) -> FastMCP:
                 "realtime_performance": {"status": "implemented_unvalidated", "scope": "Owned-host block timing and static cost model (falcon_native_perf_benchmark, falcon_perf_static); not the standalone CPU meter"},
                 "ui_checks": {"status": "implemented_unvalidated", "scope": "Static control-tree/mouse-blocking/contrast checks, live probe and native save/reload round trip (falcon_ui_check, falcon_ui_live_probe, falcon_native_ui_roundtrip); real mouse input is not tested"},
                 "performance_rendering": {"status": "implemented_unvalidated", "scope": "Owned-host offline render of timestamped notes/CC64/CC/bend/pressure on channels 1..16, canned phrases and performance checks (falcon_native_perform, falcon_native_perform_suite, falcon_perform_analyze); not realtime, not external MIDI input"},
-                "layer_stems": {"status": "implemented_unvalidated", "scope": "Owned-host per-layer solo/without/dry renders with guarded restore and contribution analysis (falcon_native_stems, falcon_stem_analyze)"},
+                "structural_inserts": {"status": "implemented_unvalidated", "scope": "Owned-host preview/apply/rollback of whitelisted insert modules (filter, chorus, amp, tremolo, saturation) with velocity/keyfollow/modwheel modulation, revision guard, readback and mandatory before/after probe render (falcon_native_structure)"},
+                "layer_stems": {"status": "implemented_unvalidated", "scope": "Owned-host per-layer solo/without/dry renders with guarded restore and contribution analysis (falcon_native_stems, falcon_native_stems_result, falcon_stem_analyze); long runs continue as background jobs"},
+                "collection_similarity": {"status": "implemented_unvalidated", "scope": "Owned-host key x velocity grid across 2..8 instruments; pairwise shared-recording, partial-fingerprint and timbre comparison (falcon_native_collection, falcon_native_collection_result); background job, session saved and reloaded"},
                 "text_listening": {"status": "implemented", "scope": "Deterministic DSP reports for agents without audio input; heuristics, not perceptual verdicts"},
                 "reference_segments": {"status": "implemented", "scope": "Explicit local audio range, no source separation; level-normalized measurement hypotheses"},
             },
@@ -623,6 +658,7 @@ def create_server(config: Config | None = None) -> FastMCP:
         )
 
     from .advanced import register_advanced
+    from .collection_tools import register_collection
     from .design_tools import register_design
     from .knowledge_tools import register_knowledge
     from .listen_tools import register_listening
@@ -632,6 +668,7 @@ def create_server(config: Config | None = None) -> FastMCP:
     from .perform_tools import register_perform
     from .reference_tools import register_reference
     from .stem_tools import register_stems
+    from .structure_tools import register_structure
     from .sweep_tools import register_sweeps
     from .ui_tools import register_ui_checks
     from .workflow_tools import register_workflows
@@ -648,6 +685,8 @@ def create_server(config: Config | None = None) -> FastMCP:
     register_perf(mcp, cfg, audit, native_host)
     register_ui_checks(mcp, cfg, audit, bridge, native_host)
     register_stems(mcp, cfg, audit, native_host)
+    register_structure(mcp, cfg, audit, native_host)
+    register_collection(mcp, cfg, audit, native_host)
     from .rack_tools import register_rack
 
     register_rack(mcp, cfg, audit, native_host, midi_compare_run)

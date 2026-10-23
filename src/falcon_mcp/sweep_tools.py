@@ -14,12 +14,17 @@ from pydantic import Field, StrictBool, StrictFloat, StrictInt
 
 from . import listen
 from .audio import read_audio
+from .jobs import DEFAULT_WAIT_SECONDS, JOB_ID_PATTERN, MAX_WAIT_SECONDS, jobs_for
 from .listen_tools import TargetSpec
 
+READ = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
 WRITE = {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False}
 Session = Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]
 Revision = Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
 Selector = Annotated[str, Field(min_length=1, max_length=1024)]
+WaitSeconds = Annotated[float, Field(ge=0, le=MAX_WAIT_SECONDS)]
+RequestTimeout = Annotated[float, Field(ge=10, le=1800)]
+JobId = Annotated[str, Field(pattern=JOB_ID_PATTERN)]
 
 MAX_CELLS = 48
 START_SECONDS = 0.1
@@ -39,13 +44,17 @@ def _fmt(value, digits=1, unit=""):
     return "n/a" if value is None else f"{value:.{digits}f}{unit}"
 
 
-async def _render(host, config, session_id, prefix, notes, seconds, sample_rate, revision, keep_audio):
+def timeout_kw(timeout: float | None) -> dict:
+    return {"timeout": timeout} if timeout else {}
+
+
+async def _render(host, config, session_id, prefix, notes, seconds, sample_rate, revision, keep_audio, timeout=None):
     config.audio_root.mkdir(parents=True, exist_ok=True)
     path = config.audio_path(f"{prefix}-{uuid.uuid4().hex}.wav", must_exist=False)
     result = await host.request(session_id, "render", {
         "path": str(path), "seconds": seconds, "sample_rate": sample_rate, "notes": notes,
         "expected_revision": revision,
-    })
+    }, **timeout_kw(timeout))
     try:
         audio, rate = await asyncio.to_thread(read_audio, path)
     finally:
@@ -191,6 +200,8 @@ def _cast(raw: str, kind: str):
 
 
 def register_sweeps(mcp, config, audit, host):
+    jobs = jobs_for(host, config, audit)
+
     @mcp.tool(annotations=WRITE)
     async def falcon_native_sweep(
         session_id: Session,
@@ -202,6 +213,9 @@ def register_sweeps(mcp, config, audit, host):
         sample_rate: Annotated[int, Field(ge=44100, le=96000)] = 48000,
         expected_revision: Revision | None = None,
         keep_audio: bool = False,
+        wait_seconds: WaitSeconds = DEFAULT_WAIT_SECONDS,
+        render_timeout_seconds: RequestTimeout | None = None,
+        resume_job_id: JobId | None = None,
     ) -> dict[str, Any]:
         """Render every key x velocity cell separately in the OWNED VST3 session and report a text map.
 
@@ -209,7 +223,12 @@ def register_sweeps(mcp, config, audit, host):
         pitch scaling) jumps that suggest sample-zone seams, velocity reversals, velocity dynamic range,
         velocity-to-brightness slope and clipping. At most 48 cells; one render per cell. "Adjacent" means
         neighbours in the swept list, so sweep consecutive keys around suspected zone boundaries.
-        The state revision is pinned after the first cell; a concurrent edit aborts the sweep.
+        The state revision is pinned after the first cell; a concurrent edit aborts the sweep. Parameters
+        that the instrument's own scripts write while rendering do not count as an edit.
+        Runs as a background job: if it is not finished within wait_seconds (default 40) it returns status
+        "running" with a job_id; collect it with falcon_native_job_result. Every finished cell is saved, so a
+        failed run continues with the same arguments plus resume_job_id. render_timeout_seconds raises the
+        per-render limit (default 120 s, env FALCON_NATIVE_REQUEST_TIMEOUT) for very large instruments.
         Measurements steer edits; they are not a perceptual verdict.
         """
         if sample_rate not in (44100, 48000, 96000):
@@ -220,29 +239,51 @@ def register_sweeps(mcp, config, audit, host):
         if len(notes) * len(velocities) > MAX_CELLS:
             raise ValueError(f"At most {MAX_CELLS} cells per sweep; split keys or velocities")
         seconds = max(1.0, START_SECONDS + hold_seconds + tail_seconds)
-        audit.event("native_sweep_start", session_id=session_id, notes=notes, velocities=velocities)
-        cells, revision = [], expected_revision
-        for note in sorted(notes):
-            for velocity in sorted(velocities):
+        grid = [(note, velocity) for note in sorted(notes) for velocity in sorted(velocities)]
+        key = {"notes": sorted(notes), "velocities": sorted(velocities), "channel": channel,
+               "hold": hold_seconds, "tail": tail_seconds, "rate": sample_rate, "keep_audio": keep_audio}
+
+        async def work(job_id, progress, checkpoint):
+            audit.event("native_sweep_start", session_id=session_id, notes=notes, velocities=velocities, job=job_id)
+            revision = checkpoint.revision or expected_revision
+            progress.update(stage="rendering cells", total=len(grid))
+            for note, velocity in grid:
+                unit = f"{note}:{velocity}"
+                if unit in checkpoint:
+                    continue
                 result, audio, rate, path = await _render(
                     host, config, session_id, f"sweep-{note}-{velocity}",
                     [{"note": note, "velocity": velocity, "channel": channel, "start_seconds": START_SECONDS,
-                      "duration_seconds": hold_seconds}], seconds, sample_rate, revision, keep_audio)
-                revision = revision or result.get("revision")
+                      "duration_seconds": hold_seconds}], seconds, sample_rate, revision, keep_audio,
+                    render_timeout_seconds)
+                if revision is None:
+                    revision = result.get("revision")
+                if checkpoint.revision is None:
+                    checkpoint.revision = revision
                 report = await asyncio.to_thread(
                     listen.listen, audio, rate, expected_note=note, note_on_seconds=START_SECONDS,
                     note_off_seconds=START_SECONDS + hold_seconds, include_ascii=False)
-                cells.append({"note": note, "name": listen.note_name(note), "velocity": velocity,
-                              **listen.compact(report), **({"path": path} if path else {})})
-        found, summary = key_velocity_findings(cells, notes, velocities)
-        return {"revision": revision, "cells": cells, "grid": ascii_grid(cells, notes, velocities),
-                "findings": found or ["no key/velocity issues above the heuristic thresholds"],
-                "velocity_summary": summary,
-                "thresholds": {"silent_rms_dbfs": SILENT_RMS_DBFS, "pitch_cents": PITCH_TOLERANCE_CENTS,
-                               "adjacent_level_db": LEVEL_SEAM_DB, "adjacent_centroid_ratio": CENTROID_SEAM_RATIO,
-                               "velocity_reversal_db": VELOCITY_REVERSAL_DB},
-                "limitations": "Single-note offline renders; round-robin, legato, effects tails and modulation "
-                               "state can differ from live playing. Thresholds are heuristics."}
+                checkpoint.record(unit, {"note": note, "name": listen.note_name(note), "velocity": velocity,
+                                         **listen.compact(report), **({"path": path} if path else {}),
+                                         "state_changed_by_render": bool(result.get("state_changed_by_render"))})
+                progress["done"] = len(checkpoint.completed)
+            cells = [{k: v for k, v in checkpoint.completed[f"{n}:{v}"].items() if k != "state_changed_by_render"}
+                     for n, v in grid]
+            script_writes = sum(bool(checkpoint.completed[f"{n}:{v}"].get("state_changed_by_render")) for n, v in grid)
+            found, summary = key_velocity_findings(cells, notes, velocities)
+            return {"revision": revision, "cells": cells, "grid": ascii_grid(cells, notes, velocities),
+                    "findings": found or ["no key/velocity issues above the heuristic thresholds"],
+                    "velocity_summary": summary,
+                    "renders_that_changed_state": script_writes,
+                    "resumed_cells": progress["resumed_units"],
+                    "thresholds": {"silent_rms_dbfs": SILENT_RMS_DBFS, "pitch_cents": PITCH_TOLERANCE_CENTS,
+                                   "adjacent_level_db": LEVEL_SEAM_DB, "adjacent_centroid_ratio": CENTROID_SEAM_RATIO,
+                                   "velocity_reversal_db": VELOCITY_REVERSAL_DB},
+                    "limitations": "Single-note offline renders; round-robin, legato, effects tails and modulation "
+                                   "state can differ from live playing. Thresholds are heuristics."}
+
+        job_id = jobs.submit("sweep", session_id, key, work, resume_job_id)
+        return await jobs.wait(job_id, wait_seconds)
 
     @mcp.tool(annotations=WRITE)
     async def falcon_native_param_sweep(
@@ -256,6 +297,9 @@ def register_sweeps(mcp, config, audit, host):
         tail_seconds: Annotated[float, Field(ge=0.5, le=8)] = 1.0,
         sample_rate: Annotated[int, Field(ge=44100, le=96000)] = 48000,
         target: dict[str, TargetSpec] | None = None,
+        wait_seconds: WaitSeconds = DEFAULT_WAIT_SECONDS,
+        render_timeout_seconds: RequestTimeout | None = None,
+        resume_job_id: JobId | None = None,
     ) -> dict[str, Any]:
         """Try several values of ONE indexed native parameter, render each, then restore the original.
 
@@ -265,11 +309,14 @@ def register_sweeps(mcp, config, audit, host):
         vs baseline), direction per feature as the value rises, and the best value against target
         ({feature: {min,max} | {value,tolerance,weight}}, as in falcon_match_target) when given.
         Apply the chosen value afterwards with falcon_native_edit; this tool leaves the session as found.
+        Runs as a background job like falcon_native_sweep (wait_seconds, falcon_native_job_result,
+        resume_job_id, render_timeout_seconds); each finished value is saved for a resume.
         """
         if sample_rate not in (44100, 48000, 96000):
             raise ValueError("sample_rate must be 44100, 48000 or 96000")
         if len({(type(v), v) for v in values}) != len(values):
             raise ValueError("values must not repeat")
+        timeout = timeout_kw(render_timeout_seconds)
         read = await host.request(session_id, "edit", {"selector": selector, "changes": [], "expected_revision": None})
         if parameter not in read["attributes"]:
             raise ValueError("Parameter not found on this node; read it with falcon_native_edit")
@@ -291,69 +338,113 @@ def register_sweeps(mcp, config, audit, host):
         seconds = max(1.0, START_SECONDS + hold_seconds + tail_seconds)
         render_note = [{"note": note, "velocity": velocity, "channel": channel, "start_seconds": START_SECONDS,
                         "duration_seconds": hold_seconds}]
-        state = {"raw": original_raw, "revision": read["revision"]}
-        rows, failure = [], None
-        audit.event("native_param_sweep_start", session_id=session_id, selector=selector,
-                    parameter=parameter, original=original_raw, values=values)
+        spec = {name: s.model_dump(exclude_none=True) for name, s in target.items()} if target else None
+        key = {"selector": selector, "parameter": parameter,
+               "values": [[type(v).__name__, v] for v in values], "note": note, "velocity": velocity,
+               "channel": channel, "hold": hold_seconds, "tail": tail_seconds, "rate": sample_rate, "target": spec}
 
-        async def measure(value, baseline):
-            _, audio, rate, _ = await _render(host, config, session_id, "param-sweep", render_note, seconds,
-                                              sample_rate, state["revision"], False)
-            report = await asyncio.to_thread(
-                listen.listen, audio, rate, expected_note=note, note_on_seconds=START_SECONDS,
-                note_off_seconds=START_SECONDS + hold_seconds, include_ascii=False)
-            rows.append({"value": value, "baseline": baseline, "attribute": state["raw"],
-                         "features": listen.feature_vector(report), "summary": listen.compact(report)})
-            return report
+        async def work(job_id, progress, checkpoint):
+            state = {"raw": original_raw, "revision": read["revision"]}
+            if checkpoint.revision is not None:
+                if checkpoint.meta.get("original") != original_raw:
+                    raise ValueError(f"{parameter} is {original_raw}, the checkpoint was taken at "
+                                     f"{checkpoint.meta.get('original')}; start a new sweep")
+                # The worker refuses this unless the session is still in the checkpointed state.
+                await host.request(session_id, "status", {"expected_revision": checkpoint.revision})
+                state["revision"] = checkpoint.revision
+            else:
+                checkpoint.meta["original"] = original_raw
+                checkpoint.revision = read["revision"]
+            failure = None
+            progress.update(stage="rendering values", total=len(values) + 1)
+            audit.event("native_param_sweep_start", session_id=session_id, selector=selector,
+                        parameter=parameter, original=original_raw, values=values, job=job_id)
 
-        async def write(value):
-            result = await host.request(session_id, "edit", {
-                "selector": selector, "changes": [{"name": parameter, "value": value, "expected": state["raw"]}],
-                "expected_revision": state["revision"]})
-            state.update(raw=result["readback"]["attributes"][parameter], revision=result["revision"])
+            async def measure(unit, value, baseline):
+                _, audio, rate, _ = await _render(host, config, session_id, "param-sweep", render_note, seconds,
+                                                  sample_rate, state["revision"], False, render_timeout_seconds)
+                report = await asyncio.to_thread(
+                    listen.listen, audio, rate, expected_note=note, note_on_seconds=START_SECONDS,
+                    note_off_seconds=START_SECONDS + hold_seconds, include_ascii=False)
+                evaluation = listen.evaluate_target(report, spec) if spec else None
+                checkpoint.record(unit, {
+                    "row": {"value": value, "baseline": baseline, "attribute": state["raw"],
+                            "features": listen.feature_vector(report), "summary": listen.compact(report)},
+                    "evaluation": evaluation and {k: evaluation[k] for k in ("distance", "passed", "next_step")}})
+                progress["done"] = len(checkpoint.completed)
 
-        try:
-            reports = {"baseline": await measure(original, True)}
-            for value in values:
-                await write(value)
-                reports[str(value)] = await measure(value, False)
-        except Exception as exc:  # noqa: BLE001 - restore first, then re-raise with the outcome.
-            failure = exc
-        finally:
-            restore = {"restored": state["raw"] == original_raw, "original": original_raw}
-            if not restore["restored"]:
-                try:
-                    await write(original)
-                    restore.update(restored=state["raw"] == original_raw, readback=state["raw"])
-                except BaseException as exc:  # noqa: BLE001 - report, never mask the sweep's own outcome.
-                    restore.update(restored=False, error=str(exc),
-                                   action=f"Inspect {selector} with falcon_native_edit and set {parameter}={original_raw}")
-            restore["revision"] = state["revision"]
-            audit.event("native_param_sweep_restore", session_id=session_id, selector=selector,
-                        parameter=parameter, **restore)
-        if failure is not None:
-            raise RuntimeError(f"Parameter sweep failed after {len(rows)} render(s): {failure}; "
-                               f"original restored: {restore['restored']}") from failure
-        ranked, directions = parameter_response(rows)
-        table = [{"value": r["value"], "baseline": r["baseline"], **r["summary"]}
-                 for r in sorted(rows, key=lambda r: (_numeric(r["value"]), not r["baseline"]))]
-        result = {"selector": selector, "parameter": parameter, "definition": definition,
-                  "original": original_raw, **restore, "table": table,
-                  "features_ranked_by_change": [r for r in ranked if r["direction_as_value_rises"] != "flat"][:20],
-                  "direction_by_feature": directions,
-                  "unchanged_features": [name for name, d in directions.items() if d == "flat"],
-                  "definition_of_steps": "noticeable steps = change vs baseline / per-feature heuristic step; >=1 "
-                                         "is worth listening for",
-                  "limitations": "One note and velocity; measurements steer edits, not a perceptual verdict."}
-        if target:
-            spec = {name: s.model_dump(exclude_none=True) for name, s in target.items()}
-            scored = []
-            for row in rows:
-                evaluation = listen.evaluate_target(reports["baseline" if row["baseline"] else str(row["value"])], spec)
-                scored.append({"value": row["value"], "baseline": row["baseline"], "distance": evaluation["distance"],
-                               "passed": evaluation["passed"], "next_step": evaluation["next_step"]})
-            scored.sort(key=lambda s: s["distance"])
-            result["target"] = {"ranking": scored, "best_value": scored[0]["value"],
-                                "best_is_baseline": scored[0]["baseline"],
-                                "note": "Best among tried values only; refine between neighbours if distance > 0"}
-        return result
+            async def write(value):
+                result = await host.request(session_id, "edit", {
+                    "selector": selector, "changes": [{"name": parameter, "value": value, "expected": state["raw"]}],
+                    "expected_revision": state["revision"]}, **timeout)
+                state.update(raw=result["readback"]["attributes"][parameter], revision=result["revision"])
+
+            try:
+                if "baseline" not in checkpoint:
+                    await measure("baseline", original, True)
+                for value in values:
+                    unit = f"{type(value).__name__}:{value}"
+                    if unit in checkpoint:
+                        continue
+                    await write(value)
+                    await measure(unit, value, False)
+            except Exception as exc:  # noqa: BLE001 - restore first, then re-raise with the outcome.
+                failure = exc
+            finally:
+                restore = {"restored": state["raw"] == original_raw, "original": original_raw}
+                if not restore["restored"]:
+                    try:
+                        await write(original)
+                        restore.update(restored=state["raw"] == original_raw, readback=state["raw"])
+                    except BaseException as exc:  # noqa: BLE001 - report, never mask the sweep's own outcome.
+                        restore.update(restored=False, error=str(exc),
+                                       action=f"Inspect {selector} with falcon_native_edit and set {parameter}={original_raw}")
+                restore["revision"] = state["revision"]
+                if restore["restored"] and state["revision"] != checkpoint.revision:
+                    # The restored state is identical in content; later resumes start from it.
+                    checkpoint.revision = state["revision"]
+                audit.event("native_param_sweep_restore", session_id=session_id, selector=selector,
+                            parameter=parameter, **restore)
+            if failure is not None:
+                raise RuntimeError(f"Parameter sweep failed after {len(checkpoint.completed)} render(s): {failure}; "
+                                   f"original restored: {restore['restored']}") from failure
+            saved = checkpoint.completed
+            rows = [saved["baseline"]["row"]] + [saved[f"{type(v).__name__}:{v}"]["row"] for v in values]
+            ranked, directions = parameter_response(rows)
+            table = [{"value": r["value"], "baseline": r["baseline"], **r["summary"]}
+                     for r in sorted(rows, key=lambda r: (_numeric(r["value"]), not r["baseline"]))]
+            result = {"selector": selector, "parameter": parameter, "definition": definition,
+                      "original": original_raw, **restore, "table": table,
+                      "features_ranked_by_change": [r for r in ranked if r["direction_as_value_rises"] != "flat"][:20],
+                      "direction_by_feature": directions,
+                      "unchanged_features": [name for name, d in directions.items() if d == "flat"],
+                      "resumed_values": progress["resumed_units"],
+                      "definition_of_steps": "noticeable steps = change vs baseline / per-feature heuristic step; >=1 "
+                                             "is worth listening for",
+                      "limitations": "One note and velocity; measurements steer edits, not a perceptual verdict."}
+            if spec:
+                units = ["baseline"] + [f"{type(v).__name__}:{v}" for v in values]
+                scored = [{"value": saved[u]["row"]["value"], "baseline": saved[u]["row"]["baseline"],
+                           **saved[u]["evaluation"]} for u in units]
+                scored.sort(key=lambda s: s["distance"])
+                result["target"] = {"ranking": scored, "best_value": scored[0]["value"],
+                                    "best_is_baseline": scored[0]["baseline"],
+                                    "note": "Best among tried values only; refine between neighbours if distance > 0"}
+            return result
+
+        job_id = jobs.submit("psweep", session_id, key, work, resume_job_id)
+        return await jobs.wait(job_id, wait_seconds)
+
+    @mcp.tool(annotations=READ)
+    async def falcon_native_job_result(
+        job_id: JobId,
+        wait_seconds: WaitSeconds = DEFAULT_WAIT_SECONDS,
+    ) -> dict[str, Any]:
+        """Collect a background falcon_native_sweep, falcon_native_param_sweep, falcon_native_stems or
+        falcon_native_collection run.
+
+        Waits up to wait_seconds (kept below the client's request timeout); returns the tool's report with
+        status "done", raises the run's error if it failed (with resume instructions when finished units
+        were saved), or returns status "running" with progress (done / total) so you can call again.
+        """
+        return await jobs.wait(job_id, wait_seconds)
