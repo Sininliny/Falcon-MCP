@@ -490,7 +490,7 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
                                      "to set it up and close it")
                 return
             raise RuntimeError(
-                "The plugin window did not appear on the desktop within 20 s, so nothing was shown to the user "
+                "The plugin window did not appear on the desktop within 180 s, so nothing was shown to the user "
                 f"(process session {status.get('process_session')}, active console session "
                 f"{status.get('console_session')}; {status.get('note') or 'no visible window'}). Run the MCP "
                 "server inside the logged-in desktop session (Claude Desktop), or export a .vstpreset from a DAW "

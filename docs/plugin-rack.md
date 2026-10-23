@@ -55,7 +55,8 @@ Each run writes `<audio root>/rack/<run>/timeline.events.json`, `timeline.mid` a
 2. `falcon_rack_state(plugin="Kontakt 8", name="noire")`; the user loads Noire and closes the window. If
    nobody closes it within `timeout_minutes`, it is closed automatically and the state is saved anyway
    (`closed_by_timeout: true`). On Windows the worker finds its window, moves it on screen if needed and
-   brings it to the front; if no window appears within 20 s (for example a server running as a service in
+   brings it to the front and puts the instruction in its title (Kontakt 8 needs 50-60 s to show it); if no
+   window appears within 180 s (for example a server running as a service in
    session 0) the call fails at once with the session numbers instead of waiting for nobody. A `.vstpreset` exported from a DAW also works: pass its path as `state`.
 3. `falcon_native_host(action="start")`, load the candidate Multi with `falcon_native_file`.
 4. `falcon_rack_compare(reference={"plugin": "Kontakt 8", "state": "noire"}, falcon_session_id=...,

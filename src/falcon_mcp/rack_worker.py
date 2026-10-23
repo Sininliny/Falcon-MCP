@@ -104,11 +104,12 @@ def _apply_parameters(plugin, parameters: dict) -> dict:
     return applied
 
 
-def _surface_window(status_path: Path, wait_seconds: float = 20.0) -> dict:
+def _surface_window(status_path: Path, wait_seconds: float = 180.0) -> dict:
     """Find this process's plugin window, put it on screen and in front, and report what happened.
 
     A process started in the background may not take the foreground on Windows, so the window can open
     behind other windows or off screen; a process in another session (a service) has no visible window at all.
+    Kontakt 8 needed 50-60 s before its window appeared in the live test, hence the long wait.
     """
     status = {"window_found": False, "platform": sys.platform}
     wait_seconds = float(os.environ.get("FALCON_RACK_WINDOW_WAIT", wait_seconds))
@@ -144,6 +145,7 @@ def _surface_window(status_path: Path, wait_seconds: float = 20.0) -> dict:
         hwnd = found[0]
         title = ctypes.create_unicode_buffer(256)
         user32.GetWindowTextW(hwnd, title, 256)
+        user32.SetWindowTextW(hwnd, f"[Falcon MCP: set up the sound, then close this window] {title.value}")
         moved = False
         if not user32.MonitorFromWindow(hwnd, 0):  # MONITOR_DEFAULTTONULL: not on any screen
             user32.SetWindowPos(hwnd, 0, 80, 80, 0, 0, 0x0001 | 0x0004)  # SWP_NOSIZE | SWP_NOZORDER
