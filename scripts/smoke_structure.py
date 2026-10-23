@@ -64,7 +64,7 @@ async def run(args):
                                      plan_id=plan["plan_id"], expected_revision=plan["revision"],
                                      probe_notes_midi=args.notes, **spec)
                 step["apply"] = {k: applied.get(k) for k in (
-                    "applied", "verified", "problems", "unrelated_state_changed", "rolled_back",
+                    "applied", "verified", "problems", "unrelated_state_changed", "unrelated_changes", "rolled_back",
                     "rollback_reason", "targets", "revision")}
                 step["verification"] = applied.get("verification")
                 if applied.get("applied"):
@@ -77,8 +77,10 @@ async def run(args):
                 print(json.dumps(step, indent=1), file=sys.stderr, flush=True)
         finally:
             await call("falcon_native_host", action="stop", session_id=session)
-    report["passed"] = all(s["apply"]["applied"] and s["apply"]["verified"] and s["back_to_original"]
-                           and s["rollback"]["restored_exact"] for s in report["steps"])
+    # back_to_original is exact-fingerprint only; Falcon drifts float last digits on every state round trip.
+    report["passed"] = all(s["apply"]["applied"] and s["apply"]["verified"]
+                           and not s["apply"]["unrelated_state_changed"]
+                           and s["rollback"]["restored_equivalent"] for s in report["steps"])
     print(json.dumps(report, indent=1))
     return 0 if report["passed"] else 1
 

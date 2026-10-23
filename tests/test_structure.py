@@ -27,7 +27,7 @@ LAYER = PROGRAM + "/Layers[1]/Layer[1]"
 def multi(inserts="") -> bytes:
     groups = "".join(KG.format(i=i, lo=i * 32, hi=i * 32 + 31, inserts=inserts if i == 1 else "")
                      for i in range(4))
-    return ('<UVI4><Engine Name=""><Synth Name="uvi"><Children><Part Name="Part 0"><Program Name="Program" '
+    return ('<UVI4><Engine Name=""><Synth Name="uvi"><Children><Part Name="Part 0"><Program Name="Program" Gain="1" '
             f'DisplayName="Felt"><Layers><Layer Name="Layer 0"><Keygroups>{groups}</Keygroups></Layer>'
             '</Layers></Program></Part></Children></Synth></Engine></UVI4>').encode()
 
@@ -281,3 +281,40 @@ def test_tool_hard_audio_failure_rolls_back_automatically(tool):
                              expected_revision=plan["revision"], **params))
     assert result["applied"] is False and result["rolled_back"] and "peaks" in result["rollback_reason"]
     assert content_fingerprint(worker.current()) == original
+
+
+def test_state_comparison_tolerates_falcon_round_trip_drift():
+    from falcon_mcp.native_structure import state_differences
+
+    a = parse_xml(b'<UVI4><SparkVerb PreDelay="31.0000057"/><ScriptProcessor><state>'
+                  b'{"version":1,"controls":[1,2]}</state></ScriptProcessor></UVI4>')
+    b = parse_xml(b'<UVI4><SparkVerb PreDelay="31.0000076"/><ScriptProcessor><state>'
+                  b'{"controls":[1,2],"version":1}</state></ScriptProcessor></UVI4>')
+    assert state_differences(a, b) == []
+    c = parse_xml(b'<UVI4><SparkVerb PreDelay="31.5"/><ScriptProcessor><state>{"controls":[1,3]}</state>'
+                  b'</ScriptProcessor></UVI4>')
+    assert state_differences(a, c) == ["UVI4/SparkVerb[1]@PreDelay: '31.0000057' != '31.5'",
+                                       "UVI4/ScriptProcessor[1]/state[1]: text differs"]
+
+
+class DriftingFalcon(FakeFalcon):
+    """Like Falcon 27.0.2: every setState nudges a float's last digits."""
+
+    @FakeFalcon.raw_state.setter
+    def raw_state(self, value):
+        tree = parse_xml(state_xml(value))
+        program = tree.find(PROGRAM)
+        program.set("Gain", repr(float(program.get("Gain", "1")) * (1 + 6e-8)))
+        self._state = replace_state_xml(value, ET.tostring(tree, encoding="utf-8"))
+
+
+def test_rollback_is_equivalent_despite_float_drift(tool):
+    run, _ = tool(DriftingFalcon(multi()))
+    params = {"target": LAYER, "module": "AnalogChorus", "label": "Wide", "scope": "self"}
+    plan = asyncio.run(run(action="preview", session_id=SESSION, **params))
+    result = asyncio.run(run(action="apply", session_id=SESSION, plan_id=plan["plan_id"],
+                             expected_revision=plan["revision"], **params))
+    assert result["applied"] and result["verified"] and not result["unrelated_state_changed"]
+    undone = asyncio.run(run(action="rollback", session_id=SESSION, rollback_id=result["rollback_id"],
+                             expected_revision=result["revision"]))
+    assert undone["restored_exact"] is False and undone["restored_equivalent"] is True

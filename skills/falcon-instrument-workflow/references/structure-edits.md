@@ -66,7 +66,27 @@ to soft ones at key 60. That is a DSP measurement, not a listening verdict.
 
 - Owned VST3 session only; the Falcon open on screen is not changed.
 - If a Program script rewrites parameters during the baseline render, the change is applied on top of
-  what the script wrote; `unrelated_state_changed` reports whether anything outside the new nodes differs
-  from that state after readback.
+  what the script wrote; `unrelated_state_changed`/`unrelated_changes` report anything outside the new nodes
+  that differs from that state after readback.
+- Falcon re-serializes some floats with last-digit drift on every state round trip (a SparkVerb PreDelay
+  went 31.0000057 -> 31.0000076) and reorders keys in script state JSON. Comparisons therefore treat
+  numbers within a relative 1e-6 and JSON-equal text as unchanged. Rollback reports both
+  `restored_exact` (byte-level fingerprint, usually false for that reason) and `restored_equivalent`.
 - Verification renders use channel 1 and fixed probe notes; key ranges or Part MIDI filters that exclude
   them make the comparison empty, not wrong. Choose `probe_notes_midi` inside the instrument's range.
+
+## Live check (Windows Falcon 27.0.2, owned VST3, 2026-10-23)
+
+`scripts/smoke_structure.py` on two sampled keyboard Programs; no timeouts, nothing saved.
+
+| Preset | Keygroups | Apply + render + rollback | High/low velocity centroid ratio, keys 36 / 60 / 84 (before -> after) |
+| --- | --- | --- | --- |
+| Polar Current EP | 116 | 37 s | 2.83 -> 4.05 / 2.24 -> 2.53 / 1.50 -> 2.03 |
+| Glacier Duplex Piano | 308 | 46 s | 1.33 -> 1.84 / 1.05 -> 1.11 / 1.12 -> 1.45 |
+
+MoogFilter at 900 Hz, KeyTracking 0.5, velocity -> Freq ratio 0.5: soft notes lost up to 0.6 dB and
+became darker (centroid x0.66..0.94), loud notes stayed within 0.1 dB and x0.95..0.99. Readback verified
+every node; no hard failures. A Program AnalogChorus (Intensity 2) measured a flat -0.7 dB with no
+centroid change, which is why probes now also report a side/mid (stereo width) level. Exact-fingerprint
+rollback checks failed only because of the float/JSON round-trip drift described above; the comparison
+is now tolerant of it.

@@ -43,6 +43,7 @@ CONTAINERS = {"Program", "Layer", "Keygroup"}
 MAX_CONTAINERS = 4096
 MAX_PLANS = 64
 MAX_SNAPSHOTS = 16
+STATE_REL_TOL = 1e-6
 LABEL = re.compile(r"[A-Za-z][A-Za-z0-9 _.-]{0,47}")
 
 
@@ -206,6 +207,46 @@ def _strip(root, spec: dict, placed: list[dict]):
             container.remove(inserts)
 
 
+def _same_value(a: str | None, b: str | None) -> bool:
+    if a == b:
+        return True
+    if a is None or b is None:
+        return False
+    try:
+        return math.isclose(float(a), float(b), rel_tol=STATE_REL_TOL, abs_tol=1e-9)
+    except ValueError:
+        pass
+    try:  # script <state> payloads are JSON whose key order Falcon does not preserve
+        return json.loads(a) == json.loads(b)
+    except ValueError:
+        return a.strip() == b.strip()
+
+
+def state_differences(a, b, limit: int = 10, path: str = "UVI4") -> list[str]:
+    """Paths where two states differ beyond Falcon's serialization drift.
+
+    Falcon 27.0.2 re-serializes some floats with last-digit drift on every setState round trip
+    (a SparkVerb PreDelay went 31.0000057 -> 31.0000076) and reorders keys in script state JSON.
+    """
+    found = []
+    if a.tag != b.tag:
+        return [f"{path}: element {a.tag} != {b.tag}"]
+    for key in sorted(set(a.attrib) | set(b.attrib)):
+        if not _same_value(a.get(key), b.get(key)):
+            found.append(f"{path}@{key}: {a.get(key)!r} != {b.get(key)!r}")
+    if not _same_value(a.text or "", b.text or ""):
+        found.append(f"{path}: text differs")
+    if len(a) != len(b):
+        found.append(f"{path}: {len(a)} children != {len(b)}")
+    counts = {}
+    for left, right in zip(a, b):
+        counts[left.tag] = counts.get(left.tag, 0) + 1
+        if len(found) >= limit:
+            break
+        found += state_differences(left, right, limit - len(found), f"{path}/{left.tag}[{counts[left.tag]}]")
+    return found[:limit]
+
+
 def verify(readback, base, spec: dict, placed: list[dict]) -> dict:
     """Every new node is present with its values and connections; report anything else that changed."""
     problems = []
@@ -234,8 +275,9 @@ def verify(readback, base, spec: dict, placed: list[dict]) -> dict:
             break
     others = copy.deepcopy(readback)
     _strip(others, spec, placed)
+    unrelated = state_differences(others, base)
     return {"verified": not problems, "problems": problems[:20],
-            "unrelated_state_changed": content_fingerprint(others) != content_fingerprint(base)}
+            "unrelated_state_changed": bool(unrelated), "unrelated_changes": unrelated}
 
 
 def render(plugin, path: str, notes: list[dict], seconds: float, sample_rate: int) -> dict:
@@ -345,8 +387,11 @@ class StructureSession:
             raise ValueError(f"{later} native edit(s) were applied after this change; rolling back discards "
                              "them too. Pass discard_later_edits=true after inspecting")
         apply(parse_xml(entry["state"]))
-        restored = content_fingerprint(current())
+        tree = current()
+        restored = content_fingerprint(tree)
+        differences = state_differences(tree, parse_xml(entry["state"]))
         for key in [k for k, s in self.snapshots.items() if s["revision_number"] >= entry["revision_number"]]:
             self.snapshots.pop(key)
         return {"rolled_back": True, "rollback_id": entry["rollback_id"], "revision": restored,
-                "restored_exact": restored == entry["before_revision"], "discarded_later_edits": later}
+                "restored_exact": restored == entry["before_revision"], "restored_equivalent": not differences,
+                "restore_differences": differences, "discarded_later_edits": later}

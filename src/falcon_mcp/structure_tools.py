@@ -52,11 +52,19 @@ def probe_notes(notes: list[int], velocities: list[int]) -> list[dict]:
 
 
 def probe_metrics(audio: np.ndarray, rate: int, notes: list[dict]) -> list[dict]:
+    stereo = audio if audio.ndim == 2 and audio.shape[1] >= 2 else None
     mono = audio.mean(axis=1) if audio.ndim == 2 else audio
     rows = []
     for note in notes:
         start = int(note["start_seconds"] * rate)
-        segment = mono[start:start + int((note["duration_seconds"] + 0.3) * rate)]
+        stop = start + int((note["duration_seconds"] + 0.3) * rate)
+        segment = mono[start:stop]
+        width = None
+        if stereo is not None:
+            # Side/mid level: chorus and autopan show up here, not in the spectral centroid.
+            left, right = stereo[start:stop, 0], stereo[start:stop, 1]
+            mid, side = np.sqrt(np.mean((left + right) ** 2)), np.sqrt(np.mean((left - right) ** 2))
+            width = round(20 * math.log10(max(side, 1e-10) / mid), 1) if mid > 1e-10 else None
         head = segment[:int(CENTROID_WINDOW * rate)]
         rms = float(np.sqrt(np.mean(segment ** 2))) if len(segment) else 0.0
         level = 20 * math.log10(rms) if rms > 1e-10 else -200.0
@@ -68,7 +76,7 @@ def probe_metrics(audio: np.ndarray, rate: int, notes: list[dict]) -> list[dict]
                 centroid = float((freqs * spectrum).sum() / spectrum.sum())
         rows.append({"note": note["note"], "velocity": note["velocity"], "rms_dbfs": round(level, 2),
                      "peak": round(float(np.abs(segment).max()) if len(segment) else 0.0, 4),
-                     "centroid_hz": round(centroid, 1) if centroid else None})
+                     "centroid_hz": round(centroid, 1) if centroid else None, "side_mid_db": width})
     return rows
 
 
@@ -91,7 +99,8 @@ def compare(before: list[dict], after: list[dict]) -> dict:
         rows.append({"note": b["note"], "velocity": b["velocity"], "before_dbfs": b["rms_dbfs"],
                      "after_dbfs": a["rms_dbfs"], "delta_db": round(a["rms_dbfs"] - b["rms_dbfs"], 2),
                      "before_centroid_hz": b["centroid_hz"], "after_centroid_hz": a["centroid_hz"],
-                     "centroid_ratio": ratio})
+                     "centroid_ratio": ratio, "before_side_mid_db": b.get("side_mid_db"),
+                     "after_side_mid_db": a.get("side_mid_db")})
         if b["rms_dbfs"] > AUDIBLE_DBFS and a["rms_dbfs"] < SILENT_DBFS:
             failures.append(f"note {b['note']} vel {b['velocity']} went silent")
         if a["peak"] > OVERLOAD_PEAK:
@@ -105,6 +114,11 @@ def compare(before: list[dict], after: list[dict]) -> dict:
     deltas = [r["delta_db"] for r in rows]
     if deltas:
         findings.append(f"level change {min(deltas):+.1f}..{max(deltas):+.1f} dB across probes")
+    widths = [(r["before_side_mid_db"], r["after_side_mid_db"]) for r in rows
+              if r["before_side_mid_db"] is not None and r["after_side_mid_db"] is not None]
+    if widths:
+        change = [after - before for before, after in widths]
+        findings.append(f"side/mid level change {min(change):+.1f}..{max(change):+.1f} dB (stereo width)")
     return {"probes": rows, "velocity_brightness": brightness, "findings": findings, "hard_failures": failures}
 
 
@@ -187,7 +201,8 @@ def register_structure(mcp, config, audit, host):
                 "action": "rollback", "rollback_id": result["rollback_id"],
                 "expected_revision": status["revision"]})
             return {**result, "applied": False, "rolled_back": True, "rollback_reason": reason,
-                    "revision": undone["revision"], "restored_exact": undone["restored_exact"]}
+                    "revision": undone["revision"], "restored_exact": undone["restored_exact"],
+                    "restored_equivalent": undone["restored_equivalent"]}
 
         try:
             await host.request(session_id, "render", {
