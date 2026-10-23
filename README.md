@@ -2,7 +2,7 @@
 
 Local MCP control for UVI Falcon 2027: inspect the engine, edit parameters, audition and capture audio, diagnose signals, export project graphs, and compare timbres with an optional local model.
 
-Two explicit contexts: the Lua bridge controls an open standalone/DAW instance; the optional owned VST3 host provides automated file load/save and direct audio rendering. Windows Falcon **27.0.2** native-host acceptance passed for a basic synth Program, including readback, gain edits, Program/Multi save/reopen and audio. Other hosts, versions and scripted presets require separate validation. The server uses stdio and opens no network listener.
+Two explicit contexts: the Lua bridge controls an open standalone/DAW instance; the optional owned VST3 host provides automated file load/save and direct audio rendering. Windows Falcon **28.0.2** native-host acceptance passed for a basic synth Program, including readback, gain edits, Program/Multi save/reopen and audio. Other hosts, versions and scripted presets require separate validation. The server uses stdio and opens no network listener.
 
 ## Installation
 
@@ -207,7 +207,7 @@ License: [Apache-2.0](LICENSE).
 
 ## Development
 
-Architecture, adding tools, versioning, tests/CI and live validation are described in the [developer guide](docs/development.md). The current target is Falcon 27.0.2.
+Architecture, adding tools, versioning, tests/CI and live validation are described in the [developer guide](docs/development.md). The current target is Falcon 28.0.2.
 
 ## Agent skill and repository language
 

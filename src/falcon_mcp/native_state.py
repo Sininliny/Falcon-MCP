@@ -66,7 +66,7 @@ def unpack_state(state: bytes) -> tuple[ET.Element, bytes, int, bytes, bytes]:
     if wrapper.tag != "VST3PluginState" or component is None or not component.text:
         raise ValueError("Missing VST3 component state")
     data = decode_memory(component.text)
-    # This is the observed Falcon 27.0.2 VST3/VST2-compatible state envelope.
+    # This is the observed Falcon 28.0.2 VST3/VST2-compatible state envelope.
     if data[:4] != b"VstW" or data[16:20] != b"CcnK" or data[24:28] != b"FBCh":
         raise ValueError("Unsupported Falcon component envelope; no state was changed")
     offset = 176

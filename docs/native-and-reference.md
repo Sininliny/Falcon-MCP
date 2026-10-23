@@ -4,7 +4,7 @@ Introduced in 0.3.0; current 0.4.0 adds [connection guards, controlled building 
 
 ## Install on Windows
 
-Use an activated/licensed Falcon 27.0.2 installation and the project's Python environment:
+Use an activated/licensed Falcon 28.0.2 installation and the project's Python environment:
 
 ```powershell
 .venv\Scripts\python.exe -m pip install -e ".[host]"
@@ -56,7 +56,7 @@ Use the returned `reference_id` with `falcon_compare_reference` after each fixed
 
 ## Native acceptance on Yingg
 
-Windows Falcon 27.0.2, Pedalboard 0.9.26, Python 3.12.9; no editor opened and no mouse input:
+Windows Falcon 28.0.2, Pedalboard 0.9.26, Python 3.12.9; no editor opened and no mouse input:
 
 - Loaded a native Multi into the owned instance and verified Program name readback.
 - Rendered MIDI to 96,000 stereo frames at 48 kHz; peak `0.1507912725`.

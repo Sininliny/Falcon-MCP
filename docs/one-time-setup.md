@@ -2,7 +2,7 @@
 
 Guide version: Falcon MCP server 0.6.0 (bridge 0.6.0).
 
-Applies to Falcon MCP 0.6.0; the setup steps are unchanged since 0.4.0. This guide configures the open-instance Lua bridge. For the separate owned VST3 host and automated Program/Multi file operations, see [native hosting](native-and-reference.md). Persistent standalone startup was verified with 0.2.3; automatic bridge deployment passed with 0.4.0. Owned-host file I/O/rendering was verified with 0.3.0 and controlled build/acceptance/publishing with 0.4.0 on Windows Falcon 27.0.2. See [validation records](validation.md) for scope. Other versions/hosts require separate validation.
+Applies to Falcon MCP 0.6.0; the setup steps are unchanged since 0.4.0. This guide configures the open-instance Lua bridge. For the separate owned VST3 host and automated Program/Multi file operations, see [native hosting](native-and-reference.md). Persistent standalone startup was verified with 0.2.3; automatic bridge deployment passed with 0.4.0. Owned-host file I/O/rendering was verified with 0.3.0 and controlled build/acceptance/publishing with 0.4.0 on Windows Falcon 28.0.2. See [validation records](validation.md) for scope. Other versions/hosts require separate validation.
 
 ## 1. Install the server
 
@@ -41,7 +41,7 @@ Feedback is optional for control, project parsing, UML, and signal diagnostics. 
 4. Use **Save Multi as…** to create a separate recovery template. Use **Save as default Multi** to configure new Falcon instances. Preserve any previous default file before replacing it.
 5. For an existing DAW session, save the Master launcher in that project/template too. Changing Falcon's default Multi does not retrofit existing projects.
 
-**Do not depend on WATCH FOR SCRIPT CHANGES.** On Falcon 27.0.2, the switch was off after reopening the saved default Multi. Version 0.2.3 uses a persistent launcher that loads runtime updates without this switch or repeated GUI automation.
+**Do not depend on WATCH FOR SCRIPT CHANGES.** On Falcon 28.0.2, the switch was off after reopening the saved default Multi. Version 0.2.3 uses a persistent launcher that loads runtime updates without this switch or repeated GUI automation.
 
 Master placement survives Program replacement. Loading another Multi without the launcher, clearing the Multi, or deleting the processor removes the connection; restore the saved recovery template once.
 
@@ -195,7 +195,7 @@ Keep local runtime files, credentials, audio, and private Multi backups out of G
 
 - The original Program bridge disappeared when its Program was replaced; Master placement fixed the scope problem.
 - Watch worked within one process but failed the restart test. The persistent launcher replaced that dependency.
-- Runtime compilation executes in non-real-time `onLoad`, triggered through state loading; mailbox messages never supply executable source. The current implementation uses state-file API version 23, verified on Falcon 27.0.2.
+- Runtime compilation executes in non-real-time `onLoad`, triggered through state loading; mailbox messages never supply executable source. The current implementation uses state-file API version 23, verified on Falcon 28.0.2.
 - The completed installation reconnected and switched builds after a full restart with **zero subsequent GUI input**. Instance epochs advanced from 1 to 2.
 - Acceptance covered extension callbacks, syntax-error recovery, 43 MCP tools, project parsing, UML, diagnostics, voice control, MIDI, and logs. The release passed 80 automated tests. This does not establish VST/DAW compatibility.
 

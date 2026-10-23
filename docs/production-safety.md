@@ -8,7 +8,7 @@ For the open Lua instance, inspect `falcon_get_connections` and retain the chose
 
 Gain connections (including amplitude-envelope paths) and `@PitchBend` require `allow_protected=true`. Source/destination rewiring is rejected. This is a scoped public connection snapshot, not a cryptographic fingerprint of the entire standalone project or an engine transaction. A native setter failure can still leave a partial batch; inspect returned readback before continuing.
 
-For the owned host, browse native XML selectors with `falcon_native_edit`, then inspect the exact `SignalConnection` using `falcon_native_connections`. Retain `identity={Name, Source, Destination}` and `revision`. Send numeric/bool changes with exact attribute-string `expected` values and `expected_revision`; preview first, then repeat with `apply=true`. Any canonical state change invalidates the plan. Generic native parameter edits cannot bypass connection protection. The native adapter supports Ratio and Bypass using separately observed Falcon 27.0.2 definitions; the generated official module index does not include SignalConnection.
+For the owned host, browse native XML selectors with `falcon_native_edit`, then inspect the exact `SignalConnection` using `falcon_native_connections`. Retain `identity={Name, Source, Destination}` and `revision`. Send numeric/bool changes with exact attribute-string `expected` values and `expected_revision`; preview first, then repeat with `apply=true`. Any canonical state change invalidates the plan. Generic native parameter edits cannot bypass connection protection. The native adapter supports Ratio and Bypass using separately observed Falcon 28.0.2 definitions; the generated official module index does not include SignalConnection.
 
 All native parameter writes now require `expected_revision` from their inspected read. Renders and saves return the source state revision and mutation number. Native host status also reports the loaded disk file/hash, whether disk changed since loading, and whether the owned state changed since loading. These identities do not identify a foreground window or fingerprint an unsaved standalone Multi.
 
@@ -38,7 +38,7 @@ Example build arguments:
 }
 ```
 
-The candidate stays in managed work storage. A temporary owned host must load it, render it, save native state, reopen that output and render again. Only passing acceptance exports a Program under `<home>/presets`; failure retains evidence without exporting a playable release. The open standalone is a separate context. Template compatibility was established on Falcon 27.0.2; a successful native test is still required on the installed version. Persistent custom Lua loops remain an offline-host compatibility limitation.
+The candidate stays in managed work storage. A temporary owned host must load it, render it, save native state, reopen that output and render again. Only passing acceptance exports a Program under `<home>/presets`; failure retains evidence without exporting a playable release. The open standalone is a separate context. Template compatibility was established on Falcon 28.0.2; a successful native test is still required on the installed version. Persistent custom Lua loops remain an offline-host compatibility limitation.
 
 ## Audio acceptance
 

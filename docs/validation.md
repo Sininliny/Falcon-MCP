@@ -4,7 +4,7 @@ Current 0.4.0: 123 automated tests pass, with 56-tool discovery, guarded modulat
 
 ## 0.4.0 native workflow acceptance
 
-On Yingg, 2026-10-21, Windows Falcon 27.0.2/Pedalboard 0.9.26: the real MCP stdio workflow built a two-layer analog Program with retained gain-envelope and Pitch Wheel connections. Four pitches, three velocities, seven-note headroom and sound after native save/reopen passed; the Program exported and published with revision/artifact hashes. Wrong connection source, applying before preview, and using a stale native state revision were rejected. The saved default Multi hash was restored; no editor or mouse operation was used.
+On Yingg, 2026-10-21, Windows Falcon 28.0.2/Pedalboard 0.9.26: the real MCP stdio workflow built a two-layer analog Program with retained gain-envelope and Pitch Wheel connections. Four pitches, three velocities, seven-note headroom and sound after native save/reopen passed; the Program exported and published with revision/artifact hashes. Wrong connection source, applying before preview, and using a stale native state revision were rejected. The saved default Multi hash was restored; no editor or mouse operation was used.
 
 The installed package and live Master bridge were updated to 0.4.0; `setup --verify-reload` confirmed matching builds and `ready_without_gui=true`. A live Lua preview on `Nordic Nylon` identified `PitchBendMod`, `@PitchBend` → Pitch, Ratio 2, without applying a parameter write. Its live Ratio definition confirmed float with the UVI unbounded min/max sentinel. Evidence: `.runtime/deployment-040-final.json` and `.runtime/acceptance-live-connection-040.json`. This update does not repeat the historical standalone restart test.
 
@@ -16,7 +16,7 @@ On Yingg, 2026-10-21, the installed 0.3.0 runtime replaced the running 0.2.4 Mas
 
 The installed package includes the optional native-host dependency, and the English agent skill is installed locally. Existing MCP clients must reconnect to refresh cached imports and discover all 52 tools. This live deployment check does not repeat the historical standalone restart test or prove that every saved DAW template contains the launcher. Local evidence: `.runtime/deployment-030-final.json`.
 
-Historical hardware environment: 2026-10-20, Windows, Falcon standalone 27.0.2, Python 3.12.9, MCP Python SDK 1.30.0, RTX 3070 Ti Laptop 8 GB. Versioned results below describe their original releases; they do not imply native acceptance of later changes.
+Historical hardware environment: 2026-10-20, Windows, Falcon standalone 28.0.2, Python 3.12.9, MCP Python SDK 1.30.0, RTX 3070 Ti Laptop 8 GB. Versioned results below describe their original releases; they do not imply native acceptance of later changes.
 
 ## 0.2.0 automated checks
 
@@ -116,7 +116,7 @@ With Watch off, a full Falcon restart required zero subsequent GUI input: Master
 
 `smoke_bootstrap.py` exercised extension publication, onSave/onLoad delegation, rejected-source fallback and recovery through real stdio; `finally` restored the extension and the model stayed unloaded. Evidence: `.runtime/acceptance-bootstrap-extension.json`.
 
-`smoke_v2.py` passed on the migrated project: 33 nodes, 269 parameters, six modulation connections, complete scans, UML, diagnostics, voices, MIDI and three log sources. This was a different project from the earlier Analog Poly test. State-file API version 23 was verified on Falcon 27.0.2; other hosts/versions remain unverified.
+`smoke_v2.py` passed on the migrated project: 33 nodes, 269 parameters, six modulation connections, complete scans, UML, diagnostics, voices, MIDI and three log sources. This was a different project from the earlier Analog Poly test. State-file API version 23 was verified on Falcon 28.0.2; other hosts/versions remain unverified.
 
 ## Sample audit analysis check (2026-10-22, unreleased)
 

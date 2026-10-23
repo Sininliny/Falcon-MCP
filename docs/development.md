@@ -8,7 +8,7 @@ This guide is for people (and agents) changing Falcon MCP itself. Users installi
 
 | Component | Current target | Notes |
 |---|---|---|
-| UVI Falcon | **27.0.2** (Falcon 2027), Windows standalone and VST3 | The only build with live acceptance records. Write it exactly `27.0.2`, as shown in Falcon's About box; `scripts/check_versions.py --strict` flags the misspelling with dots moved. |
+| UVI Falcon | **28.0.2** (Falcon 2027), Windows standalone and VST3 | The only build with live acceptance records. Write it exactly `28.0.2`, as shown in Falcon's About box; `scripts/check_versions.py --strict` flags the misspelling with dots moved. |
 | Python | 3.11+ (CI and local use 3.12) | `tomllib` and modern typing are required. |
 | MCP SDK | `mcp>=1.26,<2` (FastMCP) | stdio transport only; the server opens no network listener. |
 | Clients | Claude Desktop, Claude Code, Codex | All start their own stdio server from the repository `.venv`. |
@@ -98,7 +98,7 @@ python -m venv .venv
 
 ## Live validation
 
-Live checks need the Windows machine with a licensed Falcon 27.0.2. Run them from the repository root with the same `FALCON_MCP_HOME` the clients use, while Falcon is idle.
+Live checks need the Windows machine with a licensed Falcon 28.0.2. Run them from the repository root with the same `FALCON_MCP_HOME` the clients use, while Falcon is idle.
 
 | Script | Context | Checks |
 |---|---|---|

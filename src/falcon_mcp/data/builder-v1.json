@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "template_id": "analog-v1",
-  "falcon_version": "27.0.2",
+  "falcon_version": "28.0.2",
   "source": "Native serialized basic analog structure, validated on Yingg; no soundware assets",
   "modules": [
     "Layer",

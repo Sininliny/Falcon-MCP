@@ -47,7 +47,7 @@ def edit_node(root, selector: str, changes: list[dict], *, connection_guarded: b
         raise ValueError("Use native_connections with identity/revision guards and a diff preview")
     definitions = _module_definitions().get(node.tag, {})
     # SignalConnection is omitted from the generated _elements catalog. These two settings
-    # were separately read from live Falcon 27.0.2; keep the native adapter deliberately narrow.
+    # were separately read from live Falcon 28.0.2; keep the native adapter deliberately narrow.
     if node.tag == "SignalConnection":
         definitions = {"Ratio": {"name": "Ratio", "type": "float", "min": 1, "max": 0},
                        "Bypass": {"name": "Bypass", "type": "boolean"}}
@@ -91,7 +91,7 @@ def edit_node(root, selector: str, changes: list[dict], *, connection_guarded: b
     return {"selector": selector, "type": node.tag, "attributes": dict(node.attrib),
             "indexed_definitions": list(definitions.values()), "children": children,
             "children_truncated": len(node) > 100,
-            "validation": ("Native XML + separately observed Falcon 27.0.2 connection definitions"
+            "validation": ("Native XML + separately observed Falcon 28.0.2 connection definitions"
                            if node.tag == "SignalConnection" else
                            "Native XML + official offline index, not live UVIScript parameter definitions")}
 

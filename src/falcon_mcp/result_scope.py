@@ -47,27 +47,27 @@ STATUS_MEANING = {
 # Only facts stated in docs/validation.md. Function-level production verification does not exist yet.
 BEHAVIOR_EVIDENCE = {
     "playNote": ("minimal_behavior_verified", "0.2.0 native acceptance: notes 48/60/67 captured",
-                 "Windows Falcon 27.0.2 standalone, bridge 0.2.0"),
+                 "Windows Falcon 28.0.2 standalone, bridge 0.2.0"),
     "releaseVoice": ("minimal_behavior_verified", "0.2.0 voice volume control and release",
-                     "Windows Falcon 27.0.2 standalone, bridge 0.2.0"),
+                     "Windows Falcon 28.0.2 standalone, bridge 0.2.0"),
     "setParameter": ("minimal_behavior_verified", "0.2.0 Gain 0.1 write/readback and restore",
-                     "Windows Falcon 27.0.2 standalone, bridge 0.2.0"),
-    "getParameter": ("minimal_behavior_verified", "0.2.0 readback", "Windows Falcon 27.0.2 standalone, bridge 0.2.0"),
+                     "Windows Falcon 28.0.2 standalone, bridge 0.2.0"),
+    "getParameter": ("minimal_behavior_verified", "0.2.0 readback", "Windows Falcon 28.0.2 standalone, bridge 0.2.0"),
     "getParameterConnections": ("minimal_behavior_verified", ("0.2.0 AmpEnvMod connections read; 0.4.0 "
-                                "@PitchBend -> Pitch Ratio 2 read"), "Windows Falcon 27.0.2 standalone"),
+                                "@PitchBend -> Pitch Ratio 2 read"), "Windows Falcon 28.0.2 standalone"),
     "insertEffect": ("minimal_behavior_verified", "0.2.0 Gain insert completed then removed",
-                     "Windows Falcon 27.0.2 standalone, bridge 0.2.0"),
+                     "Windows Falcon 28.0.2 standalone, bridge 0.2.0"),
     "removeEffect": ("minimal_behavior_verified", "0.2.0 Gain insert removed",
-                     "Windows Falcon 27.0.2 standalone, bridge 0.2.0"),
+                     "Windows Falcon 28.0.2 standalone, bridge 0.2.0"),
     "beat2ms": ("minimal_behavior_verified", "0.2.0 extension printed beat2ms(1)=500",
-                "Windows Falcon 27.0.2 standalone, bridge 0.2.0"),
+                "Windows Falcon 28.0.2 standalone, bridge 0.2.0"),
     "createMidiFile": ("minimal_behavior_verified", "0.2.0 one-track file, NoteOn insert, save, release",
-                       "Windows Falcon 27.0.2 standalone, bridge 0.2.0"),
+                       "Windows Falcon 28.0.2 standalone, bridge 0.2.0"),
 }
 
-# Validated product/host versions, spelled once. Falcon's own build number is written 27.0.2 (Falcon
-# 2027); "2.7.0" elsewhere is a transcription error until Falcon's About box says otherwise.  version-check: ignore
-VALIDATED_ON = "Windows Falcon 27.0.2, Pedalboard 0.9.26 (owned host); Falcon 27.0.2 standalone (bridge)"
+# Validated product/host versions, spelled once. Falcon's build is 28.0.2 (confirmed by the user from
+# Falcon's About box); older notes that wrote 27.0.2 or 2.7.0 were mis-transcriptions.  version-check: ignore
+VALIDATED_ON = "Windows Falcon 28.0.2, Pedalboard 0.9.26 (owned host); Falcon 28.0.2 standalone (bridge)"
 STATE_API_VERSION = 23
 
 # Short codes keep compact results small; FULL mode and falcon://result-scope expand them.
@@ -402,7 +402,7 @@ def _native_params_extra(state, tool, args, result) -> dict:
 CONNECTION_SEMANTICS = {
     "model": "A connection adds Ratio x source to the destination's base value in the destination unit; "
              "the parameter itself holds the base value.",
-    "pitch": "Pitch destinations are semitones: Ratio 2 with bipolar PitchBend = +/-2 st (observed, Falcon 27.0.2).",
+    "pitch": "Pitch destinations are semitones: Ratio 2 with bipolar PitchBend = +/-2 st (observed, Falcon 28.0.2).",
     "gain": "Gain/amplitude destinations (envelope -> Gain) shape level; exact law not verified offline. "
             "Render before and after; a connection that exists can still be inaudible.",
     "polarity": "Bipolar sources span -1..1, unipolar 0..1; the same Ratio moves a bipolar source both ways.",
@@ -579,7 +579,7 @@ def glossary() -> dict:
                 **{tool: "0-based raw MIDI channel" for tool in CHANNEL_BASE}},
             "versions": {"server": __version__, "validated_on": VALIDATED_ON, "state_api_version": STATE_API_VERSION,
                          "naming": "server X.Y.Z / bridge X.Y.Z (build id) / Falcon product build as shown in "
-                                   "Falcon's About box, e.g. 27.0.2"}}
+                                   "Falcon's About box, e.g. 28.0.2"}}
 
 
 def _plain_args(kwargs: dict) -> dict:

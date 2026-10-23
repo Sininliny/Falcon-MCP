@@ -3,7 +3,7 @@
 Hard errors: package (__init__), pyproject and bridge.lua disagree.
 Guide errors (--strict): a bound guide lacks "Guide version: Falcon MCP server X" for the current version,
 an "Applies to Falcon MCP X" line names an older version, or a Falcon product version is written as
-2.7.0 (the validated Falcon build is written 27.0.2; check Falcon's About box before changing it).
+27.0.2 or 2.7.0 (the validated Falcon build is 28.0.2, as shown in Falcon's About box).
 """
 
 import argparse
@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BOUND_GUIDES = ["skills/falcon-instrument-workflow/SKILL.md", "docs/one-time-setup.md", "docs/result-scope.md",
                 "docs/development.md"]
 SCANNED = ["docs", "skills", "src/falcon_mcp"]
-SUSPECT_PRODUCT = re.compile(r"Falcon\s*(?:v)?2\.7\.0|\b2\.7\.0\b")
+SUSPECT_PRODUCT = re.compile(r"\b(?:27\.0\.2|2\.7\.0)\b")
 
 
 def code_versions(root: Path) -> dict[str, str]:
@@ -53,7 +53,7 @@ def guide_findings(root: Path, version: str) -> list[str]:
                 if applies and applies.group(1) != version:
                     findings.append(f"{relative}:{number}: 'Applies to Falcon MCP {applies.group(1)}' (server {version})")
                 if SUSPECT_PRODUCT.search(line) and "version-check: ignore" not in line:
-                    findings.append(f"{relative}:{number}: '2.7.0' looks like a mis-spelled Falcon build (27.0.2)")
+                    findings.append(f"{relative}:{number}: '{SUSPECT_PRODUCT.search(line).group(0)}' is a mis-spelled Falcon build (28.0.2)")
     return findings
 
 

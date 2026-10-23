@@ -28,7 +28,7 @@ Historical release record. The 0.2.0 baseline gained 21 regression tests, for 63
 
 ## Native acceptance
 
-Windows Falcon standalone 27.0.2 at 48 kHz; the original ASIO configuration and patch were preserved.
+Windows Falcon standalone 28.0.2 at 48 kHz; the original ASIO configuration and patch were preserved.
 
 - Real stdio discovery exposed 42 tools. The public project had 42 nodes, 372 parameters, 11 modulation connections and 12 routes; scans and UML were complete.
 - Voice creation/control/release, MIDI creation/edit/read/save/release and three log sources passed.

@@ -42,7 +42,7 @@ The block is added by `install_result_scope(mcp, cfg, bridge, native_host)` afte
 
 **Rendering** (`falcon_native_render`, sweeps). Notes are rendered offline as note on/off only; CC64, expression, pitch bend and aftertouch are not rendered, and real-time CPU is not measured. The loaded Multi's Part MIDI channels decide what sounds.
 
-**Connections** (`falcon_get_connections`, `falcon_set_connection_parameters`, `falcon_native_connections`). `connections[]` restates each connection as source, destination, ratio, bypass and what the ratio means where it is known (Pitch destinations: semitones; Ratio 2 on @PitchBend is ±2 semitones, observed on Falcon 27.0.2). Everywhere else the scaling is reported as undocumented and to be calibrated by render. The general model (base value plus Ratio × source; bipolar vs unipolar sources; per-voice vs shared sources; Gain destinations shape level but can still be inaudible) is in the glossary, or inline with `full`.
+**Connections** (`falcon_get_connections`, `falcon_set_connection_parameters`, `falcon_native_connections`). `connections[]` restates each connection as source, destination, ratio, bypass and what the ratio means where it is known (Pitch destinations: semitones; Ratio 2 on @PitchBend is ±2 semitones, observed on Falcon 28.0.2). Everywhere else the scaling is reported as undocumented and to be calibrated by render. The general model (base value plus Ratio × source; bipolar vs unipolar sources; per-voice vs shared sources; Gain destinations shape level but can still be inaudible) is in the glossary, or inline with `full`.
 
 **Save and publish** (`falcon_native_file` save, `falcon_revision` snapshot/publish). `saved[]` lists the written file, kind and hash. For native saves, `resources` scans the saved XML for file-like attribute values and splits them into `referenced_existing`, `unresolved` and `library_ufs`. `not_done` always lists `resources_collected`, `browser_preview` and `relocated_reload`. A Multi save does not update standalone Program files, and the reverse.
 
@@ -50,7 +50,7 @@ The block is added by `install_result_scope(mcp, cfg, bridge, native_host)` afte
 
 ## Versions
 
-One spelling per version: `server X.Y.Z`, `bridge X.Y.Z (build id)` and the Falcon product build as shown in Falcon's About box. The validated product build is written 27.0.2 (Falcon 2027). If another guide writes it differently, check the About box rather than copying either spelling. `scripts/check_versions.py` fails when the package, `pyproject.toml` and `bridge.lua` disagree; with `--strict` it also fails when a bound guide lacks a matching "Guide version" line, an "Applies to" line names an older server, or a product version is spelled 2.7.0 (version-check: ignore).
+One spelling per version: `server X.Y.Z`, `bridge X.Y.Z (build id)` and the Falcon product build as shown in Falcon's About box. The validated product build is 28.0.2, as shown in Falcon's About box; earlier notes that wrote 27.0.2 or 2.7.0 were mis-transcriptions. `scripts/check_versions.py` fails when the package, `pyproject.toml` and `bridge.lua` disagree; with `--strict` it also fails when a bound guide lacks a matching "Guide version" line, an "Applies to" line names an older server, or a product version is spelled 27.0.2 or 2.7.0 (version-check: ignore).
 
 ## Declaring a new tool
 

@@ -1,6 +1,6 @@
 # API coverage and project analysis
 
-The index was retrieved on 2026-10-20 from the [UVIScript reference](https://lua.uvi.net/) and [Falcon manual](https://manual.uvi.net/falcon/en/). Historical hardware checks used Windows Falcon standalone 27.0.2.
+The index was retrieved on 2026-10-20 from the [UVIScript reference](https://lua.uvi.net/) and [Falcon manual](https://manual.uvi.net/falcon/en/). Historical hardware checks used Windows Falcon standalone 28.0.2.
 
 `src/falcon_mcp/data/api_coverage.json` contains 1,489 member/function/property/constant records, including inherited and duplicate members; 431 map to direct tools. Other records identify native-extension paths. These are signature mappings, not 1,489 implemented or hardware-tested operations. Query individual sources and signatures with `falcon_api_coverage`.
 
@@ -41,7 +41,7 @@ Read `falcon://capabilities.workflow_support` for machine-readable distinctions 
 | Continuous model feedback | Not implemented; feedback is one capture/file and one worker invocation. |
 | Reference audio | Exact local time range, meters and normalized comparison; no target-source separation from a mix. |
 
-Owned native hosting is validated on Windows Falcon 27.0.2/Pedalboard 0.9.26 for a basic synth Program. It is not a way to capture a different running instance's unsaved state. Persistent Lua loops can stall offline hosting; original instrument scripts are retained, and compatibility is reported per preset. See [native validation and usage](native-and-reference.md).
+Owned native hosting is validated on Windows Falcon 28.0.2/Pedalboard 0.9.26 for a basic synth Program. It is not a way to capture a different running instance's unsaved state. Persistent Lua loops can stall offline hosting; original instrument scripts are retained, and compatibility is reported per preset. See [native validation and usage](native-and-reference.md).
 
 Other exclusions include host/driver configuration, ScriptProcessor source inspection and processor insertion, protected-bank internals, complete internal MultiSample zone enumeration, and an atomic engine freeze. Public API availability may change by Falcon version; these are current implementation boundaries.
 

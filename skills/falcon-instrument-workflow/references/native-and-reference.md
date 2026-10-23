@@ -2,7 +2,7 @@
 
 ## Native file operations without desktop control
 
-The owned VST3 backend was validated on Yingg, Windows, Falcon 27.0.2 and Pedalboard 0.9.26. It uses a version-checked native state adapter, not a newly discovered UVIScript load/save API. Unknown state envelopes are rejected. It does not control a pre-existing standalone or DAW plugin instance.
+The owned VST3 backend was validated on Yingg, Windows, Falcon 28.0.2 and Pedalboard 0.9.26. It uses a version-checked native state adapter, not a newly discovered UVIScript load/save API. Unknown state envelopes are rejected. It does not control a pre-existing standalone or DAW plugin instance.
 
 1. Call `falcon_native_host(action="start")`. Retain the returned `session_id` and confirm the owned session's Program names. Repeated start returns the same session. Do not confuse this ID with `falcon_status.engine.instance`.
 2. Load a known local file with `falcon_native_file`: `.uvim` uses `kind="multi"`; `.uvip` uses `kind="program"` and a one-based existing Part index. A Multi replaces all Parts/Master; a Program replaces only that Part's instrument, preserving its routing. Wrong suffix/kind pairs are rejected. The load result reports native name readback.

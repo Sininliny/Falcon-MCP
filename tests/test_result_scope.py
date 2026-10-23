@@ -55,7 +55,7 @@ async def test_api_coverage_items_carry_status_levels(config):
     result = await raw(mcp, "falcon_api_coverage", {"query": "playNote", "limit": 100})
     levels = {item["name"]: item["status"]["level"] for item in result["items"]}
     assert levels["playNote"] == "minimal_behavior_verified"
-    assert "27.0.2" in next(i for i in result["items"] if i["name"] == "playNote")["status"]["on"]
+    assert "28.0.2" in next(i for i in result["items"] if i["name"] == "playNote")["status"]["on"]
     assert set(levels.values()) <= {"indexed", "minimal_behavior_verified"}
     assert result["result_scope"]["status_levels"][0] == "indexed"
 
@@ -284,7 +284,7 @@ def test_glossary_names_every_code():
     for profile in PROFILES.values():
         for code in [*profile["checked"], *profile["unchecked"]]:
             assert code in data["codes"]
-    assert data["versions"]["server"] == __version__ and "27.0.2" in data["versions"]["validated_on"]
+    assert data["versions"]["server"] == __version__ and "28.0.2" in data["versions"]["validated_on"]
 
 
 def test_code_versions_agree():
@@ -305,3 +305,18 @@ def test_every_registered_tool_has_a_scope_profile(config):
 
     names = [tool.name for tool in create_server(config)._tool_manager.list_tools()]
     assert [n for n in names if n not in result_scope.PROFILES] == []
+
+
+def test_check_versions_flags_old_falcon_spellings(tmp_path):
+    import importlib.util
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("check_versions", root / "scripts" / "check_versions.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.guide_findings(root, __version__) == []
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "guide.md").write_text("Tested on Falcon 27.0.2 and 2.7.0; now 28.0.2.\n", "utf-8")
+    findings = module.guide_findings(tmp_path, __version__)
+    assert any("'27.0.2'" in f for f in findings) and not any("28.0.2'" in f for f in findings)
