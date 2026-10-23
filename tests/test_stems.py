@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import itertools
 import json
 import time
 import xml.etree.ElementTree as ET
@@ -444,3 +445,44 @@ async def test_native_requests_do_not_grow_with_the_number_of_keygroups(config):
         counts[keygroups] = len(host.ops)
     assert counts[40] <= counts[1] + 4
     assert counts[40] < 70  # ~4 requests per render plus one read per tree level
+
+
+def test_silent_target_gets_no_roles():
+    windows, parts = synth()
+    full = mix(parts, "body", "hammer")
+    silent = np.zeros_like(full)
+    result = stems.contribution(full, full.copy(), RATE, windows, solo=silent)
+    assert result["status"] == "silent" and result["roles"] == []
+
+
+def test_low_exposure_is_masked_however_quiet():
+    windows, parts = synth()
+    body = parts["body"]
+    rows = []
+    for gain in (0.2, 0.06):  # about -14 dB and -24 dB under the body, both fully covered by it
+        hidden = body * gain
+        rows.append(stems.contribution(body + hidden, body, RATE, windows, solo=hidden))
+    assert all(r["exposure"]["exposed_energy_fraction"] < 0.2 for r in rows)
+    assert [r["status"] for r in rows] == ["masked", "masked"]
+
+
+def test_ascii_table_keeps_columns_apart_for_near_silence():
+    windows, parts = synth()
+    full = mix(parts, "body", "hammer")
+    faint = parts["body"] * 1e-7
+    row = {"name": "Faint", "contribution": stems.contribution(full + faint, full, RATE, windows, solo=faint)}
+    line = stems.ascii_table([row]).splitlines()[2]
+    assert "<-99" in line and "-99.9-" not in line
+    assert all(not a.isdigit() or b != "-" for a, b in itertools.pairwise(line))
+
+
+@pytest.mark.asyncio
+async def test_restore_rebases_once_when_a_script_rewrites_state(config):
+    from falcon_mcp.stem_tools import StatePatch
+
+    host = FakeHost()
+    patch = StatePatch(host, SESSION, host.revision(), AuditLog(config.log_root))
+    await patch.set(LAYERS[0], "Mute", True, "boolean")
+    host.root.find(f"{PART}/Program[1]").set("Gain", "0.9")  # script write during the render
+    outcome = await patch.restore()
+    assert outcome["restored"] and host.attr(LAYERS[0], "Mute") == "0"

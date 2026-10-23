@@ -20,6 +20,7 @@ ACTIVE_FLOOR_DB = -60.0      # TF cells this far below the full mix's loudest ce
 EXPOSED_MARGIN_DB = -3.0     # a target cell is "exposed" when it is at most 3 dB under the rest of the mix
 DOMINANT_MARGIN_DB = 6.0     # a target cell "covers" the rest when it is 6 dB above it
 INAUDIBLE_RE_FULL_DB = -40.0
+MASKED_EXPOSURE = 0.2        # below this exposed-energy fraction an above-floor target is "masked"
 DETERMINISTIC_NULL_DB = -40.0
 MONO_DB = -60.0              # side-minus-mid floor; anything below reads as mono
 # Whole-phrase features that stay meaningful for chords and phrases (envelope/pitch fields assume one note).
@@ -333,6 +334,10 @@ def classify(item: dict, repeat: dict | None = None) -> tuple[list[str], str, li
     """Role words (body/transient/space/stereo_width/noise/brightness/low_end/level_only/masks_others) + status."""
     roles, evidence = [], []
     solo, removal = item.get("solo") or {}, item.get("removal") or {}
+    if solo and solo.get("loudness") is None:
+        # No roles for a silent solo: its zero side/mid and missing correlation are not "wide".
+        return [], "silent", [("solo render is silent: check mapping, mute, routing, velocity range or "
+                               "whether the phrase triggers it (release/pedal-up samples)")]
     matched, expo = item.get("matched") or {}, item.get("exposure") or {}
     share = solo.get("share_by_region_db") or {}
     added = removal.get("added_by_region_db") or {}
@@ -383,8 +388,6 @@ def classify(item: dict, repeat: dict | None = None) -> tuple[list[str], str, li
     steps = matched.get("max_noticeable_steps")
     exposed = expo.get("exposed_energy_fraction")
     covers = expo.get("covers_rest_fraction")
-    if solo and solo.get("loudness") is None:
-        return roles, "silent", evidence + ["solo render is silent: check mapping, mute, routing or velocity range"]
     if removal.get("silent_without"):
         return roles or ["body"], "carries_everything", evidence + ["the mix is silent without this target"]
     if level is not None and level < INAUDIBLE_RE_FULL_DB:
@@ -393,9 +396,12 @@ def classify(item: dict, repeat: dict | None = None) -> tuple[list[str], str, li
     if quiet_change and (exposed is None or exposed < 0.05):
         status = "inaudible"
         evidence.append(f"removing it changes loudness {drop:+.2f} dB and no feature by >=1 step after matching")
-    elif exposed is not None and exposed < 0.2 and (level is None or level > -20):
+    elif exposed is not None and exposed < MASKED_EXPOSURE:
+        # Any target with level above the inaudible floor but little exposed energy is masked, however
+        # quiet; a lower exposure must never read as "more audible" than a higher one.
         status = "masked"
-        evidence.append(f"only {exposed:.0%} of its energy is exposed above the rest of the mix")
+        evidence.append(f"only {exposed:.0%} of its energy is exposed above the rest of the mix"
+                        + (f" (solo {level:+.1f} dB re full)" if level is not None else ""))
     elif drop is not None and drop >= 1 and steps is not None and steps < 1:
         status = "audible"
         roles.append("level_only")
@@ -451,7 +457,14 @@ def ascii_table(rows: list[dict]) -> str:
     lines = [head, "-" * len(head)]
 
     def num(value, width, digits=1):
-        return f"{'n/a':>{width}}" if value is None else f"{value:>{width}.{digits}f}"
+        # Always one separating space; values below -99.9 dB (near silence) print as "<-99".
+        if value is None:
+            text = "n/a"
+        elif value < -99.9:
+            text = "<-99"
+        else:
+            text = f"{value:.{digits}f}"
+        return " " + text.rjust(width - 1)
 
     for row in rows:
         c = row["contribution"]

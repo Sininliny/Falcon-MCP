@@ -142,20 +142,12 @@ class StatePatch:
     async def set(self, selector: str, name: str, value, kind: str):
         return bool(await self.set_many([(selector, name, value, kind)]))
 
-    async def restore(self) -> dict:
-        """Write every original value back. Reads first: an instrument script may have rewritten the value
-        during the render (back to the original, or to a float32 neighbour of it), which an expected-value
-        guard on the value this patch wrote would refuse."""
-        errors, overridden = [], []
-        if not self.applied:
-            return {"restored": True, "errors": errors, "revision": self.revision, "overridden_during_render": []}
-        items, self.applied = self.applied, []
-        try:
-            nodes = await read_nodes(self.host, self.session_id, list(dict.fromkeys(i["selector"] for i in items)),
-                                     self.revision)
-        except Exception as exc:  # noqa: BLE001 - report instead of raising from a finally block
-            return {"restored": False, "errors": [f"restore read failed: {exc}"], "revision": self.revision,
-                    "overridden_during_render": []}
+    async def _restore(self, items: list[dict], errors: list[str], overridden: list[str]):
+        """One batched read, then one batched write of every attribute that is not back at its original."""
+        if not items:
+            return
+        nodes = await read_nodes(self.host, self.session_id, list(dict.fromkeys(i["selector"] for i in items)),
+                                 self.revision)
         todo = []
         for item in items:
             label = f"{item['selector']}.{item['name']}"
@@ -164,18 +156,38 @@ class StatePatch:
                 overridden.append(f"{label}: set to {item['current']}, script wrote {raw} during the render")
             if raw != item["original"]:
                 todo.append({**item, "now": raw, "back": _cast(item["original"], item["kind"])})
-        self.progress.update(stage=f"{self.progress.get('stage', '')} (restoring)".strip(),
-                             edits_total=len(todo), edits_done=0)
-        if todo:
+        self.progress.update(edits_total=len(todo), edits_done=0)
+        if not todo:
+            return
+        readback = await self._write(todo, "back", "now")
+        for item in todo:
+            value = readback[(item["selector"], item["name"])]
+            if value != item["original"] and not _same_number(value, item["original"]):
+                errors.append(f"{item['selector']}.{item['name']} reads back {value}, expected {item['original']}")
+
+    async def restore(self) -> dict:
+        """Write every original value back. Reads first: an instrument script may have rewritten the value
+        during the render (back to the original, or to a float32 neighbour of it), which an expected-value
+        guard on the value this patch wrote would refuse."""
+        errors, overridden = [], []
+        items, self.applied = self.applied, []
+        if items:
+            self.progress["stage"] = f"{self.progress.get('stage', '')} (restoring)".strip()
+        for attempt in range(2):
+            errors, overridden = [], []
             try:
-                readback = await self._write(todo, "back", "now")
-                for item in todo:
-                    value = readback[(item["selector"], item["name"])]
-                    if value != item["original"] and not _same_number(value, item["original"]):
-                        errors.append(f"{item['selector']}.{item['name']} reads back {value}, "
-                                      f"expected {item['original']}")
-            except Exception as exc:  # noqa: BLE001 - report every failure with its attribute
-                errors += [f"{i['selector']}.{i['name']}={i['original']}: {exc}" for i in todo]
+                await self._restore(items, errors, overridden)
+                break
+            except Exception as exc:  # noqa: BLE001 - report instead of raising from a finally block
+                if "revision changed" in str(exc) and attempt == 0:
+                    # A script rewrote state after the render: rebase on the current revision and retry once.
+                    try:
+                        self.revision = (await self.host.request(self.session_id, "status", {}))["revision"]
+                        continue
+                    except Exception as status_exc:  # noqa: BLE001
+                        exc = status_exc
+                errors.append(f"restore of {len(items)} attribute(s) failed: {exc}")
+                break
         return {"restored": not errors, "errors": errors, "revision": self.revision,
                 "overridden_during_render": overridden}
 
