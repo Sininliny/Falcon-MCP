@@ -31,7 +31,7 @@ For missing bridges, follow the [manual initialization guide](https://github.com
 
 ## Choose the production path
 
-For guarded modulation, template structure creation, audio acceptance and immutable releases, read [production safety](references/production-safety.md). Use `falcon_native_connections` for connection writes, `falcon_build_instrument` for allowlisted structures, and snapshot → `falcon_accept_instrument` → publish for revision-bound evidence. Do not reuse a passing report after changing a file.
+For guarded modulation, template structure creation, audio acceptance and immutable releases, read [production safety](references/production-safety.md). Use `falcon_native_connections` for connection writes, `falcon_native_structure` (preview → apply with automatic before/after render → rollback) to add whitelisted filter/chorus/amp/tremolo/saturation inserts with velocity/keyfollow/modwheel modulation in the owned session (read [structure edits](references/structure-edits.md)), `falcon_build_instrument` for allowlisted structures, and snapshot → `falcon_accept_instrument` → publish for revision-bound evidence. Do not reuse a passing report after changing a file.
 
 - Existing structures and supported effect chains: use live MCP tools with readback and expected-value guards.
 - Missing synthesis structures: current public runtime APIs do not expose general Layer/Keygroup/Oscillator/Modulator/connection creation. Prefer the controlled builder when its catalog covers the design; otherwise use an explicitly chosen offline authoring workflow and test native loading, sound and reopening. The owned host can validate/export structures; it does not provide general runtime structure creation. XML parsing alone is insufficient.
