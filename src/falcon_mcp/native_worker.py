@@ -181,6 +181,7 @@ def engine(root: Path):
     revision_number = 0
     connection_plans = {}
     loaded_source = {}
+    structure = None
     aliases = RevisionAliases()
 
     def current():
@@ -401,6 +402,14 @@ def engine(root: Path):
                             connection_plans.clear()
                         connection_plans[result["plan_id"]] = copy.deepcopy(result)
                         result["applied"] = False
+            elif op == "structure":
+                from .native_structure import StructureSession
+
+                if structure is None:
+                    structure = StructureSession(root, plugin)
+                result = structure.handle(args, current, apply, lambda: state_xml(plugin.raw_state),
+                                          lambda: revision_number)
+                result["revision_number"] = revision_number
             elif op == "benchmark":
                 from .native_perf import benchmark
 

@@ -265,7 +265,7 @@ def pitch_analysis(mono: np.ndarray, rate: int, expected_note: float | None, reg
     # Remove octave errors relative to the median before statistics.
     ratio = np.log2(track / median)
     inliers = np.abs(ratio) < 0.25
-    octave_jumps = int((~inliers).sum())
+    octave_jumps = _octave_jumps(track)
     track_t, track = times[voiced][inliers], track[inliers]
     median = float(np.median(track))
     midi = 69 + 12 * math.log2(median / 440)
@@ -297,6 +297,134 @@ def pitch_analysis(mono: np.ndarray, rate: int, expected_note: float | None, reg
     result["track"] = [[round(float(t), 3), round(float(c), 1)] for t, c in zip(track_t[::step], cents[::step])]
     result["track_format"] = "[time_seconds, cents_from_median]"
     return result
+
+
+def _frame_pitches(freqs: np.ndarray, amps: np.ndarray, fmin: float, fmax: float,
+                   max_notes: int = 6) -> list[tuple[float, float]]:
+    """Iterative harmonic-sum estimation with partial removal on one frame's spectral peaks."""
+    remaining = np.ones(len(freqs), bool)
+    found: list[tuple[float, float]] = []
+    first = None
+    for _ in range(max_notes):
+        if remaining.sum() < 2:
+            break
+        best = (0.0, 0.0, None)
+        candidates = {f / k for f in freqs[remaining] for k in (1, 2, 3, 4) if fmin <= f / k <= fmax}
+        for f0 in candidates:
+            h = np.round(freqs / f0)
+            ok = remaining & (h >= 1) & (h <= 10)
+            # Piano partials run sharp (inharmonicity); widen the window for higher partials.
+            cents = np.abs(1200 * np.log2(np.maximum(freqs, 1e-9) / np.maximum(h * f0, 1e-9)))
+            hit = ok & (cents < np.minimum(20 + 5 * h, 60))
+            # Weights falling with harmonic number keep sub-octave candidates from winning.
+            score = float(np.sum(amps[hit] / np.sqrt(h[hit])))
+            if hit.sum() >= 2 and score > best[0]:
+                best = (score, f0, hit)
+        score, f0, hit = best
+        if hit is None or (first is not None and score < 0.25 * first):
+            break
+        first = first or score
+        found.append((f0, score))
+        # Remove the whole partial series, not just h <= 10: fit piano-style stretch f_h = h*f0*sqrt(1+B*h^2)
+        # from the matched partials so high partials of a rich or inharmonic tone are not left behind as
+        # fake extra notes.
+        h = np.round(freqs[hit] / f0)
+        stretch = (freqs[hit] / (h * f0)) ** 2 - 1
+        inharmonicity = float(np.clip(np.sum(stretch * h**2) / max(np.sum(h**4), 1e-12), 0, 2e-3))
+        series = np.arange(1, int(freqs.max() / f0) + 2)
+        predicted = series * f0 * np.sqrt(1 + inharmonicity * series**2)
+        nearest = np.abs(1200 * np.log2(freqs[:, None] / predicted[None, :])).min(axis=1)
+        remaining &= ~hit & ~(nearest < 40)
+    return found
+
+
+def _simple_ratio(a: float, b: float, tolerance_cents: float = 25.0) -> bool:
+    """True when two f0s may be partials of one tone (ratios n/m with n, m <= 3)."""
+    ratio = max(a, b) / min(a, b)
+    for n, m in ((1, 1), (2, 1), (3, 1), (3, 2)):
+        if abs(1200 * math.log2(ratio / (n / m))) < tolerance_cents:
+            return True
+    return False
+
+
+def polyphony_analysis(mono: np.ndarray, rate: int, region: tuple[float, float],
+                       fmin: float = 40.0, fmax: float = 2100.0, max_frames: int = 40) -> dict:
+    """Detect simultaneous notes. Conservative: only chords containing non-simple intervals count.
+
+    Pairs related by unison/octave/twelfth/fifth are never treated as evidence, because a single
+    tone with a weak fundamental can produce exactly those candidates.
+    """
+    size = 2 ** math.ceil(math.log2(0.17 * rate))
+    start, stop = int(region[0] * rate), min(len(mono), int(region[1] * rate))
+    if stop - start < size:
+        start = max(0, stop - size)
+    if stop - start < size:
+        return {"polyphonic": False, "frames_analyzed": 0, "reason": "segment too short"}
+    hop = max(int(0.05 * rate), (stop - start - size) // max_frames + 1)
+    offsets = list(range(start, stop - size + 1, hop))
+    energies = np.array([float(np.mean(mono[o:o + size] ** 2)) for o in offsets])
+    keep = [o for o, e in zip(offsets, energies) if e > energies.max() * 1e-3]
+    window = np.hanning(size)
+    spectrum_freqs = np.fft.rfftfreq(size, 1 / rate)
+    band = spectrum_freqs <= 5000
+    evidence, counts, notes = 0, [], {}
+    for offset in keep:
+        magnitude = np.abs(np.fft.rfft(mono[offset:offset + size] * window))[band]
+        power = magnitude[1:] ** 2 + 1e-24
+        if np.exp(np.mean(np.log(power))) / np.mean(power) > 0.2:
+            counts.append(0)  # Noise-like frame: random spectral peaks are not notes.
+            continue
+        level = 20 * np.log10(np.maximum(magnitude, 1e-12))
+        peaks, _ = signal.find_peaks(level, height=level.max() - 50, prominence=10, distance=2)
+        if len(peaks) < 2:
+            counts.append(len(peaks))
+            continue
+        peaks = peaks[np.argsort(magnitude[peaks])[::-1][:60]]
+        # Parabolic interpolation for sub-bin peak frequencies.
+        a, b, c = level[peaks - 1], level[peaks], level[np.minimum(peaks + 1, len(level) - 1)]
+        shift = np.clip(0.5 * (a - c) / np.where(a - 2 * b + c == 0, 1, a - 2 * b + c), -0.5, 0.5)
+        freqs = (peaks + shift) * rate / size
+        pitches = [f0 for f0, _ in _frame_pitches(freqs, np.sqrt(magnitude[peaks]), fmin, fmax)]
+        counts.append(len(pitches))
+        if any(not _simple_ratio(x, y) for i, x in enumerate(pitches) for y in pitches[i + 1:]):
+            evidence += 1
+            for f0 in pitches:
+                name = note_name(69 + 12 * math.log2(f0 / 440))
+                notes[name] = notes.get(name, 0) + 1
+    analyzed = len(keep)
+    polyphonic = analyzed > 0 and evidence >= max(2, 0.25 * analyzed)
+    result = {
+        "polyphonic": bool(polyphonic), "frames_analyzed": analyzed, "polyphonic_frames": evidence,
+        "max_simultaneous_notes": int(max(counts)) if counts and polyphonic else (1 if counts else 0),
+        "method": "Per-frame harmonic-sum multi-f0 with partial removal; chords count only when two "
+                  "estimated notes are not unison/octave/twelfth/fifth related",
+    }
+    if polyphonic:
+        ranked = sorted(notes.items(), key=lambda item: -item[1])
+        result["detected_notes"] = [name for name, count in ranked if count >= max(2, 0.25 * evidence)][:12]
+    return result
+
+
+def max_overlap(windows: list[tuple[float, float]]) -> int:
+    """Most notes sounding at once, from (on, off) seconds; feeds listen(max_simultaneous_notes=...)."""
+    edges = sorted([(on, 1) for on, _ in windows] + [(off, -1) for _, off in windows])
+    count = best = 0
+    for _, step in edges:  # Offs sort before ons at the same instant, so abutting notes are not a chord.
+        count += step
+        best = max(best, count)
+    return best
+
+
+def _octave_jumps(track: np.ndarray) -> int:
+    """Frames an octave away from their neighbours; legitimate note changes in a melody do not count."""
+    if len(track) < 3:
+        return 0
+    log = np.log2(track)
+    padded = np.pad(log, 10, mode="edge")
+    local = np.median(np.lib.stride_tricks.sliding_window_view(padded, 21), axis=1)
+    distance = log - local
+    octaves = np.round(distance)
+    return int(np.sum((octaves != 0) & (np.abs(distance - octaves) < 0.1)))
 
 
 def harmonic_analysis(mono: np.ndarray, rate: int, f0: float, start: float, end: float) -> dict:
@@ -559,6 +687,10 @@ def describe(report: dict) -> list[str]:
             words.append(f"vibrato {pitch['vibrato']['rate_hz']:.1f} Hz +/-{pitch['vibrato']['depth_cents']:.0f} cents")
         if abs(pitch.get("drift_cents_per_second") or 0) > 10:
             words.append(f"pitch drifts {pitch['drift_cents_per_second']:+.0f} cents/s")
+    elif pitch.get("polyphonic"):
+        notes = pitch.get("detected_notes")
+        words.append("polyphonic" + (f" (estimated notes {', '.join(notes)})" if notes else "")
+                     + ": pitch, tuning and octave checks withheld")
     elif pitch.get("reason"):
         words.append("no stable pitch detected")
     trem = env["tremolo"]
@@ -620,7 +752,7 @@ def findings(report: dict) -> list[str]:
             out.append("pitch_off_expected_by_more_than_15_cents")
         if pitch["octave_jump_frames"] > 3:
             out.append("unstable_octave_tracking")
-    elif report.get("expected_note") is not None:
+    elif report.get("expected_note") is not None and not pitch.get("polyphonic"):
         out.append("expected_pitch_not_detected")
     stereo = report.get("stereo")
     if stereo and stereo["correlation"] is not None and stereo["correlation"] < -0.2:
@@ -630,9 +762,10 @@ def findings(report: dict) -> list[str]:
 
 def listen(audio: np.ndarray, rate: int, expected_note: float | None = None,
            note_on_seconds: float | None = None, note_off_seconds: float | None = None,
-           include_ascii: bool = True, light: bool = False) -> dict:
-    """Full listening report. light=True skips pitch, harmonics, brightness-over-time and click analysis
-    (the slow, single-note parts) for callers that only compare level, envelope, spectrum and stereo."""
+           include_ascii: bool = True, max_simultaneous_notes: int | None = None, light: bool = False) -> dict:
+    """Full listening report. max_simultaneous_notes: known from the MIDI when the caller rendered events;
+    None detects from audio. light=True skips polyphony, pitch, harmonics, brightness-over-time and click
+    analysis (the slow, single-note parts) for callers that only compare level, envelope, spectrum and stereo."""
     data = audio.astype(np.float64)
     peak = float(np.max(np.abs(data))) if data.size else 0.0
     rms = math.sqrt(float(np.mean(data**2))) if data.size else 0.0
@@ -665,9 +798,23 @@ def listen(audio: np.ndarray, rate: int, expected_note: float | None = None,
                       spectrum=spectral_bands(data, rate), clicks={"count": 0, "skipped": True},
                       stereo=stereo_analysis(data, rate))
         return report
-    pitch = pitch_analysis(mono, rate, expected_note, region)
-    report.update(envelope=envelope, pitch=pitch, spectrum=spectral_bands(data, rate))
-    f0 = pitch["median_f0_hz"] if pitch.get("available") else (midi_to_hz(expected_note) if expected_note is not None else None)
+    if max_simultaneous_notes is None:
+        polyphony = {**polyphony_analysis(mono, rate, region), "source": "audio"}
+    else:
+        polyphony = {"polyphonic": max_simultaneous_notes >= 2, "max_simultaneous_notes": max_simultaneous_notes,
+                     "source": "midi_events"}
+    if polyphony["polyphonic"]:
+        # Single-f0 trackers lock onto a chord's common subharmonic or hop between voices; any
+        # pitch, tuning or harmonic conclusion from them would be an artefact.
+        pitch = {"available": False, "polyphonic": True,
+                 "reason": "Polyphonic material: single-pitch tracking, tuning and harmonic analysis withheld"}
+        if polyphony.get("detected_notes"):
+            pitch["detected_notes"] = polyphony["detected_notes"]
+    else:
+        pitch = pitch_analysis(mono, rate, expected_note, region)
+    report.update(envelope=envelope, polyphony=polyphony, pitch=pitch, spectrum=spectral_bands(data, rate))
+    f0 = None if polyphony["polyphonic"] else pitch["median_f0_hz"] if pitch.get("available") else (
+        midi_to_hz(expected_note) if expected_note is not None else None)
     peak_time = envelope["peak_time_seconds"]
     if f0:
         start = peak_time + 0.03
@@ -675,6 +822,8 @@ def listen(audio: np.ndarray, rate: int, expected_note: float | None = None,
         if stop - start < 0.1:
             start, stop = envelope["onset_seconds"], min(len(data) / rate, envelope["onset_seconds"] + 0.5)
         report["harmonics"] = harmonic_analysis(mono, rate, f0, start, stop)
+    elif polyphony["polyphonic"]:
+        report["harmonics"] = {"available": False, "reason": "Polyphonic material: partials of several notes overlap"}
     late = min(end - 0.05, peak_time + 0.8) if end - 0.05 > peak_time + 0.1 else None
     report["brightness_over_time"] = brightness_trajectory(
         mono, rate, [("attack", peak_time)] + ([("late", late)] if late else []))
