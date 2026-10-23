@@ -662,6 +662,7 @@ def create_server(config: Config | None = None) -> FastMCP:
     from .design_tools import register_design
     from .knowledge_tools import register_knowledge
     from .listen_tools import register_listening
+    from .midi_compare_tools import register_midi_compare
     from .native_tools import register_native
     from .perf_tools import register_perf
     from .perform_tools import register_perform
@@ -675,6 +676,7 @@ def create_server(config: Config | None = None) -> FastMCP:
     register_advanced(mcp, cfg, bridge, audit, capture_lock, capture_monitor)
     register_reference(mcp, cfg, feedback)
     register_listening(mcp, cfg)
+    register_midi_compare(mcp, cfg, audit)
     register_design(mcp, cfg)
     register_knowledge(mcp, cfg, audit)
     native_host = register_native(mcp, cfg, audit)
