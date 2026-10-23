@@ -104,6 +104,67 @@ def _apply_parameters(plugin, parameters: dict) -> dict:
     return applied
 
 
+def _surface_window(status_path: Path, wait_seconds: float = 180.0) -> dict:
+    """Find this process's plugin window, put it on screen and in front, and report what happened.
+
+    A process started in the background may not take the foreground on Windows, so the window can open
+    behind other windows or off screen; a process in another session (a service) has no visible window at all.
+    Kontakt 8 needed 50-60 s before its window appeared in the live test, hence the long wait.
+    """
+    status = {"window_found": False, "platform": sys.platform}
+    wait_seconds = float(os.environ.get("FALCON_RACK_WINDOW_WAIT", wait_seconds))
+    if os.name != "nt" or wait_seconds <= 0:
+        status.update(window_found=None, checked=False)
+        status["note"] = "window check skipped (Windows only; FALCON_RACK_WINDOW_WAIT=0 disables it)"
+        status_path.write_text(json.dumps(status), encoding="utf-8")
+        return status
+    import ctypes
+    from ctypes import wintypes
+
+    user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+    pid = os.getpid()
+    session = wintypes.DWORD()
+    kernel32.ProcessIdToSessionId(pid, ctypes.byref(session))
+    status.update(process_session=session.value, console_session=kernel32.WTSGetActiveConsoleSessionId())
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def collect(hwnd, _):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value == pid and user32.IsWindowVisible(hwnd):
+            found.append(hwnd)
+        return True
+
+    deadline = time.monotonic() + wait_seconds
+    while not found and time.monotonic() < deadline:
+        user32.EnumWindows(collect, 0)
+        if not found:
+            time.sleep(0.25)
+    if found:
+        hwnd = found[0]
+        title = ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(hwnd, title, 256)
+        user32.SetWindowTextW(hwnd, f"[Falcon MCP: set up the sound, then close this window] {title.value}")
+        moved = False
+        if not user32.MonitorFromWindow(hwnd, 0):  # MONITOR_DEFAULTTONULL: not on any screen
+            user32.SetWindowPos(hwnd, 0, 80, 80, 0, 0, 0x0001 | 0x0004)  # SWP_NOSIZE | SWP_NOZORDER
+            moved = True
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+        user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0003)  # HWND_TOPMOST, SWP_NOMOVE | SWP_NOSIZE
+        user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, 0x0003)  # back to HWND_NOTOPMOST, but now in front
+        foreground = bool(user32.SetForegroundWindow(hwnd))
+        user32.FlashWindow(hwnd, True)
+        rect = wintypes.RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        status.update(window_found=True, title=title.value, rect=[rect.left, rect.top, rect.right, rect.bottom],
+                      moved_on_screen=moved, foreground=foreground)
+    elif status["process_session"] == 0:
+        status["note"] = "running in session 0 (a service): windows there are never shown on the desktop"
+    status_path.write_text(json.dumps(status), encoding="utf-8")
+    return status
+
+
 def editor(request: dict, result_path: Path):
     """Show the plugin window; when the user closes it, save the state as .vstpreset (raw state fallback)."""
     import threading
@@ -116,6 +177,8 @@ def editor(request: dict, result_path: Path):
     timer = threading.Timer(request["close_after_seconds"], close.set)
     timer.daemon = True
     timer.start()
+    window = threading.Thread(target=_surface_window, args=(Path(request["window_status"]),), daemon=True)
+    window.start()
     plugin.show_editor(close)
     timer.cancel()
     target = Path(request["output"])
@@ -175,6 +238,22 @@ def settle(plugin, request: dict) -> dict:
             "peak_probe_db": float(np.max(levels)) if levels else None}
 
 
+def _select_program(plugin, request: dict) -> dict | None:
+    """MIDI bank select + program change, for plugins that switch instruments that way."""
+    program = request.get("program")
+    if program is None:
+        return None
+    channel = request.get("program_channel", 1) - 1
+    messages = []
+    if request.get("bank") is not None:
+        messages += [(bytes([0xB0 + channel, 0, request["bank"] >> 7]), 0.0),
+                     (bytes([0xB0 + channel, 32, request["bank"] & 0x7F]), 0.0)]
+    messages.append((bytes([0xC0 + channel, program]), 0.01))
+    plugin(messages, duration=0.5, sample_rate=request["sample_rate"], num_channels=2,
+           buffer_size=request["buffer_size"], reset=False)
+    return {"program": program, "bank": request.get("bank"), "channel": channel + 1}
+
+
 def render(request: dict, result_path: Path):
     import numpy as np
     import soundfile as sf
@@ -186,6 +265,7 @@ def render(request: dict, result_path: Path):
     plugin = _load(request["bundle"], request.get("plugin_name"))
     _apply_state(plugin, request.get("state"))
     applied = _apply_parameters(plugin, request.get("parameters"))
+    program = _select_program(plugin, request)
     load_seconds = time.monotonic() - loaded
     settled = settle(plugin, request)
     rate, block = request["sample_rate"], request["buffer_size"]
@@ -224,7 +304,7 @@ def render(request: dict, result_path: Path):
                         "render_seconds": round(time.monotonic() - started, 2)})
     result_path.write_text(json.dumps({"ok": True, "result": {
         "plugin": _describe(plugin), "load_seconds": round(load_seconds, 2), "settle": settled,
-        "parameters_applied": applied, "renders": renders}}, allow_nan=False), encoding="utf-8")
+        "parameters_applied": applied, "program": program, "renders": renders}}, allow_nan=False), encoding="utf-8")
     _terminate()  # while the plugin is still referenced, so its destructor never runs
 
 

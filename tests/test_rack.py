@@ -106,6 +106,11 @@ def tools(tmp_path, config, monkeypatch):
     for name in ("Good", "Bright", "Slow", "Shell", "Fx", "Crash", "Hang", "Deaf", "Sticky", "Patient", "Falcon"):
         (plugins / f"{name}.vst3").write_bytes(name.encode())
     monkeypatch.setenv("PYTHONPATH", str(FAKE))
+    monkeypatch.setenv("FALCON_RACK_WINDOW_WAIT", "0")  # fake plugins open no real window
+    presets = tmp_path / "presets" / "FakeCo" / "Good" / "Soft"
+    presets.mkdir(parents=True)
+    (presets / "Soft Keys.vstpreset").write_text(json.dumps({"gain": 0.5}))
+    monkeypatch.setenv("FALCON_RACK_PRESET_PATHS", str(tmp_path / "presets"))
     monkeypatch.setattr("falcon_mcp.rack_tools.EXIT_GRACE_SECONDS", 1.0)
     monkeypatch.setattr(rack, "default_vst3_dirs", lambda: [plugins])
     mcp = FastMCP("t")
@@ -259,3 +264,22 @@ async def test_live_findings_unload_hang_first_note_editor_timeout_falcon(tools)
     assert saved["status"] == "done" and saved["closed_by_timeout"] is True
     with pytest.raises(ValueError, match="falcon_session_id"):
         await tools["falcon_rack_render"](plugin="Falcon", sweep=rack_sweep(notes=[60]))
+
+
+async def test_switch_sound_by_preset_name_or_program(tools):
+    await _finish(tools, await tools["falcon_rack_scan"](probe_timeout_seconds=4, wait_seconds=0))
+    listed = await tools["falcon_rack_presets"](plugin="Good")
+    assert [p["name"] for p in listed["presets"] if p["source"] == "vst3_presets"] == ["Soft Keys"]
+    assert listed["presets"][0]["folder"] == "Soft"
+    base = await _finish(tools, await tools["falcon_rack_render"](
+        plugin="Good", sweep=rack_sweep(notes=[60]), warmup_seconds=0, settle_seconds=5))
+    soft = await _finish(tools, await tools["falcon_rack_render"](
+        plugin="Good", state="soft keys", sweep=rack_sweep(notes=[60]), warmup_seconds=0, settle_seconds=5))
+    assert soft["render"]["peak_dbfs"] == pytest.approx(base["render"]["peak_dbfs"] - 6.02, abs=0.2)
+    assert soft["render"]["state"]["path"].endswith("Soft Keys.vstpreset")
+    program = await _finish(tools, await tools["falcon_rack_render"](
+        plugin="Good", program=3, sweep=rack_sweep(notes=[60]), warmup_seconds=0, settle_seconds=5))
+    assert program["render"]["program"] == {"program": 3, "bank": None, "channel": 1}
+    assert program["render"]["peak_dbfs"] == pytest.approx(base["render"]["peak_dbfs"] - 12.04, abs=0.2)
+    with pytest.raises(ValueError, match="No preset"):
+        await tools["falcon_rack_render"](plugin="Good", state="nothing", sweep=rack_sweep(notes=[60]))
