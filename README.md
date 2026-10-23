@@ -153,6 +153,7 @@ The server exposes **56 tools**, structured schemas, the `falcon://capabilities`
 | `falcon_measure_audio`, `falcon_describe_timbre`, `falcon_compare_audio` | Measurements and optional model feedback. |
 | `falcon_scan_project`, `falcon_query_project`, `falcon_export_uml` | Project snapshots and diagrams. |
 | `falcon_diagnose_audio`, `falcon_spectrum`, `falcon_get_logs` | Signal diagnostics and audit access. |
+| `falcon_sample_audit` | Sample-source audit of `.uvip`/`.uvim` files without Falcon: sampling interval, velocity layers, per-layer normalization, truncated samples, channel layout, noise floor, recordings shared across instruments ([sample audit](docs/sample-audit.md)). |
 
 ## Operating rules
 
