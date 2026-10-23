@@ -17,6 +17,7 @@ from .perform import (
     PHRASES,
     TimelineError,
     compile_events,
+    sounding_windows,
     summarize,
     timeline_end,
     write_timeline,
@@ -159,7 +160,9 @@ def register_perform(mcp, config, audit, host):
     async def evaluate(events, sections, seconds, meta, compiled, audio, rate, wav, include_table):
         report = await asyncio.to_thread(analyze, audio, rate, events, seconds, meta["name"] if sections else None,
                                          sections)
-        heard = await asyncio.to_thread(listen.listen, audio, rate, None, None, None, False)
+        # Pedal-extended note windows: held-pedal phrases are chords to a pitch tracker.
+        voices = listen.max_overlap([(w["on"], w["sound_off"]) for w in sounding_windows(events, seconds)])
+        heard = await asyncio.to_thread(listen.listen, audio, rate, None, None, None, False, voices)
         full = {"phrase": meta, "events": events, "sections": sections, "summary": summarize(events, compiled),
                 **report, "listening": {k: heard.get(k) for k in ("level", "description", "findings")}}
         saved = wav.with_suffix(".perform.json")

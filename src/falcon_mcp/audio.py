@@ -141,7 +141,8 @@ class FeedbackRunner:
             "cache": str(self.config.model_cache),
         }
 
-    async def analyze(self, path: Path, targets: list[str] | None = None) -> dict:
+    async def analyze(self, path: Path, targets: list[str] | None = None,
+                      facets: list[dict] | None = None, bank: str = "synth") -> dict:
         audio, rate = await asyncio.to_thread(read_audio, path)
         measured = await asyncio.to_thread(measurements, audio, rate)
         if measured["silent"]:
@@ -159,7 +160,10 @@ class FeedbackRunner:
                 "device": self.config.device,
                 "offline": self.config.local_files_only,
                 "targets": targets or [],
+                "bank": bank,
             }
+            if facets:
+                payload["facets"] = facets
             env = os.environ.copy()
             env["HF_HOME"] = str(self.config.model_cache)
             env["TOKENIZERS_PARALLELISM"] = "false"

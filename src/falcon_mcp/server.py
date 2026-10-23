@@ -23,6 +23,7 @@ from .audit import AuditLog, trace_id
 from .bridge import FalconBridge
 from .catalog import search_catalog
 from .config import Config
+from .descriptors import descriptor_deltas, resolve_facets
 from .listen import listen
 from .setup import installation_status, setup_bridge
 
@@ -38,6 +39,22 @@ Name = Annotated[str, Field(min_length=1, max_length=128)]
 Offset = Annotated[int, Field(ge=0, le=100000)]
 Limit = Annotated[int, Field(ge=1, le=100)]
 Value = StrictBool | StrictInt | StrictFloat | StrictStr
+
+
+class DescriptorItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    label: str = Field(min_length=1, max_length=60)
+    text: str = Field(min_length=1, max_length=300, description="English CLAP prompt, e.g. 'A felt piano ...'")
+
+
+class DescriptorFacet(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    facet: str = Field(min_length=1, max_length=60)
+    items: list[DescriptorItem] = Field(min_length=2, max_length=16)
+
+
+DescriptorBank = Literal["synth", "keys", "all", "custom"]
+CustomDescriptors = Annotated[list[DescriptorFacet], Field(max_length=8)]
 READ = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
 WRITE = {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False}
 
@@ -420,14 +437,22 @@ def create_server(config: Config | None = None) -> FastMCP:
         path: str,
         targets: Annotated[list[Annotated[str, Field(min_length=1, max_length=500)]], Field(max_length=16)]
         | None = None,
+        descriptor_bank: DescriptorBank = "synth",
+        custom_descriptors: CustomDescriptors | None = None,
+        descriptor_file: str | None = None,
     ) -> dict[str, Any]:
         """Describe <=30 s audio using local open-source CLAP; load ONLY for this call, then release.
 
-        Returns English facet descriptions, relative similarities, ambiguity, and measurements.
-        targets may contain English desired-sound descriptions for A/B comparisons. No cloud inference.
-        First download weights using 'falcon-mcp download-model'; inference is offline by default.
+        Returns English facet descriptions, relative similarities, ambiguity, per-descriptor scores and
+        measurements. targets may contain English desired-sound descriptions for A/B comparisons.
+        descriptor_bank: synth (default), keys (acoustic/felt/upright piano, Rhodes, Wurlitzer: hammer,
+        mechanics, perspective, pedal, tremolo), all, or custom. custom_descriptors / descriptor_file
+        (.json under the audio root or assets, same layout) add facets [{facet, items: [{label, text}]}].
+        No cloud inference. First download weights using 'falcon-mcp download-model'; offline by default.
         """
-        return await feedback.analyze(cfg.audio_path(path), targets)
+        custom = [facet.model_dump() for facet in custom_descriptors or []]
+        facets = resolve_facets(cfg, descriptor_bank, custom, descriptor_file)
+        return await feedback.analyze(cfg.audio_path(path), targets, facets, descriptor_bank)
 
     @mcp.tool(annotations=READ)
     async def falcon_compare_audio(
@@ -435,14 +460,21 @@ def create_server(config: Config | None = None) -> FastMCP:
         after_path: str,
         targets: Annotated[list[Annotated[str, Field(min_length=1, max_length=500)]], Field(max_length=16)]
         | None = None,
+        descriptor_bank: DescriptorBank = "synth",
+        custom_descriptors: CustomDescriptors | None = None,
+        descriptor_file: str | None = None,
     ) -> dict[str, Any]:
         """Compare two recordings with the same descriptor bank and optional target text.
 
-        Reports measured differences and target similarity deltas; does not claim which sound is better.
+        Reports measured differences, target similarity deltas and the largest per-descriptor deltas
+        (useful when both share top labels); does not claim which sound is better. descriptor_bank and
+        custom descriptors work as in falcon_describe_timbre (use keys for pianos and electric pianos).
         Each inference worker exits after its call. Keep note, velocity and gain identical.
         """
-        before = await feedback.analyze(cfg.audio_path(before_path), targets)
-        after = await feedback.analyze(cfg.audio_path(after_path), targets)
+        custom = [facet.model_dump() for facet in custom_descriptors or []]
+        facets = resolve_facets(cfg, descriptor_bank, custom, descriptor_file)
+        before = await feedback.analyze(cfg.audio_path(before_path), targets, facets, descriptor_bank)
+        after = await feedback.analyze(cfg.audio_path(after_path), targets, facets, descriptor_bank)
         keys = ["rms_dbfs", "peak_dbfs", "spectral_centroid_hz", "spectral_flatness", "crest_db"]
         deltas = {key: after["measurements"][key] - before["measurements"][key] for key in keys}
         target_deltas = [
@@ -454,6 +486,7 @@ def create_server(config: Config | None = None) -> FastMCP:
             "after": after,
             "measurement_deltas": deltas,
             "target_deltas": target_deltas,
+            "descriptor_deltas": descriptor_deltas(before, after),
         }
 
     @mcp.tool(annotations=READ)

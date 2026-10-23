@@ -59,6 +59,9 @@ shape matters, for example a filter sweep, swell or gated tail.
   not compare RMS between files with different amounts of silence.
 - `None` means not measured. A missing vibrato or pitch block is not evidence that the sound has
   no vibrato or is unpitched; pitch tracking fails on noise, chords and inharmonic sounds.
+- On chords the report sets `polyphony.polyphonic` and withholds pitch and harmonic conclusions.
+  `detected_notes` is an estimate. Octave and fifth dyads are not detected as chords, so check the
+  pitch block only on renders you know are single notes.
 - Vibrato depth is accurate to about 15 % at normal rates, but very low notes read fast vibrato
   lower. Vibrato smears harmonic lines, so a lower HNR with vibrato is not added noise.
 - A zero click count on bright saw or pulse material does not prove there are no small clicks;
