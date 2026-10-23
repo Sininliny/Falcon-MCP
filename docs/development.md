@@ -1,6 +1,6 @@
 # Developer guide
 
-Guide version: Falcon MCP server 0.5.0 (bridge 0.5.0).
+Guide version: Falcon MCP server 0.6.0 (bridge 0.6.0).
 
 This guide is for people (and agents) changing Falcon MCP itself. Users installing it should read the [installation guide](one-time-setup.md) or run the [Windows installer](#windows-installer).
 

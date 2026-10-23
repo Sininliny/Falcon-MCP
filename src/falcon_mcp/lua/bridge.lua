@@ -1,7 +1,7 @@
 -- UVI Falcon 2027 / UVIScript Lua 5.1. BRIDGE_ROOT and TOKEN are generated.
 -- Use documented asynchronous file I/O only. Never load/execute mailbox code.
 local json = require("uvi.json")
-local BRIDGE_VERSION="0.5.0"
+local BRIDGE_VERSION="0.6.0"
 local lastId = ""
 local lastMutation = {}
 local voices = {}

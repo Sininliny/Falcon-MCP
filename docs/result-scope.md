@@ -1,6 +1,6 @@
 # Result scope
 
-Guide version: Falcon MCP server 0.5.0 (bridge 0.5.0).
+Guide version: Falcon MCP server 0.6.0 (bridge 0.6.0).
 
 Several detours in real projects came from treating three different facts as one: "the interface exists", "the parameter write succeeded" and "the instrument works". The documents explain the difference, but an agent cannot be expected to remember them during a long session. Every tool result therefore starts with a `result_scope` block that states, for this one result, where it ran, what it touched and what it did not check.
 
