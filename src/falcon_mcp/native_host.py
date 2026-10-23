@@ -19,6 +19,8 @@ class NativeProtocolError(RuntimeError):
 class NativeHost:
     # Edit replies carry indexed definitions twice (read + readback); Arpeggiator alone is ~90 KB.
     stream_limit = 16 * 1024 * 1024
+    # One request (a render of a large instrument) may take minutes; past this the worker is stopped.
+    default_timeout = float(os.environ.get("FALCON_NATIVE_REQUEST_TIMEOUT", "120"))
 
     def __init__(self, config, audit):
         self.config, self.audit = config, audit
@@ -93,7 +95,7 @@ class NativeHost:
         if not self.status()["running"] or session_id != self.session_id:
             raise RuntimeError("Native session changed/stopped; inspect native_host status and use its session_id")
 
-    async def request(self, session_id: str, op: str, args: dict):
+    async def request(self, session_id: str, op: str, args: dict, timeout: float | None = None):
         async with self.lock:
             self._check(session_id)
             identifier = uuid.uuid4().hex
@@ -105,7 +107,7 @@ class NativeHost:
             try:
                 self.process.stdin.write(encoded)
                 await self.process.stdin.drain()
-                line = await asyncio.wait_for(self.process.stdout.readline(), 120)
+                line = await asyncio.wait_for(self.process.stdout.readline(), timeout or self.default_timeout)
                 result = json.loads(line)
                 if result.get("id") != identifier or result.get("session_id") != session_id:
                     raise NativeProtocolError("Native response identity mismatch")

@@ -159,6 +159,23 @@ def _notes_in(events, name):
     return [n for n in note_windows(events) if events[n["index"]].get("section") == name]
 
 
+def _voice_cents(measured: float | None, target_note: int, others: list[int]) -> tuple[float | None, bool]:
+    """Cents of a single-f0 estimate re the target, or (None, True) when it tracked another voice.
+
+    A ringing previous note or a sub-octave lock is not a tuning error; reporting it as one made
+    overlapped piano phrases look detuned.
+    """
+    if not measured:
+        return None, False
+    cents = 1200 * math.log2(measured / listen.midi_to_hz(target_note))
+    if abs(cents) <= 50:
+        return cents, False
+    candidates = [12 * k for k in (-2, -1, 1, 2)] + [o - target_note + 12 * k for o in others for k in (-1, 0, 1)]
+    if any(abs(cents - 100 * c) < 50 for c in candidates):
+        return None, True
+    return cents, False
+
+
 # --------------------------------------------------------------------------- phrase analyzers
 
 def analyze_retrigger(sig: Signal, events, sections):
@@ -227,16 +244,18 @@ def analyze_legato(sig: Signal, events, sections):
         burst0 = sig.transient(notes[0]["on"])
         rises, offsets = [], []
         for k, n in enumerate(notes):
-            target = listen.midi_to_hz(n["note"])
-            early = sig.f0(n["on"] + 0.005, n["on"] + 0.05)
-            mid = sig.f0(n["on"] + 0.1, n["off"] - 0.02) if n["off"] - n["on"] > 0.15 else None
+            others = [o["note"] for o in notes if o is not n and o["on"] < n["off"] and o["off"] + 0.5 > n["on"]]
+            early, early_other = _voice_cents(sig.f0(n["on"] + 0.005, n["on"] + 0.05), n["note"], others)
+            mid, mid_other = _voice_cents(sig.f0(n["on"] + 0.1, n["off"] - 0.02) if n["off"] - n["on"] > 0.15
+                                          else None, n["note"], others)
             row = {"section": section["name"], "note": listen.note_name(n["note"]), "time": _round(n["on"], 3),
                    "rise_db": _round(sig.rise(n["on"])),
                    "join_dip_db": _round((sig.level(n["on"] - 0.08, n["on"] - 0.03) or FLOOR_DB) -
                                          (sig.level(n["on"] - 0.02, n["on"] + 0.03, "min") or FLOOR_DB)) if k else None,
                    "click_vs_first_db": _round((sig.transient(n["on"]) or FLOOR_DB) - (burst0 or FLOOR_DB)),
-                   "early_cents": _round(1200 * math.log2(early / target), 0) if early else None,
-                   "cents": _round(1200 * math.log2(mid / target), 0) if mid else None}
+                   "early_cents": _round(early, 0), "cents": _round(mid, 0)}
+            if early_other or mid_other:
+                row["pitch_tracked_other_voice"] = True
             rows.append(row)
             if k:
                 rises.append(row["rise_db"] or 0)

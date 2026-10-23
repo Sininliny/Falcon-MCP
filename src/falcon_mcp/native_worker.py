@@ -17,6 +17,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from .bridge import preparation_lock
+from .native_revision import SETTLE_SECONDS, RevisionAliases, settle
 from .native_state import (
     MAX_STATE,
     parse_xml,
@@ -181,6 +182,7 @@ def engine(root: Path):
     connection_plans = {}
     loaded_source = {}
     structure = None
+    aliases = RevisionAliases()
 
     def current():
         return parse_xml(state_xml(plugin.raw_state))
@@ -192,8 +194,10 @@ def engine(root: Path):
         if source:
             path = Path(source["path"])
             source["disk_changed_since_load"] = not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != source["sha256"]
-            source["session_modified_since_load"] = content_fingerprint(tree) != source["native_revision"]
-        return {"session_id": session_id, "revision": content_fingerprint(tree),
+            source["session_modified_since_load"] = not aliases.matches(source["native_revision"],
+                                                                        content_fingerprint(tree))
+        revision = content_fingerprint(tree)
+        return {"session_id": session_id, "revision": revision, "equivalent_revisions": aliases.of(revision),
                 "revision_number": revision_number, "loaded_source": source, "programs": [
             {"part": i, "name": p.find("Program").get("DisplayName", "Program")}
             for i, p in enumerate(parts, 1) if p.find("Program") is not None
@@ -206,14 +210,23 @@ def engine(root: Path):
         plugin.raw_state = replace_state_xml(plugin.raw_state, ET.tostring(tree, encoding="utf-8"))
         revision_number += 1
         connection_plans.clear()
+        aliases.clear()
         write_bytes(root / "session.uvim", state_xml(plugin.raw_state))
+
+    def settle_scripts(seconds):
+        # Instrument scripts write parameters on their first process blocks; baseline the state after that.
+        outcome = settle(plugin, lambda: content_fingerprint(current()), seconds=seconds)
+        if outcome["changed"]:
+            write_bytes(root / "session.uvim", state_xml(plugin.raw_state))
+        return outcome
 
     # The startup supervisor removed MCP loops from the default. Keep this owned
     # instance bridge-free: offline hosts cannot reliably run persistent Lua pollers.
     tree = current()
     if strip_bridges(tree):
         apply(tree)
-    protocol.write(json.dumps({"ready": True, **summary()}) + "\n")
+    startup_settle = settle_scripts(SETTLE_SECONDS)
+    protocol.write(json.dumps({"ready": True, **summary(), "settle": startup_settle}) + "\n")
     for line in sys.stdin.buffer:
         request = {}
         try:
@@ -223,7 +236,8 @@ def engine(root: Path):
             if request["session_id"] != session_id:
                 raise ValueError("Native session guard mismatch")
             op, args = request["op"], request["args"]
-            if args.get("expected_revision") and content_fingerprint(current()) != args["expected_revision"]:
+            if args.get("expected_revision") and not aliases.matches(args["expected_revision"],
+                                                                     content_fingerprint(current())):
                 raise ValueError("Native revision changed; inspect before retrying")
             if op == "status":
                 result = summary()
@@ -255,12 +269,14 @@ def engine(root: Path):
                 expected = [p.find("Program").get("DisplayName", "Program") for p in program_nodes(tree)
                             if p.find("Program") is not None]
                 apply(tree)
+                settled = settle_scripts(float(args.get("settle_seconds", SETTLE_SECONDS)))
                 loaded_source = {"path": str(source), "sha256": source_hash, "kind": args["kind"],
                                  "native_revision": content_fingerprint(current())}
                 result = summary()
                 if [p["name"] for p in result["programs"]] != expected:
                     raise RuntimeError("Native load readback differs; inspect session before further editing")
                 result["removed_mcp_launchers"] = removed
+                result["settle"] = settled
             elif op == "save":
                 tree = current()
                 strip_bridges(tree)
@@ -312,10 +328,13 @@ def engine(root: Path):
                 audio = plugin(sorted(events, key=lambda e: e[1]), duration=args["seconds"],
                                sample_rate=args["sample_rate"], num_channels=2, buffer_size=buffer_size)
                 sf.write(args["path"], audio.T, args["sample_rate"], subtype="FLOAT")
+                after = content_fingerprint(current())
+                changed = aliases.rendered(render_revision, after)
                 result = {"path": args["path"], "frames": audio.shape[1], "peak": float(np.abs(audio).max()),
                           "midi_events": len(events), "buffer_size": buffer_size,
                           "midi_sha256": args.get("midi_sha256") if args.get("midi_path") else None,
-                          "revision": render_revision, "revision_number": revision_number,
+                          "revision": render_revision, "revision_after": after,
+                          "state_changed_by_render": changed, "revision_number": revision_number,
                           "scope": "Direct plugin render; no driver, loopback or other applications"}
                 write_bytes(root / "session.uvim", state_xml(plugin.raw_state))
             elif op == "edit":

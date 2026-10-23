@@ -1,6 +1,9 @@
 [
   {
     "facet": "Brightness",
+    "banks": [
+      "synth"
+    ],
     "items": [
       {
         "label": "Bright and sharp",
@@ -18,6 +21,9 @@
   },
   {
     "facet": "Attack and sustain",
+    "banks": [
+      "synth"
+    ],
     "items": [
       {
         "label": "Short pluck",
@@ -39,6 +45,9 @@
   },
   {
     "facet": "Texture",
+    "banks": [
+      "synth"
+    ],
     "items": [
       {
         "label": "Clean and smooth",
@@ -68,6 +77,9 @@
   },
   {
     "facet": "Movement",
+    "banks": [
+      "synth"
+    ],
     "items": [
       {
         "label": "Stable",
@@ -89,6 +101,10 @@
   },
   {
     "facet": "Space",
+    "banks": [
+      "synth",
+      "keys"
+    ],
     "items": [
       {
         "label": "Dry and close",
@@ -105,6 +121,174 @@
       {
         "label": "Wide chorus",
         "text": "A wide lush layered synthesizer with detuned chorus and stereo movement."
+      }
+    ]
+  },
+  {
+    "facet": "Keyboard instrument",
+    "banks": [
+      "keys"
+    ],
+    "items": [
+      {
+        "label": "Concert grand piano",
+        "text": "A concert grand piano with a full, resonant, powerful tone and a long singing sustain."
+      },
+      {
+        "label": "Upright piano",
+        "text": "An upright piano with a boxy, close and slightly thin tone."
+      },
+      {
+        "label": "Felt piano",
+        "text": "A soft felt piano with muffled hammers, a dark intimate tone and audible mechanical noise."
+      },
+      {
+        "label": "Honky-tonk piano",
+        "text": "A detuned honky-tonk upright piano with a jangly, out of tune chorus."
+      },
+      {
+        "label": "Rhodes electric piano",
+        "text": "A Rhodes electric piano with a bell-like metallic tine attack and a warm round sustain."
+      },
+      {
+        "label": "Wurlitzer electric piano",
+        "text": "A Wurlitzer electric piano with a reedy, nasal tone that barks and growls when played hard."
+      },
+      {
+        "label": "Celesta or toy piano",
+        "text": "A celesta or toy piano with a glassy, tinkling, bell-like tone."
+      }
+    ]
+  },
+  {
+    "facet": "Piano tone",
+    "banks": [
+      "keys"
+    ],
+    "items": [
+      {
+        "label": "Dark and muffled",
+        "text": "A dark, muffled piano tone with the high frequencies damped, like felt between hammer and string."
+      },
+      {
+        "label": "Warm and mellow",
+        "text": "A warm, mellow and rounded piano tone."
+      },
+      {
+        "label": "Bright and present",
+        "text": "A bright, present piano tone with a clear, crisp top end."
+      },
+      {
+        "label": "Glassy and hard",
+        "text": "A glassy, brittle and hard-edged piano tone."
+      }
+    ]
+  },
+  {
+    "facet": "Hammer and attack",
+    "banks": [
+      "keys"
+    ],
+    "items": [
+      {
+        "label": "Soft felt hammer",
+        "text": "A piano note with a soft, padded felt hammer attack and no sharp transient."
+      },
+      {
+        "label": "Hard hammer strike",
+        "text": "A piano note with a hard hammer strike and a sharp percussive transient."
+      },
+      {
+        "label": "Metallic tine ping",
+        "text": "An electric piano note with a metallic tine ping at the start of each note."
+      },
+      {
+        "label": "Reed bark",
+        "text": "An electric piano with an overdriven, barking reed attack that growls on loud notes."
+      }
+    ]
+  },
+  {
+    "facet": "Mechanics and noise",
+    "banks": [
+      "keys"
+    ],
+    "items": [
+      {
+        "label": "Clean, no mechanics",
+        "text": "A clean piano recording with no audible key, pedal or damper noise."
+      },
+      {
+        "label": "Audible mechanics",
+        "text": "A piano with clearly audible mechanical noise: key clicks, hammer thumps, damper and pedal sounds."
+      },
+      {
+        "label": "Hiss and room noise",
+        "text": "A piano recording with audible background hiss and room noise."
+      }
+    ]
+  },
+  {
+    "facet": "Perspective",
+    "banks": [
+      "keys"
+    ],
+    "items": [
+      {
+        "label": "Intimate and close",
+        "text": "An intimate, close-miked piano recorded right next to the hammers, quiet and personal."
+      },
+      {
+        "label": "Concert hall",
+        "text": "A piano heard from a distance in a large concert hall with natural reverb."
+      },
+      {
+        "label": "Lo-fi and worn",
+        "text": "A lo-fi piano with tape wobble, saturation and a narrow, worn character."
+      }
+    ]
+  },
+  {
+    "facet": "Sustain and pedal",
+    "banks": [
+      "keys"
+    ],
+    "items": [
+      {
+        "label": "Long ringing sustain",
+        "text": "A piano note that rings out with a long, slowly decaying sustain."
+      },
+      {
+        "label": "Short damped notes",
+        "text": "Short, damped piano notes that stop quickly."
+      },
+      {
+        "label": "Pedal wash",
+        "text": "Piano notes blurred together by the sustain pedal with sympathetic string resonance."
+      }
+    ]
+  },
+  {
+    "facet": "Electric piano movement",
+    "banks": [
+      "keys"
+    ],
+    "items": [
+      {
+        "label": "Steady",
+        "text": "A steady electric piano without tremolo, chorus or phaser."
+      },
+      {
+        "label": "Tremolo",
+        "text": "An electric piano with tremolo, the volume pulsing rhythmically."
+      },
+      {
+        "label": "Stereo autopan",
+        "text": "An electric piano with stereo autopan tremolo moving between left and right."
+      },
+      {
+        "label": "Chorus or phaser",
+        "text": "An electric piano with a swirling chorus or phaser effect."
       }
     ]
   }
