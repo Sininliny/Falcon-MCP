@@ -4,7 +4,8 @@ Behaviour follows the plugin file name: Crash* exits during load, Hang* never fi
 holds two plugins, Fx* is an effect, Slow* is silent for its first three renders (background loading),
 Bright* has stronger upper partials, Deaf* ignores notes in the first 0.5 s after a reset, Sticky* hangs
 while unloading, Patient* keeps its window open until the close event. State files are JSON
-({"gain": ...}); show_editor sets gain 0.25; program change n sets gain 1/(n+1).
+({"gain": ..., "instrument": ...}); show_editor sets gain 0.25; program change n sets gain 1/(n+1);
+drop_file (FALCON_RACK_TEST_DROP) embeds the file's text in the state and sets gain 0.5.
 """
 
 import json
@@ -34,16 +35,22 @@ class _Plugin:
         self.reported_latency_samples = 0
         self.parameters = {"gain": None}
         self.gain = 1.0
+        self.instrument = None
         self.calls = 0
         self.reset()
 
     @property
     def raw_state(self):
-        return json.dumps({"gain": self.gain}).encode()
+        return json.dumps({"gain": self.gain, "instrument": self.instrument}).encode()
 
     @raw_state.setter
     def raw_state(self, data):
-        self.gain = float(json.loads(data)["gain"])
+        state = json.loads(data)
+        self.gain, self.instrument = float(state["gain"]), state.get("instrument")
+
+    def drop_file(self, path):
+        # Like Kontakt loading a dropped .nki: the sound changes and the state embeds the instrument.
+        self.instrument, self.gain = Path(path).read_text(encoding="utf-8"), 0.5
 
     preset_data = raw_state
 

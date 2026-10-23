@@ -18,7 +18,7 @@ re-implement what pedalboard already does. So the rack is a thin layer over the 
 | Tool | What it does |
 |---|---|
 | `falcon_rack_scan` | Finds `*.vst3` in the standard folders (Windows: `Common Files\VST3`, `%LOCALAPPDATA%\Programs\Common\VST3`), `FALCON_RACK_VST3_PATHS` and `folders`. New or updated plugins are loaded once each to read name, vendor, instrument/effect; cached in `<home>/rack/plugins.json`. |
-| `falcon_rack_state` | Opens the plugin's own window on the desktop. The user sets it up (load Noire in Kontakt) and closes it; the state is saved as `<home>/rack/states/<name>.vstpreset`. |
+| `falcon_rack_state` | Opens the plugin's own window on the desktop. The user sets it up (load Noire in Kontakt) and closes it; the state is saved as `<home>/rack/states/<name>.vstpreset`. With `instrument=<.nki>` no user is needed. |
 | `falcon_rack_render` | Renders one plugin (+ state, + optional exposed parameters) from `midi_path`, `events` or `sweep`. |
 | `falcon_rack_compare` | Renders the reference plugin and the candidate from one timeline, then runs `falcon_midi_compare`. The candidate is the owned Falcon session (`falcon_session_id`) or another rack plugin. |
 | `falcon_rack_presets` | Lists the sounds a plugin can switch to without its window: saved states and its `.vstpreset` files (standard VST3 preset folders, `FALCON_RACK_PRESET_PATHS`, the bundle). |
@@ -33,8 +33,16 @@ client's 60 s call limit. They return `status: "running"` and a `job_id` when no
   plugin's presets from `falcon_rack_presets` (exact name, or a unique part of `folder/name`).
 - `program` (0-127), optional `bank` (CC0/CC32) and `program_channel`: a MIDI program change sent after
   loading, for plugins that select sounds that way.
-- Library players such as Kontakt keep instruments in `.nki` files, which are not VST3 presets: save one state
-  per instrument with `falcon_rack_state` (or export `.vstpreset`s from a DAW) and switch by name.
+- `instrument`: a library file such as a Kontakt `.nki`, loaded without the user (Windows). The worker opens
+  the plugin window, hands the file to the window's own OLE drop target on its UI thread (as if it were
+  dragged there, no mouse), waits `instrument_wait_seconds` (default 30) and closes the window. It fails if
+  the plugin state did not grow, so a file the plugin ignored never renders as the empty plugin. This adds
+  about 40 s per render for Kontakt, so save it once:
+  `falcon_rack_state(plugin="Kontakt 8", name="noire-felt", instrument="...\\Noire Library\\Instruments\\NOIRE Felt.nki")`
+  and then use `state="noire-felt"`. Live test 2026-10-23: the state saved this way rendered bit-identical to
+  Noire loaded by hand. (Kontakt 8 ignores the old `WM_DROPFILES` message, hence the OLE drop.)
+- Otherwise save one state per instrument with `falcon_rack_state` by hand (or export `.vstpreset`s from a
+  DAW) and switch by name.
 
 ## Inputs
 

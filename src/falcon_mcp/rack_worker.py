@@ -165,13 +165,160 @@ def _surface_window(status_path: Path, wait_seconds: float = 180.0) -> dict:
     return status
 
 
+WM_FALCON_DROP = 0x8000 + 0x51  # WM_APP + n: handled by the window procedure installed below
+MIN_INSTRUMENT_GROWTH = 16384  # bytes; empty Kontakt 8 state ~5.5 KB, with NOIRE Felt ~600-800 KB
+
+
+def _drop_target_window(pid: int, deadline: float):
+    """The visible window of this process that registered an OLE drop target (Qt's inside Kontakt 8)."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    user32.GetPropW.restype = ctypes.c_void_p
+    windows: list = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def collect(hwnd, _):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value == pid and user32.IsWindowVisible(hwnd):
+            windows.append(hwnd)
+        return True
+
+    while time.monotonic() < deadline:
+        windows.clear()
+        user32.EnumWindows(collect, 0)
+        for top in windows[:]:  # a copy: collect appends the children (EnumChildWindows is recursive)
+            user32.EnumChildWindows(top, collect, 0)
+        targets = []
+        for hwnd in windows:
+            if user32.GetPropW(hwnd, "OleDropTargetInterface"):
+                name = ctypes.create_unicode_buffer(128)
+                user32.GetClassNameW(hwnd, name, 128)
+                targets.append((not name.value.startswith("Qt"), hwnd))  # prefer the innermost Qt window
+        if targets:
+            time.sleep(3)  # let the plugin finish building its UI before dropping onto it
+            return min(targets)[1]
+        time.sleep(0.5)
+    return None
+
+
+def _drop_file(hwnd, path: Path) -> dict:
+    """Drag `path` onto `hwnd` without the mouse: a shell data object handed to the window's own IDropTarget.
+
+    Runs on the window's UI thread (OLE drop targets are apartment-bound): a window procedure installed on that
+    window performs the drop when it receives WM_FALCON_DROP, sent from the calling thread."""
+    import ctypes
+    from ctypes import wintypes
+
+    import pythoncom
+    from win32com.shell import shell
+
+    user32 = ctypes.windll.user32
+    user32.GetPropW.restype = ctypes.c_void_p
+    lresult = ctypes.c_ssize_t
+    wndproc_type = ctypes.WINFUNCTYPE(lresult, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+    user32.CallWindowProcW.argtypes = [ctypes.c_void_p, wintypes.HWND, wintypes.UINT, wintypes.WPARAM,
+                                       wintypes.LPARAM]
+    user32.CallWindowProcW.restype = lresult
+    user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
+    user32.SetWindowLongPtrW.restype = ctypes.c_void_p
+    user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.GetWindowLongPtrW.restype = ctypes.c_void_p
+    user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    user32.SendMessageW.restype = lresult
+    outcome: dict = {}
+
+    def drop():
+        target = pythoncom.ObjectFromAddress(user32.GetPropW(hwnd, "OleDropTargetInterface"),
+                                             pythoncom.IID_IDropTarget)
+        desktop = shell.SHGetDesktopFolder()
+        folder = desktop.BindToObject(desktop.ParseDisplayName(0, None, str(path.parent))[1], None,
+                                      shell.IID_IShellFolder)
+        child = folder.ParseDisplayName(0, None, path.name)[1]
+        data = folder.GetUIObjectOf(0, [child], pythoncom.IID_IDataObject, 0)[1]
+        rect = wintypes.RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        point = ((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2)
+        allowed = 1 | 2 | 4  # DROPEFFECT_COPY | MOVE | LINK
+        outcome["enter_effect"] = target.DragEnter(data, 0, point, allowed)
+        outcome["over_effect"] = target.DragOver(0, point, allowed)
+        outcome["drop_effect"] = target.Drop(data, 0, point, allowed)
+
+    @wndproc_type
+    def procedure(window, message, wparam, lparam):
+        if message == WM_FALCON_DROP:
+            try:
+                drop()
+            except Exception:  # noqa: BLE001 - reported to the caller
+                outcome["error"] = traceback.format_exc(limit=3)
+            return 0
+        return user32.CallWindowProcW(previous, window, message, wparam, lparam)
+
+    # Read the old procedure first: the UI thread may call ours before SetWindowLongPtrW returns.
+    previous = user32.GetWindowLongPtrW(hwnd, -4)  # GWLP_WNDPROC
+    user32.SetWindowLongPtrW(hwnd, -4, ctypes.cast(procedure, ctypes.c_void_p))
+    try:
+        user32.SendMessageW(hwnd, WM_FALCON_DROP, 0, 0)
+    finally:
+        user32.SetWindowLongPtrW(hwnd, -4, previous)
+    return outcome
+
+
+def _load_instrument(plugin, request: dict) -> dict | None:
+    """Load a library file (a Kontakt .nki, or any file the plugin accepts by drag and drop) the way a user
+    drags it onto the plugin window, then close the window. Raises if the plugin state did not grow."""
+    import threading
+
+    instrument = request.get("instrument")
+    if not instrument:
+        return None
+    if os.environ.get("FALCON_RACK_TEST_DROP"):  # tests: the fake pedalboard takes the file directly
+        before = len(plugin.raw_state)
+        plugin.drop_file(instrument)
+        return {"file": instrument, "state_bytes": [before, len(plugin.raw_state)], "test_drop": True}
+    if os.name != "nt":
+        raise RuntimeError("instrument= (loading a file by drag and drop) is supported on Windows only")
+    path = Path(instrument)
+    before = len(plugin.raw_state)
+    close = threading.Event()
+    info: dict = {"file": str(path)}
+    started = time.monotonic()
+
+    def run():
+        try:
+            hwnd = _drop_target_window(os.getpid(), started + 180)
+            if hwnd is None:
+                info["error"] = "the plugin window (with a drop target) did not appear within 180 s"
+                return
+            info["window_seconds"] = round(time.monotonic() - started, 1)
+            info.update(_drop_file(hwnd, path))
+            time.sleep(request.get("instrument_wait_seconds", 30))  # the plugin loads the file asynchronously
+        finally:
+            close.set()
+
+    threading.Thread(target=run, daemon=True).start()
+    plugin.show_editor(close)
+    info["state_bytes"] = [before, len(plugin.raw_state)]
+    info["seconds"] = round(time.monotonic() - started, 1)
+    if info.get("error") or info["state_bytes"][1] - before < MIN_INSTRUMENT_GROWTH:
+        raise RuntimeError(f"{path.name} did not load into {plugin.name} by drag and drop: {info}")
+    return info
+
+
 def editor(request: dict, result_path: Path):
-    """Show the plugin window; when the user closes it, save the state as .vstpreset (raw state fallback)."""
+    """Show the plugin window; when the user closes it, save the state as .vstpreset (raw state fallback).
+    With request["instrument"] no user is needed: the file is dropped onto the window, which then closes."""
     import threading
 
     plugin = _load(request["bundle"], request.get("plugin_name"))
     _apply_state(plugin, request.get("state"))
     opened = time.time()
+    instrument = _load_instrument(plugin, request)
+    if instrument is not None:
+        _save_state(plugin, request, result_path, opened, closed_by_timeout=False, instrument=instrument)
+        return
     # Close the window ourselves before the parent's timeout, so what the user set up so far is still saved.
     close = threading.Event()
     timer = threading.Timer(request["close_after_seconds"], close.set)
@@ -181,6 +328,10 @@ def editor(request: dict, result_path: Path):
     window.start()
     plugin.show_editor(close)
     timer.cancel()
+    _save_state(plugin, request, result_path, opened, closed_by_timeout=close.is_set())
+
+
+def _save_state(plugin, request: dict, result_path: Path, opened: float, **extra):
     target = Path(request["output"])
     target.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -193,7 +344,7 @@ def editor(request: dict, result_path: Path):
     os.replace(temp, target)
     result_path.write_text(json.dumps({"ok": True, "result": {
         "state_path": str(target), "format": kind, "bytes": len(data),
-        "editor_open_seconds": round(time.time() - opened, 1), "closed_by_timeout": close.is_set(),
+        "editor_open_seconds": round(time.time() - opened, 1), **extra,
         "plugin": _describe(plugin)}}), encoding="utf-8")
     _terminate()  # while the plugin is still referenced, so its destructor never runs
 
@@ -264,6 +415,7 @@ def render(request: dict, result_path: Path):
     loaded = time.monotonic()
     plugin = _load(request["bundle"], request.get("plugin_name"))
     _apply_state(plugin, request.get("state"))
+    instrument = _load_instrument(plugin, request)
     applied = _apply_parameters(plugin, request.get("parameters"))
     program = _select_program(plugin, request)
     load_seconds = time.monotonic() - loaded
@@ -304,7 +456,8 @@ def render(request: dict, result_path: Path):
                         "render_seconds": round(time.monotonic() - started, 2)})
     result_path.write_text(json.dumps({"ok": True, "result": {
         "plugin": _describe(plugin), "load_seconds": round(load_seconds, 2), "settle": settled,
-        "parameters_applied": applied, "program": program, "renders": renders}}, allow_nan=False), encoding="utf-8")
+        "parameters_applied": applied, "program": program, "instrument": instrument, "renders": renders}},
+        allow_nan=False), encoding="utf-8")
     _terminate()  # while the plugin is still referenced, so its destructor never runs
 
 
@@ -331,6 +484,10 @@ def _terminate():
         import ctypes
 
         kernel32 = ctypes.windll.kernel32
+        # Without restype the pseudo-handle (-1) is truncated to a 32-bit int, TerminateProcess fails on 64-bit
+        # Windows and os._exit runs the plugin's DLL unload after all (Kontakt 8 then hangs; live 2026-10-23).
+        kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+        kernel32.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint]
         kernel32.TerminateProcess(kernel32.GetCurrentProcess(), 0)
     os._exit(0)
 
