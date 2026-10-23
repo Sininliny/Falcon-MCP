@@ -21,10 +21,20 @@ re-implement what pedalboard already does. So the rack is a thin layer over the 
 | `falcon_rack_state` | Opens the plugin's own window on the desktop. The user sets it up (load Noire in Kontakt) and closes it; the state is saved as `<home>/rack/states/<name>.vstpreset`. |
 | `falcon_rack_render` | Renders one plugin (+ state, + optional exposed parameters) from `midi_path`, `events` or `sweep`. |
 | `falcon_rack_compare` | Renders the reference plugin and the candidate from one timeline, then runs `falcon_midi_compare`. The candidate is the owned Falcon session (`falcon_session_id`) or another rack plugin. |
+| `falcon_rack_presets` | Lists the sounds a plugin can switch to without its window: saved states and its `.vstpreset` files (standard VST3 preset folders, `FALCON_RACK_PRESET_PATHS`, the bundle). |
 | `falcon_rack_job` | Waits for or collects any rack job (scan, state, render, compare). |
 
 All four long operations run as background jobs, because a library load plus a render can exceed the
 client's 60 s call limit. They return `status: "running"` and a `job_id` when not finished in `wait_seconds`.
+
+## Switching sounds inside a plugin
+
+- `state` takes a `.vstpreset`/`.state` path, a name saved by `falcon_rack_state`, or the name of one of the
+  plugin's presets from `falcon_rack_presets` (exact name, or a unique part of `folder/name`).
+- `program` (0-127), optional `bank` (CC0/CC32) and `program_channel`: a MIDI program change sent after
+  loading, for plugins that select sounds that way.
+- Library players such as Kontakt keep instruments in `.nki` files, which are not VST3 presets: save one state
+  per instrument with `falcon_rack_state` (or export `.vstpreset`s from a DAW) and switch by name.
 
 ## Inputs
 
@@ -44,7 +54,9 @@ Each run writes `<audio root>/rack/<run>/timeline.events.json`, `timeline.mid` a
 1. `falcon_rack_scan()` and find the Kontakt row.
 2. `falcon_rack_state(plugin="Kontakt 8", name="noire")`; the user loads Noire and closes the window. If
    nobody closes it within `timeout_minutes`, it is closed automatically and the state is saved anyway
-   (`closed_by_timeout: true`). A `.vstpreset` exported from a DAW also works: pass its path as `state`.
+   (`closed_by_timeout: true`). On Windows the worker finds its window, moves it on screen if needed and
+   brings it to the front; if no window appears within 20 s (for example a server running as a service in
+   session 0) the call fails at once with the session numbers instead of waiting for nobody. A `.vstpreset` exported from a DAW also works: pass its path as `state`.
 3. `falcon_native_host(action="start")`, load the candidate Multi with `falcon_native_file`.
 4. `falcon_rack_compare(reference={"plugin": "Kontakt 8", "state": "noire"}, falcon_session_id=...,
    sweep={...})` for a per-key, per-velocity view, or `midi_path=...` for a passage.

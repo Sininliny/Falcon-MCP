@@ -4,7 +4,8 @@ Use when the user wants Falcon compared with a third-party VST3 instrument (for 
 on the same MIDI or the same single notes, without rendering in a DAW.
 
 1. `falcon_rack_scan()`; pick the plugin by name. Failed plugins (crash, license dialog) are listed as failed.
-2. Library players need a state that holds the instrument: `falcon_rack_state(plugin, name)` opens the
+2. To switch sounds without a window: `falcon_rack_presets(plugin)` and pass a listed name as `state`, or
+   `program=` for plugins that use MIDI program change. Library players need a state that holds the instrument: `falcon_rack_state(plugin, name)` opens the
    plugin window on the desktop; tell the user to load the instrument and close the window. Or pass a
    `.vstpreset` path exported from a DAW as `state`.
 3. Start the owned Falcon session and load the candidate (`falcon_native_host`, `falcon_native_file`).

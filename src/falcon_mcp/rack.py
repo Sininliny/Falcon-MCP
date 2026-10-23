@@ -320,3 +320,74 @@ def state_info(path: Path | None) -> dict | None:
     data = Path(path).read_bytes()
     return {"path": str(path), "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data),
             "format": "vstpreset" if Path(path).suffix.lower() == ".vstpreset" else "raw_state"}
+
+
+# --------------------------------------------------------------------------- presets
+
+MAX_PRESETS = 5000
+
+
+def preset_roots() -> list[Path]:
+    """Standard VST3 preset folders (VST3 SDK locations): user Documents, then all users."""
+    extra = [Path(p) for p in os.environ.get("FALCON_RACK_PRESET_PATHS", "").split(os.pathsep) if p.strip()]
+    if sys.platform == "win32":
+        from .native_worker import documents_dir
+
+        found = [documents_dir() / "VST3 Presets",
+                 Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "VST3 Presets"]
+    elif sys.platform == "darwin":
+        found = [Path.home() / "Library/Audio/Presets", Path("/Library/Audio/Presets")]
+    else:
+        found = [Path.home() / ".vst3/presets", Path("/usr/share/vst3/presets")]
+    return extra + found
+
+
+def _names(bundle: Path, row: dict) -> set[str]:
+    return {n.lower() for n in (row.get("name"), row.get("descriptive_name"), Path(bundle).stem) if n}
+
+
+def find_presets(bundle: Path, row: dict, state_root: Path, roots: list[Path] | None = None) -> list[dict]:
+    """Presets that belong to one plugin: states saved by falcon_rack_state, then .vstpreset files in
+    <root>/<Vendor>/<Plugin>/ under the standard preset folders and in the bundle's Resources/Presets."""
+    names = _names(bundle, row)
+    out: list[dict] = []
+    if state_root.is_dir():
+        for path in sorted(state_root.iterdir()):
+            if path.suffix.lower() in STATE_SUFFIXES:
+                out.append({"name": path.stem, "path": str(path), "source": "saved_state"})
+    folders = []
+    for root in roots if roots is not None else preset_roots():
+        try:
+            vendors = [v for v in root.iterdir() if v.is_dir()]
+        except OSError:
+            continue
+        for vendor in vendors:
+            try:
+                folders += [p for p in vendor.iterdir() if p.is_dir() and p.name.lower() in names]
+            except OSError:
+                continue
+    folders.append(Path(bundle) / "Contents" / "Resources" / "Presets")
+    for folder in folders:
+        if not folder.is_dir():
+            continue
+        for path in sorted(folder.rglob("*.vstpreset")):
+            out.append({"name": path.stem, "path": str(path), "source": "vst3_presets",
+                        "folder": str(path.parent.relative_to(folder)) if path.parent != folder else ""})
+            if len(out) >= MAX_PRESETS:
+                return out
+    return out
+
+
+def match_preset(presets: list[dict], query: str) -> dict:
+    """Exact name (case-insensitive) first, then a unique substring of name or folder/name."""
+    needle = query.lower().strip()
+    exact = [p for p in presets if p["name"].lower() == needle]
+    if exact:
+        return exact[0]
+    partial = [p for p in presets if needle in f"{p.get('folder', '')}/{p['name']}".lower()]
+    if len(partial) == 1:
+        return partial[0]
+    if not partial:
+        raise RackError(f"No preset or saved state matches {query!r}; list them with falcon_rack_presets")
+    raise RackError(f"{query!r} matches {len(partial)} presets, e.g. {[p['name'] for p in partial[:10]]}; "
+                    "use the exact name")

@@ -53,6 +53,8 @@ declare("falcon_rack_compare", "rack_plugin_host", ["offline_render", "plugin_se
         ["third_party_state", "realtime_cpu", "perceptual_quality"],
         note="A Falcon side named by falcon_session_id is rendered by the owned VST3 session (falcon_native_host).")
 declare("falcon_rack_job", "rack_plugin_host")
+declare("falcon_rack_presets", "rack_plugin_host", ["file_hash"], ["third_party_state"],
+        note="Lists preset files on disk; does not load the plugin.")
 
 
 class PluginSpec(BaseModel):
@@ -61,8 +63,13 @@ class PluginSpec(BaseModel):
     plugin_name: Annotated[str, Field(max_length=128)] | None = Field(
         default=None, description="Plugin inside a shell bundle that holds several")
     state: Path_ | None = Field(default=None, description=(
-        "A .vstpreset/.state path, or a name saved by falcon_rack_state (needed for library players: the "
-        "state is what makes Kontakt play Noire)"))
+        "Which sound to load: a .vstpreset/.state path, a name saved by falcon_rack_state, or the name of one "
+        "of the plugin's own presets from falcon_rack_presets. Library players need it (it makes Kontakt "
+        "play Noire)."))
+    program: Byte | None = Field(default=None, description="MIDI program change sent after loading (0-127)")
+    bank: Annotated[int, Field(ge=0, le=16383)] | None = Field(
+        default=None, description="Bank select (CC0/CC32) sent before the program change")
+    program_channel: Annotated[int, Field(ge=1, le=16)] = 1
     parameters: dict[str, float | bool | str] | None = Field(
         default=None, description="Exposed plugin parameters to set after the state (pedalboard python names)")
     label: Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,32}$")] | None = None
@@ -130,10 +137,33 @@ class RackRunner:
         except OSError:
             return ""
 
-    async def call(self, op: str, request: dict, run: str, timeout: float) -> dict:
+    async def call(self, op: str, request: dict, run: str, timeout: float, watch=None) -> dict:
+        """Run one worker request. watch=(path, callback): the callback gets the JSON in path once it appears
+        and may raise to stop the worker."""
         process, result_path, log = await self.spawn(op, request, run)
         try:
-            await asyncio.wait_for(process.wait(), timeout)
+            deadline = time.monotonic() + timeout
+            while process.returncode is None:
+                if time.monotonic() > deadline:
+                    raise TimeoutError
+                if watch and watch[0].is_file():
+                    try:
+                        status = json.loads(watch[0].read_text(encoding="utf-8"))
+                    except ValueError:
+                        status = None  # still being written
+                    if status is not None:
+                        callback = watch[1]
+                        watch = None
+                        try:
+                            callback(status)
+                        except Exception:
+                            _kill_tree(process)
+                            await process.wait()
+                            raise
+                try:
+                    await asyncio.wait_for(process.wait(), 0.5)
+                except TimeoutError:
+                    pass
         except TimeoutError:
             _kill_tree(process)
             await process.wait()
@@ -223,7 +253,7 @@ class RackRunner:
             rack.save_cache(self.cache_path, cache)
         return {"failed": failed}
 
-    def state_path(self, state: str | None) -> Path | None:
+    def state_path(self, state: str | None, bundle: Path | None = None, row: dict | None = None) -> Path | None:
         if not state:
             return None
         path = Path(state).expanduser()
@@ -235,6 +265,11 @@ class RackRunner:
             saved = self.state_root / f"{state}{suffix}"
             if saved.is_file():
                 return saved
+        if bundle is not None:
+            try:
+                return Path(rack.match_preset(rack.find_presets(bundle, row or {}, self.state_root), state)["path"])
+            except rack.RackError as exc:
+                raise ValueError(str(exc)) from exc
         raise ValueError(f"No state file {state!r}; pass a path or a name saved by falcon_rack_state "
                          f"(saved: {sorted(p.stem for p in self.state_root.glob('*'))[:20]})")
 
@@ -299,10 +334,11 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
             # Live test 2026-10-23: Falcon.vst3 stalls in the rack (its default Multi starts the MCP launcher).
             raise ValueError("Falcon is not played in the rack: use falcon_native_host and pass its session_id as "
                              "falcon_session_id to falcon_rack_compare")
-        state = runner.state_path(spec.state)
+        state = runner.state_path(spec.state, bundle, row)
         name = row.get("name") or bundle.stem
         return {"bundle": str(bundle), "plugin_name": plugin_name, "state": str(state) if state else None,
-                "parameters": spec.parameters or {}, "name": name,
+                "parameters": spec.parameters or {}, "name": name, "program": spec.program, "bank": spec.bank,
+                "program_channel": spec.program_channel, "row": row,
                 "label": spec.label or re.sub(r"[^A-Za-z0-9_-]+", "-", name).strip("-")[:32] or "plugin",
                 "is_instrument": row.get("is_instrument"), "state_info": rack.state_info(state)}
 
@@ -312,7 +348,8 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         wav = folder / f"{target['label']}.wav"
         request = {"bundle": target["bundle"], "plugin_name": target["plugin_name"], "state": target["state"],
                    "parameters": target["parameters"], "sample_rate": sample_rate, "buffer_size": buffer_size,
-                   "warmup_seconds": warmup, "settle_seconds": settle, "probe": list(rack.first_note(compiled)),
+                   "program": target["program"], "bank": target["bank"],
+                   "program_channel": target["program_channel"], "warmup_seconds": warmup, "settle_seconds": settle, "probe": list(rack.first_note(compiled)),
                    "renders": [{"path": str(wav), "seconds": length, "midi_path": files["midi_path"],
                                 "midi_sha256": files["midi_sha256"]}]}
         # Load + settle + roughly real-time worst case for slow sample libraries.
@@ -332,7 +369,7 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
             warnings.append("The catalog lists this plugin as an effect, not an instrument.")
         audit.event("rack_render", plugin=target["name"], path=out["path"], peak_dbfs=out["peak_dbfs"])
         return {"label": target["label"], "plugin": result["plugin"], "state": target["state_info"],
-                "parameters_applied": result["parameters_applied"], "load_seconds": result["load_seconds"],
+                "program": result.get("program"), "parameters_applied": result["parameters_applied"], "load_seconds": result["load_seconds"],
                 "settle": result["settle"], **out, "warnings": warnings}
 
     async def falcon_render(session_id: str, files: dict, length: float, folder: Path, sample_rate: int,
@@ -441,13 +478,33 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
             raise ValueError(f"State {name!r} exists; pass overwrite=true or choose another name")
         progress = {"stage": "plugin window open on the desktop; waiting for it to be closed"}
 
+        run = uuid.uuid4().hex
+        window_status = runner.root / "runs" / run / "window.json"
+
+        def on_window(status: dict):
+            progress["window"] = status
+            if status.get("window_found") is None:
+                return  # not checked (not Windows, or disabled)
+            if status.get("window_found"):
+                progress["stage"] = (f"window '{status.get('title')}' is open on the desktop; waiting for the user "
+                                     "to set it up and close it")
+                return
+            raise RuntimeError(
+                "The plugin window did not appear on the desktop within 20 s, so nothing was shown to the user "
+                f"(process session {status.get('process_session')}, active console session "
+                f"{status.get('console_session')}; {status.get('note') or 'no visible window'}). Run the MCP "
+                "server inside the logged-in desktop session (Claude Desktop), or export a .vstpreset from a DAW "
+                "and pass its path as state.")
+
         async def work():
             result = await runner.call("editor", {"bundle": target["bundle"], "plugin_name": target["plugin_name"],
                                                   "state": target["state"], "output": str(output),
-                                                  "close_after_seconds": timeout_minutes * 60},
-                                       uuid.uuid4().hex, timeout_minutes * 60 + 180)
+                                                  "close_after_seconds": timeout_minutes * 60,
+                                                  "window_status": str(window_status)},
+                                       run, timeout_minutes * 60 + 180, watch=(window_status, on_window))
             audit.event("rack_state_saved", plugin=target["name"], path=result["state_path"])
-            return {**result, "state": name, "sha256": rack.state_info(Path(result["state_path"]))["sha256"],
+            return {**result, "state": name, "window": progress.get("window"),
+                    "sha256": rack.state_info(Path(result["state_path"]))["sha256"],
                     "next": f"falcon_rack_render(plugin={plugin!r}, state={name!r}, ...)"}
 
         out = await wait_for(start_job("state", work(), progress), wait_seconds)
@@ -462,6 +519,9 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         plugin_name: Annotated[str, Field(max_length=128)] | None = None,
         state: Path_ | None = None,
         parameters: dict[str, float | bool | str] | None = None,
+        program: Byte | None = None,
+        bank: Annotated[int, Field(ge=0, le=16383)] | None = None,
+        program_channel: Annotated[int, Field(ge=1, le=16)] = 1,
         midi_path: Path_ | None = None,
         events: Annotated[list[PerformEvent], Field(max_length=5000)] | None = None,
         sweep: NoteSweep | None = None,
@@ -484,7 +544,8 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         reusable for falcon_native_perform or falcon_midi_compare). Before rendering, a probe note is repeated
         until its level stops changing so background sample loading is finished. Runs as a job.
         """
-        target = resolve(PluginSpec(plugin=plugin, plugin_name=plugin_name, state=state, parameters=parameters))
+        target = resolve(PluginSpec(plugin=plugin, plugin_name=plugin_name, state=state, parameters=parameters,
+                                    program=program, bank=bank, program_channel=program_channel))
         compiled, source, length = _timeline(midi_path, events, sweep, seconds, tail_seconds)
         folder, files = await asyncio.to_thread(prepare, compiled, target["label"])
         progress = {"stage": "loading plugin"}
@@ -574,6 +635,33 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
                     "renders": renders, "compared": True, "comparison": report, "limitations": LIMITATIONS}
 
         return await wait_for(start_job("compare", work(), progress), wait_seconds)
+
+    @mcp.tool(annotations=READ)
+    async def falcon_rack_presets(
+        plugin: Path_,
+        plugin_name: Annotated[str, Field(max_length=128)] | None = None,
+        query: Annotated[str, Field(max_length=128)] | None = None,
+        limit: Annotated[int, Field(ge=1, le=500)] = 100,
+    ) -> dict[str, Any]:
+        """List the sounds a rack plugin can switch to without opening its window: states saved by
+        falcon_rack_state and the plugin's .vstpreset files in the standard VST3 preset folders
+        (Documents\\VST3 Presets\\<Vendor>\\<Plugin>, ProgramData\\VST3 Presets, FALCON_RACK_PRESET_PATHS) and
+        in its bundle. Pass a listed name as state= to falcon_rack_render / falcon_rack_compare to switch.
+        Plugins that select sounds by MIDI program change take program= (and bank=) instead.
+        """
+        cache = rack.load_cache(runner.cache_path)
+        try:
+            bundle, _name, row = rack.resolve_plugin(cache, plugin, plugin_name)
+        except rack.RackError as exc:
+            raise ValueError(str(exc)) from exc
+        presets = await asyncio.to_thread(rack.find_presets, bundle, row, runner.state_root)
+        if query:
+            needle = query.lower()
+            presets = [p for p in presets if needle in f"{p.get('folder', '')}/{p['name']}".lower()]
+        return {"plugin": row.get("name") or bundle.stem, "count": len(presets), "presets": presets[:limit],
+                "searched": [str(r) for r in rack.preset_roots()],
+                "note": "Library players (Kontakt) keep their instruments in .nki files, not VST3 presets; save "
+                        "one state per instrument with falcon_rack_state, or export .vstpresets from a DAW."}
 
     @mcp.tool(annotations=READ)
     async def falcon_rack_job(job_id: JobId, wait_seconds: Wait = DEFAULT_WAIT_SECONDS) -> dict[str, Any]:

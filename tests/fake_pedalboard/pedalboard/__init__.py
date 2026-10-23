@@ -4,7 +4,7 @@ Behaviour follows the plugin file name: Crash* exits during load, Hang* never fi
 holds two plugins, Fx* is an effect, Slow* is silent for its first three renders (background loading),
 Bright* has stronger upper partials, Deaf* ignores notes in the first 0.5 s after a reset, Sticky* hangs
 while unloading, Patient* keeps its window open until the close event. State files are JSON
-({"gain": ...}); show_editor sets gain 0.25.
+({"gain": ...}); show_editor sets gain 0.25; program change n sets gain 1/(n+1).
 """
 
 import json
@@ -69,7 +69,12 @@ class _Plugin:
         n = round(duration * sample_rate)
         for data, at in sorted(messages, key=lambda m: m[1]):
             status, note, velocity = data[0] & 0xF0, data[1], data[2] if len(data) > 2 else 0
+            if status == 0xB0:
+                continue
             at = self.position + round(at * sample_rate)
+            if status == 0xC0:
+                self.gain = 1.0 / (note + 1)  # program change: data byte 1 is the program
+                continue
             if status == 0x90 and velocity > 0:
                 if self.base.startswith("Deaf") and at < 0.5 * sample_rate:
                     continue
