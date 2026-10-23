@@ -113,6 +113,12 @@ class StatePatch:
                 if readback != item["original"] and not _same_number(readback, item["original"]):
                     errors.append(f"{label} reads back {readback}, expected {item['original']}")
             except Exception as exc:  # noqa: BLE001 - keep restoring the rest, report every failure.
+                if "revision changed" in str(exc) and not item.get("retried"):
+                    # A script rewrote state after the render: rebase on the current revision and retry once.
+                    status = await self.host.request(self.session_id, "status", {})
+                    self.revision = status["revision"]
+                    self.applied.append({**item, "retried": True})
+                    continue
                 errors.append(f"{label}={item['original']}: {exc}")
         return {"restored": not errors, "errors": errors, "revision": self.revision,
                 "overridden_during_render": overridden}
