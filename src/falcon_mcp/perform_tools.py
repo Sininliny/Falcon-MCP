@@ -97,6 +97,18 @@ class PolyPressureEvent(_Ramp):
     to: Byte | None = None
 
 
+ControllerEvent = Annotated[CCEvent | SustainEvent | BendEvent | PressureEvent | PolyPressureEvent,
+                            Field(discriminator="type")]
+class TouchCurve(BaseModel):
+    """The touch_curve block returned by falcon_performance_profile."""
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
+    in_low: Annotated[float, Field(ge=1, le=127)]
+    in_high: Annotated[float, Field(ge=1, le=127)]
+    gamma: Annotated[float, Field(ge=0.25, le=4)]
+    out_low: Annotated[int, Field(ge=1, le=127)]
+    out_high: Annotated[int, Field(ge=1, le=127)]
+
+
 PerformEvent = Annotated[NoteEvent | CCEvent | SustainEvent | BendEvent | PressureEvent | PolyPressureEvent,
                          Field(discriminator="type")]
 
@@ -119,6 +131,19 @@ def _timeline(phrase_name, events, root, velocity, channel, channels, voices, se
     return events_out, sections, round(max(1.0, length), 3), meta
 
 
+def _recorded(config, path, start, length, curve, tail_seconds):
+    """Events from a captured/.mid performance, cut to a renderable window and optionally re-velocitied."""
+    from .midi_capture import apply_touch, load_performance, performance_path, window
+
+    events, info = load_performance(performance_path(config.audio_root, path))
+    events, seconds = window(events, start, length, tail_seconds)
+    if curve is not None:
+        events = apply_touch(events, curve.model_dump())
+    meta = {"name": "recorded", "source": str(path), "window_start_seconds": start,
+            "touch_curve": curve.model_dump() if curve else None, "unclosed_notes": info.get("unclosed_notes")}
+    return events, None, seconds, meta
+
+
 def _trim(check_list):
     return [c for c in check_list if c["status"] != "ok"] or [{"status": "ok", "detail": "all checks passed"}]
 
@@ -136,26 +161,36 @@ def _declare_scopes():
     declare("falcon_perform_phrases", "offline_reference")
 
 
+async def render_timeline(host, config, session_id, events, seconds, sample_rate, buffer_size, reset_controllers,
+                          ramp_rate_hz, expected_revision, tag):
+    """Compile an event timeline, render it on the owned worker and read the WAV back.
+
+    Shared by falcon_native_perform, falcon_native_render (when controller events are given) and capture replay.
+    """
+    compiled = compile_events(events, reset_controllers, ramp_rate_hz)
+    config.audio_root.mkdir(parents=True, exist_ok=True)
+    stem = f"perform-{tag}-{uuid.uuid4().hex}"
+    wav = config.audio_path(f"{stem}.wav", must_exist=False)
+    files = await asyncio.to_thread(write_timeline, compiled, wav.with_suffix(".events.json"),
+                                    wav.with_suffix(".mid"))
+    result = await host.request(session_id, "render", {
+        "path": str(wav), "seconds": seconds, "sample_rate": sample_rate, "notes": [],
+        "midi_path": files["midi_path"], "midi_sha256": files["midi_sha256"], "buffer_size": buffer_size,
+        "expected_revision": expected_revision})
+    if result.get("midi_sha256") != files["midi_sha256"]:
+        raise RuntimeError("The native worker did not confirm the event timeline (midi_sha256 missing); it "
+                           "predates performance rendering. Restart falcon_native_host after updating.")
+    audio, rate = await asyncio.to_thread(read_audio, wav, MAX_SECONDS + 1)
+    return compiled, files, result, audio, rate, wav
+
+
 def register_perform(mcp, config, audit, host):
     _declare_scopes()
 
     async def render(session_id, events, seconds, sample_rate, buffer_size, reset_controllers, ramp_rate_hz,
                      expected_revision, tag):
-        compiled = compile_events(events, reset_controllers, ramp_rate_hz)
-        config.audio_root.mkdir(parents=True, exist_ok=True)
-        stem = f"perform-{tag}-{uuid.uuid4().hex}"
-        wav = config.audio_path(f"{stem}.wav", must_exist=False)
-        files = await asyncio.to_thread(write_timeline, compiled, wav.with_suffix(".events.json"),
-                                        wav.with_suffix(".mid"))
-        result = await host.request(session_id, "render", {
-            "path": str(wav), "seconds": seconds, "sample_rate": sample_rate, "notes": [],
-            "midi_path": files["midi_path"], "midi_sha256": files["midi_sha256"], "buffer_size": buffer_size,
-            "expected_revision": expected_revision})
-        if result.get("midi_sha256") != files["midi_sha256"]:
-            raise RuntimeError("The native worker did not confirm the event timeline (midi_sha256 missing); it "
-                               "predates performance rendering. Restart falcon_native_host after updating.")
-        audio, rate = await asyncio.to_thread(read_audio, wav, MAX_SECONDS + 1)
-        return compiled, files, result, audio, rate, wav
+        return await render_timeline(host, config, session_id, events, seconds, sample_rate, buffer_size,
+                                     reset_controllers, ramp_rate_hz, expected_revision, tag)
 
     async def evaluate(events, sections, seconds, meta, compiled, audio, rate, wav, include_table):
         report = await asyncio.to_thread(analyze, audio, rate, events, seconds, meta["name"] if sections else None,
@@ -215,6 +250,10 @@ def register_perform(mcp, config, audit, host):
         ramp_rate_hz: Annotated[float, Field(ge=10, le=1000)] = 100,
         expected_revision: Revision | None = None,
         include_table: bool = False,
+        performance_path: str | None = None,
+        window_start_seconds: Annotated[float, Field(ge=0, le=7200)] = 0.0,
+        window_seconds: Annotated[float, Field(gt=0, le=MAX_SECONDS)] | None = None,
+        touch_curve: TouchCurve | None = None,
     ) -> dict[str, Any]:
         """Render a timestamped performance (notes, sustain pedal, CC, pitch bend, pressure, several channels)
         from the OWNED VST3 session and report performance checks as text.
@@ -226,10 +265,22 @@ def register_perform(mcp, config, audit, host):
         and the measured pitch-bend range. reset_controllers clears pedal/bend (and used CCs) at t=0.
         Also writes a .mid of the exact timeline for replay in the standalone or a DAW. Offline render: not a
         realtime-performance test. Results steer edits; they are not a perceptual verdict.
+        performance_path replays a recorded performance instead (falcon_midi_capture .performance.json, or a .mid
+        under the audio root): window_start_seconds/window_seconds cut a <= 60 s excerpt (controller state at
+        the cut is restated) and touch_curve (from falcon_performance_profile) remaps note velocities.
         """
         try:
-            timeline, sections, length, meta = _timeline(phrase, events, root, velocity, channel, channels,
-                                                          voices, seconds, tail_seconds)
+            if performance_path is not None:
+                if phrase or events:
+                    raise ValueError("Pass only one of phrase, events or performance_path")
+                timeline, sections, length, meta = _recorded(config, performance_path, window_start_seconds,
+                                                             window_seconds, touch_curve, tail_seconds)
+                length = max(length, seconds or 0)
+                if length > MAX_SECONDS:
+                    raise ValueError(f"Timeline needs {length:.1f} s; limit {MAX_SECONDS:.0f} s")
+            else:
+                timeline, sections, length, meta = _timeline(phrase, events, root, velocity, channel, channels,
+                                                              voices, seconds, tail_seconds)
             audit.event("native_perform", session_id=session_id, phrase=meta["name"], seconds=length)
             compiled, files, result, audio, rate, wav = await render(
                 session_id, timeline, length, sample_rate, buffer_size, reset_controllers, ramp_rate_hz,
@@ -291,16 +342,26 @@ def register_perform(mcp, config, audit, host):
         voices: Annotated[int, Field(ge=4, le=128)] = 32,
         offset_seconds: Annotated[float, Field(ge=-10, le=30)] | None = None,
         include_table: bool = False,
+        performance_path: str | None = None,
+        window_start_seconds: Annotated[float, Field(ge=0, le=7200)] = 0.0,
+        window_seconds: Annotated[float, Field(gt=0, le=MAX_SECONDS)] | None = None,
     ) -> dict[str, Any]:
         """Analyze an existing recording of a performance timeline (for example a capture of the standalone
         playing the .mid that falcon_native_perform wrote) with the same checks.
 
         offset_seconds is where timeline t=0 sits in the file; omitted, the first audible onset is aligned to
         the first note-on. Live captures include driver latency and other system audio; say so when reporting.
+        performance_path (with the same window as the render) analyzes against a recorded performance.
         """
         try:
-            timeline, sections, length, meta = _timeline(phrase, events, root, velocity, channel, channels,
-                                                          voices, None, 1.5)
+            if performance_path is not None:
+                if phrase or events:
+                    raise ValueError("Pass only one of phrase, events or performance_path")
+                timeline, sections, length, meta = _recorded(config, performance_path, window_start_seconds,
+                                                             window_seconds, None, 1.5)
+            else:
+                timeline, sections, length, meta = _timeline(phrase, events, root, velocity, channel, channels,
+                                                              voices, None, 1.5)
         except TimelineError as exc:
             raise ValueError(str(exc)) from exc
         target = config.audio_path(path)

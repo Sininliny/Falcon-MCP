@@ -222,6 +222,7 @@ class FalconBridge:
         # The generated script is one self-contained file; no Lua socket/io/os modules.
         source = files("falcon_mcp").joinpath("lua/bridge.lua").read_text(encoding="utf8")
         source += "\n" + files("falcon_mcp").joinpath("lua/extended.lua").read_text(encoding="utf8")
+        source += "\n" + files("falcon_mcp").joinpath("lua/capture.lua").read_text(encoding="utf8")
         extension = root / "extension.lua"
         if extension.exists():
             source += (
