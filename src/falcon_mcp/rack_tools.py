@@ -32,6 +32,7 @@ Wait = Annotated[float, Field(ge=0, le=50)]
 # MCP clients abort a call after ~60 s; plugin loads (Kontakt libraries) and long renders take longer.
 DEFAULT_WAIT_SECONDS = 40.0
 MAX_FINISHED_JOBS = 16
+EXIT_GRACE_SECONDS = 15.0
 STATE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$")
 SCOPE = ("Offline render of a third-party VST3 in a short-lived MCP-owned process (pedalboard, non-realtime); "
          "not the plugin open in a DAW, and the sound depends on the state (instrument/preset) it was given")
@@ -158,28 +159,42 @@ class RackRunner:
             run = uuid.uuid4().hex
             process, result_path, log = await self.spawn("probe", {"bundles": remaining}, run)
             seen, current, since, timed_out = 0, None, time.monotonic(), False
+            reported, activity = 0, time.monotonic()
             lines: list[dict] = []
+            def collect(result_path=result_path, lines=lines):
+                nonlocal seen, current, since, reported, activity
+                try:
+                    text = result_path.read_text(encoding="utf-8")
+                except OSError:
+                    text = ""
+                complete = text.splitlines()[seen:] if text.endswith("\n") else text.splitlines()[seen:-1]
+                for line in complete:
+                    row = json.loads(line)
+                    lines.append(row)
+                    seen += 1
+                    activity = time.monotonic()
+                    if "start" in row:
+                        current, since = row["start"], time.monotonic()
+                        progress.update(stage="probing", current=Path(current).name)
+                    else:
+                        current = None
+                        reported += 1
+                        progress["probed"] = progress.get("probed", 0) + 1
+
             try:
                 while True:
-                    try:
-                        text = result_path.read_text(encoding="utf-8")
-                    except OSError:
-                        text = ""
-                    complete = text.splitlines()[seen:] if text.endswith("\n") else text.splitlines()[seen:-1]
-                    for line in complete:
-                        row = json.loads(line)
-                        lines.append(row)
-                        seen += 1
-                        if "start" in row:
-                            current, since = row["start"], time.monotonic()
-                            progress.update(stage="probing", current=Path(current).name)
-                        else:
-                            current = None
-                            progress["probed"] = progress.get("probed", 0) + 1
+                    collect()
                     if process.returncode is not None:
+                        collect()  # lines written just before the exit
                         break
                     if current and time.monotonic() - since > timeout:
                         timed_out = True
+                        _kill_tree(process)
+                        await process.wait()
+                        break
+                    # Between plugins: a plugin that hangs while unloading stalls the worker after it reported.
+                    idle = time.monotonic() - activity
+                    if not current and (idle > timeout or (reported == len(remaining) and idle > EXIT_GRACE_SECONDS)):
                         _kill_tree(process)
                         await process.wait()
                         break
@@ -195,8 +210,8 @@ class RackRunner:
                 if "done" in row:
                     rack.merge_probe(cache, Path(row["done"]), {k: v for k, v in row.items() if k != "done"})
                     remaining.remove(row["done"])
-            if current or (started and started[-1] in remaining):
-                hung = current or started[-1]
+            if current:
+                hung = current
                 reason = (f"probe timed out after {timeout:.0f} s (license or dialog?)" if timed_out
                           else f"plugin crashed the probe process (exit {process.returncode})")
                 rack.merge_probe(cache, Path(hung), {"error": reason})
@@ -280,6 +295,10 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
             bundle, plugin_name, row = rack.resolve_plugin(cache, spec.plugin, spec.plugin_name)
         except rack.RackError as exc:
             raise ValueError(str(exc)) from exc
+        if bundle.stem.lower().startswith("falcon"):
+            # Live test 2026-10-23: Falcon.vst3 stalls in the rack (its default Multi starts the MCP launcher).
+            raise ValueError("Falcon is not played in the rack: use falcon_native_host and pass its session_id as "
+                             "falcon_session_id to falcon_rack_compare")
         state = runner.state_path(spec.state)
         name = row.get("name") or bundle.stem
         return {"bundle": str(bundle), "plugin_name": plugin_name, "state": str(state) if state else None,
@@ -322,8 +341,8 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
             raise RuntimeError("The owned Falcon session is not available in this server")
         if length > NATIVE_MAX_SECONDS:
             raise ValueError(f"The owned Falcon session renders at most {NATIVE_MAX_SECONDS:.0f} s per call; this "
-                             f"timeline needs {length:.0f} s. Shorten it (time range / sweep), or render Falcon "
-                             "in the rack as candidate=PluginSpec(plugin='Falcon', state=<.vstpreset>).")
+                             f"timeline needs {length:.0f} s. Shorten it (fewer sweep notes, smaller gap_seconds "
+                             "or tail_seconds, or a shorter MIDI excerpt).")
         progress.update(stage="rendering falcon (owned session)")
         wav = folder / "falcon.wav"
         result = await native_host.request(session_id, "render", {
@@ -410,7 +429,9 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         """Open a plugin's own window on this computer so the user can set it up (e.g. load Noire in Kontakt),
         then save its state as <home>/rack/states/<name>.vstpreset when the window is closed.
 
-        Needs someone at the computer: tell the user the window is open and to close it when done. Afterwards
+        Needs someone at the computer: tell the user the window is open and to close it when done. After
+        timeout_minutes the window is closed automatically and whatever was set up is saved anyway
+        (closed_by_timeout=true: check with a render before trusting it). Afterwards
         pass state=<name> to falcon_rack_render / falcon_rack_compare. from_state starts from an earlier state.
         A .vstpreset exported from a DAW works too: pass its path as state directly, no window needed.
         """
@@ -422,8 +443,9 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
 
         async def work():
             result = await runner.call("editor", {"bundle": target["bundle"], "plugin_name": target["plugin_name"],
-                                                  "state": target["state"], "output": str(output)},
-                                       uuid.uuid4().hex, timeout_minutes * 60)
+                                                  "state": target["state"], "output": str(output),
+                                                  "close_after_seconds": timeout_minutes * 60},
+                                       uuid.uuid4().hex, timeout_minutes * 60 + 180)
             audit.event("rack_state_saved", plugin=target["name"], path=result["state_path"])
             return {**result, "state": name, "sha256": rack.state_info(Path(result["state_path"]))["sha256"],
                     "next": f"falcon_rack_render(plugin={plugin!r}, state={name!r}, ...)"}
@@ -521,7 +543,8 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         compiled, source, length = _timeline(midi_path, events, sweep, seconds, tail_seconds)
         if falcon_session_id and length > NATIVE_MAX_SECONDS:
             raise ValueError(f"The owned Falcon session renders at most {NATIVE_MAX_SECONDS:.0f} s; this timeline "
-                             f"needs {length:.0f} s. Use a shorter excerpt or sweep, or a rack candidate.")
+                             f"needs {length:.0f} s (last event + tail_seconds). Lower tail_seconds or the sweep's "
+                             "gap_seconds, use fewer notes/velocities, or a shorter MIDI excerpt.")
         folder, files = await asyncio.to_thread(prepare, compiled, f"{ref['label']}-vs")
         progress = {"stage": "loading reference plugin"}
 

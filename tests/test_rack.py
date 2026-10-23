@@ -103,9 +103,10 @@ def tools(tmp_path, config, monkeypatch):
 
     plugins = tmp_path / "vst3"
     plugins.mkdir()
-    for name in ("Good", "Bright", "Slow", "Shell", "Fx", "Crash", "Hang"):
+    for name in ("Good", "Bright", "Slow", "Shell", "Fx", "Crash", "Hang", "Deaf", "Sticky", "Patient", "Falcon"):
         (plugins / f"{name}.vst3").write_bytes(name.encode())
     monkeypatch.setenv("PYTHONPATH", str(FAKE))
+    monkeypatch.setattr("falcon_mcp.rack_tools.EXIT_GRACE_SECONDS", 1.0)
     monkeypatch.setattr(rack, "default_vst3_dirs", lambda: [plugins])
     mcp = FastMCP("t")
     audit = AuditLog(config.log_root)
@@ -234,3 +235,27 @@ def note(time, duration):
     from falcon_mcp.perform_tools import NoteEvent
 
     return NoteEvent(type="note", time=time, note=60, velocity=100, duration=duration)
+
+
+async def test_live_findings_unload_hang_first_note_editor_timeout_falcon(tools):
+    """Regressions from the 2026-10-23 Yingg run (UADx Ravel, plugins hanging in unload, Falcon.vst3)."""
+    scan = await _finish(tools, await tools["falcon_rack_scan"](probe_timeout_seconds=4, wait_seconds=0))
+    rows = {r.get("name") or Path(r["path"]).stem: r for r in scan["plugins"]}
+    assert "Sticky" in rows and rows["Sticky"].get("status") != "failed"
+    assert "Deaf" in rows and "Patient" in rows
+    # A note at t=0 right after the reset still sounds, and the probe settles.
+    out = await _finish(tools, await tools["falcon_rack_render"](
+        plugin="Deaf", events=[note(0.0, 0.8)], warmup_seconds=0, settle_seconds=5))
+    assert out["status"] == "done" and not out["render"]["silent"]
+    assert out["render"]["settle"]["stable"] and out["render"]["first_sound_seconds"] < 0.01
+    # The worker exits after its result even when the plugin hangs while unloading.
+    sticky = await _finish(tools, await tools["falcon_rack_render"](
+        plugin="Sticky", sweep=rack_sweep(notes=[60]), warmup_seconds=0, settle_seconds=5))
+    assert sticky["status"] == "done", sticky
+    assert not sticky["render"]["silent"]
+    # An editor nobody closes is closed at the time limit and its state is still saved.
+    saved = await _finish(tools, await tools["falcon_rack_state"](plugin="Patient", name="late",
+                                                                  timeout_minutes=0.03))
+    assert saved["status"] == "done" and saved["closed_by_timeout"] is True
+    with pytest.raises(ValueError, match="falcon_session_id"):
+        await tools["falcon_rack_render"](plugin="Falcon", sweep=rack_sweep(notes=[60]))
