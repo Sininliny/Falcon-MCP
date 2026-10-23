@@ -762,8 +762,10 @@ def findings(report: dict) -> list[str]:
 
 def listen(audio: np.ndarray, rate: int, expected_note: float | None = None,
            note_on_seconds: float | None = None, note_off_seconds: float | None = None,
-           include_ascii: bool = True, max_simultaneous_notes: int | None = None) -> dict:
-    """max_simultaneous_notes: known from the MIDI when the caller rendered events; None detects from audio."""
+           include_ascii: bool = True, max_simultaneous_notes: int | None = None, light: bool = False) -> dict:
+    """Full listening report. max_simultaneous_notes: known from the MIDI when the caller rendered events;
+    None detects from audio. light=True skips polyphony, pitch, harmonics, brightness-over-time and click
+    analysis (the slow, single-note parts) for callers that only compare level, envelope, spectrum and stereo."""
     data = audio.astype(np.float64)
     peak = float(np.max(np.abs(data))) if data.size else 0.0
     rms = math.sqrt(float(np.mean(data**2))) if data.size else 0.0
@@ -791,6 +793,11 @@ def listen(audio: np.ndarray, rate: int, expected_note: float | None = None,
     mono = analysis_mono(data)
     end = note_off_seconds if note_off_seconds else (envelope["release"]["start_seconds"] or len(data) / rate)
     region = (envelope["onset_seconds"], max(end, envelope["onset_seconds"] + 0.1))
+    if light:
+        report.update(envelope=envelope, pitch={"available": False, "reason": "skipped (light analysis)"},
+                      spectrum=spectral_bands(data, rate), clicks={"count": 0, "skipped": True},
+                      stereo=stereo_analysis(data, rate))
+        return report
     if max_simultaneous_notes is None:
         polyphony = {**polyphony_analysis(mono, rate, region), "source": "audio"}
     else:
