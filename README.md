@@ -177,7 +177,7 @@ Native extensions run inside Falcon's Lua sandbox. The stable launcher reads tru
 
 ## Audio feedback and diagnostics
 
-CLAP matches audio against English text descriptors; it is not a generative audio-question-answering model or an objective quality score. Compare identical notes, velocities, gains, targets, and capture conditions. Feedback does not infer Falcon parameter values or change patches automatically.
+CLAP matches audio against English text descriptors; it is not a generative audio-question-answering model or an objective quality score. Pick the descriptor bank that fits the instrument: `synth` (default), `keys` (concert grand, upright, felt and honky-tonk piano, Rhodes, Wurlitzer; hammer, mechanics, perspective, pedal, tremolo), `all`, or `custom`. Your own facets can be passed inline as `custom_descriptors` or as a `.json` file `descriptor_file` (under the audio root or assets, layout `[{"facet": ..., "items": [{"label": ..., "text": ...}]}]`). Similar instruments often share top labels, so `falcon_compare_audio` and `falcon_compare_reference` also list the largest per-descriptor score changes. Compare identical notes, velocities, gains, targets, and capture conditions. Feedback does not infer Falcon parameter values or change patches automatically.
 
 The server does not import the model runtime during startup/control. Each non-silent feedback call starts a worker, loads weights, returns results, and exits; timeout/cancellation terminates and reaps it. RAM/VRAM is released; cached weights remain on disk. The default model is Apache-2.0-licensed `laion/clap-htsat-unfused`; inference defaults to offline CPU execution.
 

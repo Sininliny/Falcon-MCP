@@ -6,6 +6,9 @@ Use after the sound basically works and before adding more layers.
    `sustain_pedal` / `pedal_wash` for resonance and clarity under pedal, `dense_chords` for masking,
    `retrigger` for hammer/transient layers. Targets default to every Layer; use `groups` for
    "Body", "Modes", "Noise" sets.
+   If it returns `status: "running"` (long runs exceed the client's request timeout), call
+   `falcon_native_stems_result(job_id)` until `status` is `"done"`; do not edit the session meanwhile.
+   A failed run continues from its saved renders with the same arguments plus `resume_job_id`.
 2. Read `table`, `findings`, then each target's `status`, `roles` and `evidence`.
    - `inaudible`: the layer costs CPU and adds nothing measurable. Raise it, move it in frequency or remove it.
    - `masked`: it has level but the rest covers it (`exposure` by band shows where). Carve the covering layer
