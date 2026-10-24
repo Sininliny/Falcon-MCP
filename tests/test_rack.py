@@ -11,6 +11,20 @@ from falcon_mcp.perform import compile_events, standard_midi_file
 FAKE = Path(__file__).parent / "fake_pedalboard"
 
 
+@pytest.mark.parametrize("before,after,accepted", [
+    (b"empty", b"a" * 20000, True),
+    (b"empty", b"changed UI", False),
+    (b"a" * 30000, b"b" * 30000, True),
+    (b"a" * 30000, b"b" * 20000, True),
+    (b"a" * 30000, b"a" * 30000, False),
+    (b"a" * 30000, b"empty", False),
+], ids=["initial-load", "ui-only", "same-size", "smaller", "unchanged", "emptied"])
+def test_instrument_state_allows_replacement_without_growth(before, after, accepted):
+    from falcon_mcp.rack_worker import _instrument_state_changed
+
+    assert _instrument_state_changed(before, after) is accepted
+
+
 def _cache(tmp_path, bundles):
     cache = rack.load_cache(tmp_path / "missing.json")
     for path, probe in bundles.items():

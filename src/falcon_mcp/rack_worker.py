@@ -169,6 +169,13 @@ WM_FALCON_DROP = 0x8000 + 0x51  # WM_APP + n: handled by the window procedure in
 MIN_INSTRUMENT_GROWTH = 16384  # bytes; empty Kontakt 8 state ~5.5 KB, with NOIRE Felt ~600-800 KB
 
 
+def _instrument_state_changed(before: bytes, after: bytes) -> bool:
+    """Heuristic only: replacing a loaded instrument need not make its state larger."""
+    if len(before) < MIN_INSTRUMENT_GROWTH:
+        return len(after) - len(before) >= MIN_INSTRUMENT_GROWTH
+    return len(after) >= MIN_INSTRUMENT_GROWTH and before != after
+
+
 def _drop_target_window(pid: int, deadline: float):
     """The visible window of this process that registered an OLE drop target (Qt's inside Kontakt 8)."""
     import ctypes
@@ -268,7 +275,7 @@ def _drop_file(hwnd, path: Path) -> dict:
 
 def _load_instrument(plugin, request: dict) -> dict | None:
     """Load a library file (a Kontakt .nki, or any file the plugin accepts by drag and drop) the way a user
-    drags it onto the plugin window, then close the window. Raises if the plugin state did not grow."""
+    drags it onto the plugin window, then close the window. Rejects unchanged or empty-looking state."""
     import threading
 
     instrument = request.get("instrument")
@@ -281,7 +288,7 @@ def _load_instrument(plugin, request: dict) -> dict | None:
     if os.name != "nt":
         raise RuntimeError("instrument= (loading a file by drag and drop) is supported on Windows only")
     path = Path(instrument)
-    before = len(plugin.raw_state)
+    before = bytes(plugin.raw_state)
     close = threading.Event()
     info: dict = {"file": str(path)}
     started = time.monotonic()
@@ -300,9 +307,10 @@ def _load_instrument(plugin, request: dict) -> dict | None:
 
     threading.Thread(target=run, daemon=True).start()
     plugin.show_editor(close)
-    info["state_bytes"] = [before, len(plugin.raw_state)]
+    after = bytes(plugin.raw_state)
+    info["state_bytes"] = [len(before), len(after)]
     info["seconds"] = round(time.monotonic() - started, 1)
-    if info.get("error") or info["state_bytes"][1] - before < MIN_INSTRUMENT_GROWTH:
+    if info.get("error") or not _instrument_state_changed(before, after):
         raise RuntimeError(f"{path.name} did not load into {plugin.name} by drag and drop: {info}")
     return info
 

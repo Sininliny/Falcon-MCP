@@ -488,7 +488,7 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
 
         instrument=<file> needs nobody (Windows): the file (e.g. a Kontakt .nki) is dropped onto the plugin's
         window as if dragged there, the window closes after instrument_wait_seconds, and the state is saved.
-        Fails if the plugin state did not grow (the plugin did not accept the file).
+        Rejects unchanged or empty-looking state. State changes are a heuristic, not proof of instrument identity.
         """
         target = resolve(PluginSpec(plugin=plugin, plugin_name=plugin_name, state=from_state, instrument=instrument,
                                     instrument_wait_seconds=instrument_wait_seconds))

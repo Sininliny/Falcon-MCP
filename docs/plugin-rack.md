@@ -36,7 +36,8 @@ client's 60 s call limit. They return `status: "running"` and a `job_id` when no
 - `instrument`: a library file such as a Kontakt `.nki`, loaded without the user (Windows). The worker opens
   the plugin window, hands the file to the window's own OLE drop target on its UI thread (as if it were
   dragged there, no mouse), waits `instrument_wait_seconds` (default 30) and closes the window. It fails if
-  the plugin state did not grow, so a file the plugin ignored never renders as the empty plugin. This adds
+  the plugin state stays unchanged or looks empty. An initial load must grow the empty state; replacing
+  an existing instrument may shrink it. This heuristic does not prove instrument identity. This adds
   about 40 s per render for Kontakt, so save it once:
   `falcon_rack_state(plugin="Kontakt 8", name="noire-felt", instrument="...\\Noire Library\\Instruments\\NOIRE Felt.nki")`
   and then use `state="noire-felt"`. Live test 2026-10-23: the state saved this way rendered bit-identical to
