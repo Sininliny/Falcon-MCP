@@ -45,10 +45,10 @@ class ProjectInspector:
         before = await self.bridge.request("ping")
         nodes, edges, errors = [], [], []
         visited = {}
-        queue = deque([(root, None, None, 0)])
+        queue = deque([(root, None, None, 0, None)])
         signatures = {}
         while queue:
-            selector, parent, relation, depth = queue.popleft()
+            selector, parent, relation, depth, child_index = queue.popleft()
             if len(nodes) >= max_nodes:
                 errors.append({"kind": "node_limit", "remaining": len(queue) + 1})
                 break
@@ -71,7 +71,8 @@ class ProjectInspector:
                 node = {**info, "depth": depth, "parameters": [], "connections": [], "slices": []}
                 nodes.append(node)
                 if parent:
-                    edges.append({"kind": "contains", "source": parent, "target": path, "relation": relation})
+                    edges.append({"kind": "contains", "source": parent, "target": path,
+                                  "relation": relation, "index": child_index})
                 args = {"selector": selector, "expected_path": path}
                 children = list(first.get("items", []))
                 offset = 0
@@ -84,7 +85,7 @@ class ProjectInspector:
                     children.extend(first.get("items", []))
                 signatures[path] = [(c["path"], c["relation"], c.get("index")) for c in children]
                 for c in children:
-                    queue.append((c["selector"], path, c["relation"], depth + 1))
+                    queue.append((c["selector"], path, c["relation"], depth + 1, c.get("index")))
                 async for parameter in self._pages("parameter_page", args):
                     name = parameter["definition"]["name"]
                     if parameter.get("long_string"):

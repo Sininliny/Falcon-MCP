@@ -19,6 +19,7 @@ from .audit import AuditLog
 from .bridge import FalconBridge
 from .config import Config
 from .diagnostics import create_diagnostics, spectrum
+from .instrument_export import export_instrument
 from .project import ProjectInspector
 
 READ = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
@@ -127,6 +128,33 @@ def register_advanced(
         are reported explicitly. No remote rendering or upload. Use root_path to focus a large project.
         """
         return project.export_uml(report_id, root_path, max_nodes, include_parameters)
+
+    @mcp.tool(annotations={**READ, "readOnlyHint": False, "idempotentHint": False})
+    async def falcon_export_instrument(
+        source_path: Annotated[str, Field(min_length=1, max_length=4096)] | None = None,
+        report_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")] | None = None,
+        root_path: Annotated[str, Field(max_length=4096)] = "",
+        max_nodes: Annotated[int, Field(ge=1, le=50000)] = 10000,
+        diagram_max_nodes: Annotated[int, Field(ge=1, le=1000)] = 150,
+        include_parameters: bool = True,
+    ) -> dict[str, Any]:
+        """Export ONE instrument as offline HTML explorer, ordered JSON/Markdown, UML sources and overview SVG.
+
+        Provide exactly one source: an unprotected .uvip/.uvim XML source_path (no plugin needed), or a
+        report_id from falcon_scan_project. root_path selects an exact Program path/selector when multiple
+        Programs exist. Includes hierarchy, parameter values, modulation and routing; external/unresolved
+        endpoints are retained in JSON/Markdown and the HTML module inspector. The default overview groups
+        Layers/auxs; UML hides data containers and shows composition without drawing every association.
+        Child order is serialized/observed order, not DSP execution order. JSON/Markdown and the explorer
+        keep the whole selected hierarchy; diagram_max_nodes limits only static views/UML sources.
+        Files are written under the managed reports folder. Does not load or modify an instrument.
+        """
+        if (source_path is None) == (report_id is None):
+            raise ValueError("Provide exactly one of source_path or report_id")
+        snapshot = await asyncio.to_thread(project.load, report_id) if report_id is not None else None
+        return await asyncio.to_thread(export_instrument, config, source_path=source_path, snapshot=snapshot,
+                                       root_path=root_path, max_nodes=max_nodes,
+                                       diagram_max_nodes=diagram_max_nodes, include_parameters=include_parameters)
 
     @mcp.tool(annotations=READ)
     async def falcon_diagnose_audio(

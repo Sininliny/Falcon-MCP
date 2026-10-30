@@ -29,6 +29,11 @@ For file operations without desktop automation, install `[host]` and call `falco
 
 For sample-folder migration, read [portable preset resources](skills/falcon-instrument-workflow/references/portable-resources.md). Relative media paths use the containing Program/Multi directory; the native raw-state backend and Falcon browser have different file-context behavior.
 
+For programmer-readable instrument structure, use `falcon_export_instrument` on a `.uvip/.uvim` file
+or a saved project scan. It exports an offline interactive HTML explorer, grouped SVG overview,
+ordered JSON/Markdown and simplified Mermaid/PlantUML. Inspect modulation/routing per module instead
+of overlaying every wire on one diagram. See [instrument structure export](docs/instrument-structure.md).
+
 ### Claude Desktop on Windows
 
 Install the Python environment above first. In Claude Desktop, open **Settings → Developer → Edit Config** and back up the file before editing. The usual path is `%APPDATA%\Claude\claude_desktop_config.json`. Microsoft Store installations may use `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json`; use the file opened by **Edit Config**, rather than assuming the profiles are interchangeable.

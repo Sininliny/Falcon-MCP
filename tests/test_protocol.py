@@ -21,6 +21,7 @@ async def test_real_stdio_initialize_tools_resource_and_validation(config):
             "falcon_record_test",
             "falcon_scan_project",
             "falcon_export_uml",
+            "falcon_export_instrument",
             "falcon_diagnose_audio",
             "falcon_get_logs",
             "falcon_api_coverage",
@@ -47,9 +48,20 @@ async def test_real_stdio_initialize_tools_resource_and_validation(config):
         assert {"falcon_midi_compare", "falcon_midi_compare_result"} <= names
         assert {"falcon_rack_scan", "falcon_rack_state", "falcon_rack_render", "falcon_rack_compare",
                 "falcon_rack_job"} <= names
-        assert len(names) == 98
+        assert len(names) == 99
         assert (config.runtime / "falcon_bridge.lua").is_file()
         assert all(t.outputSchema is not None for t in tools.tools)
+        preset = config.runtime.parent / "export-test.uvip"
+        preset.write_text('<UVI4><Program Name="Keys"><Layers><Layer Name="Layer 1"/></Layers></Program></UVI4>')
+        exported = await client.call_tool("falcon_export_instrument", {"source_path": str(preset)})
+        assert not exported.isError
+        from pathlib import Path
+
+        document = json.loads(Path(exported.structuredContent["files"]["json"]).read_text("utf-8"))
+        assert document["nodes"][0]["name"] == "Keys"
+        assert document["nodes"][-1]["name"] == "Layer 1"
+        invalid_export = await client.call_tool("falcon_export_instrument", {})
+        assert invalid_export.isError
         capture = await client.call_tool("falcon_capture_status", {})
         assert not capture.isError and capture.structuredContent["state"] == "idle"
         invalid_binding = await client.call_tool("falcon_bind_instance", {"instance": ""})

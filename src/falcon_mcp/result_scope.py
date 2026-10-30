@@ -134,6 +134,8 @@ for _name in ["falcon_param_lookup", "falcon_param_search", "falcon_param_value"
               "falcon_timbre_vocabulary", "falcon_design_check", "falcon_query_project", "falcon_export_uml"]:
     declare(_name, "offline_reference")
 declare("falcon_param_calibrate", "managed_files")
+declare("falcon_export_instrument", "managed_files", ["file_hash"], ["audible_effect"],
+        note="One Program exported from preset XML or a saved public scan; no plugin load or audio verification.")
 for _name in ["falcon_listen", "falcon_audio_diff", "falcon_match_target", "falcon_measure_audio",
               "falcon_describe_timbre", "falcon_compare_audio", "falcon_diagnose_audio", "falcon_spectrum",
               "falcon_analyze_reference", "falcon_compare_reference", "falcon_audio_meter", "falcon_design_verify"]:
