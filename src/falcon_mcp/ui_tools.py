@@ -40,6 +40,23 @@ class Watch(BaseModel):
     names: Annotated[list[Name], Field(min_length=1, max_length=16)]
 
 
+class PointerAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Annotated[str, Field(pattern=r"^(click|drag)$")]
+    x: Annotated[int, Field(ge=0, le=8191)]
+    y: Annotated[int, Field(ge=0, le=8191)]
+    end_x: Annotated[int, Field(ge=0, le=8191)] | None = None
+    end_y: Annotated[int, Field(ge=0, le=8191)] | None = None
+
+
+class TraceNote(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    note: Annotated[int, Field(ge=0, le=127)]
+    velocity: Annotated[int, Field(ge=1, le=127)] = 80
+    duration_ms: Annotated[int, Field(ge=1, le=5000)] = 500
+    delay_ms: Annotated[int, Field(ge=0, le=5000)] = 0
+
+
 def _same(a, b) -> bool:
     if isinstance(a, (int, float)) and isinstance(b, (int, float)) and not isinstance(a, bool):
         return math.isclose(a, b, rel_tol=1e-6, abs_tol=1e-9)
@@ -70,16 +87,56 @@ def register_ui_checks(mcp, config, audit, bridge=None, native_host=None):
             raise ValueError("Provide an existing .uvip, .uvim or .lua file")
         report = await asyncio.to_thread(check_preset, source, part=part, canvas_colour=canvas_colour,
                                          simulate_callbacks=simulate, include_layout=include_layout)
+        report["visual_acceptance"] = {"status": "untested", "native_screenshot_checked": False,
+                                       "mouse_interaction_checked": False,
+                                       "reason": "Offline widget definitions do not verify final native layout, clipping or contrast"}
         config.report_root.mkdir(parents=True, exist_ok=True)
         saved = config.report_root / f"{uuid.uuid4().hex}.ui.json"
         await asyncio.to_thread(atomic_json, saved, report)
         out = compact(report)
+        out["visual_acceptance"] = report["visual_acceptance"]
         out["full_report"] = str(saved)
         out["next"] = ("Fix errors first. Then falcon_ui_live_probe(script selector, widget, values, watch=engine "
                        "targets above) in real Falcon, and falcon_native_ui_roundtrip after saving.")
         return out
 
     if bridge is not None:
+        @mcp.tool(annotations=WRITE)
+        async def falcon_runtime_trace(
+            watch: Annotated[list[Watch], Field(min_length=1, max_length=8)] | None = None,
+            program_selector: Selector = "Synth.parts[1].program",
+            seconds: Annotated[float, Field(ge=0.01, le=10)] = 2,
+            interval_ms: Annotated[int, Field(ge=10, le=1000)] = 20,
+            notes: Annotated[list[TraceNote], Field(max_length=32)] | None = None,
+            channel: Annotated[int, Field(ge=1, le=16)] = 1,
+        ) -> dict[str, Any]:
+            """Observe live Falcon parameters over time (e.g. exposed Layer VoiceCount and controller targets).
+
+            Optional finite notes are generated downstream of the bridge, not through upstream library scripts.
+            Without notes, play externally while observing. Exact samples/legato/envelopes require an
+            instrument-side falcon_trace_event hook in the same script environment. Closed official libraries
+            may expose only aggregate VoiceCount; this is NOT proof of individual sample selection.
+            A parameter snapshot may not expose per-voice modulated values. Unsupported targets are explicit.
+            """
+            targets = [{"selector": w.selector, "name": name} for w in watch or [] for name in w.names]
+            if len(targets) > 64:
+                raise ValueError("At most 64 watched parameters")
+            elapsed, finish = 0, 0
+            for note in notes or []:
+                elapsed += note.delay_ms
+                finish = max(finish, elapsed + note.duration_ms)
+            if finish > seconds * 1000:
+                raise ValueError("All generated notes must finish within the trace duration")
+            result = await bridge.request("runtime_trace", {
+                "watch": targets, "program_selector": program_selector,
+                "duration_ms": round(seconds * 1000), "interval_ms": interval_ms,
+                "notes": [n.model_dump() for n in notes or []], "channel": channel,
+            }, mutation=True)
+            config.report_root.mkdir(parents=True, exist_ok=True)
+            saved = config.report_root / f"{uuid.uuid4().hex}.runtime-trace.json"
+            await asyncio.to_thread(atomic_json, saved, result)
+            return {**result, "full_report": str(saved)}
+
         @mcp.tool(annotations=WRITE)
         async def falcon_ui_live_probe(
             script_selector: Selector, widget: Name,
@@ -150,6 +207,26 @@ def register_ui_checks(mcp, config, audit, bridge=None, native_host=None):
             }
 
     if native_host is not None:
+        @mcp.tool(annotations=WRITE)
+        async def falcon_native_ui_accept(
+            session_id: Session,
+            actions: Annotated[list[PointerAction], Field(max_length=8)] | None = None,
+            settle_seconds: Annotated[float, Field(ge=0.1, le=2)] = 1,
+        ) -> dict[str, Any]:
+            """Capture the actual owned Falcon editor on its isolated desktop and optionally click/drag.
+
+            Coordinates are editor-client pixels from the returned screenshot. Uses targeted Windows messages,
+            NOT a physical mouse: plugins may reject these. Never switches the user's desktop or steals focus.
+            Returns screenshots for visual review, state-change evidence and restoration, not an automatic
+            layout/contrast pass. Physical-pointer acceptance needs a separate interactive session/VM.
+            """
+            for action in actions or []:
+                if action.kind == "drag" and (action.end_x is None or action.end_y is None):
+                    raise ValueError("A drag requires end_x and end_y")
+            return await native_host.request(session_id, "ui_accept", {
+                "actions": [a.model_dump() for a in actions or []], "settle_seconds": settle_seconds,
+            }, timeout=65)
+
         @mcp.tool(annotations=WRITE)
         async def falcon_native_ui_roundtrip(
             session_id: Session, part: Annotated[int, Field(ge=1, le=128)] = 1,

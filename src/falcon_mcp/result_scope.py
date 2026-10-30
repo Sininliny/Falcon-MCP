@@ -166,6 +166,12 @@ CODES.update(control_tree="Script UI widget tree, visibility and enabled state."
 declare("falcon_ui_check", "preset_file_analysis", ["control_tree", "mouse_blocking", "label_contrast"],
         ["mouse_interaction", "ui_display", "open_instance", "owned_instance"])
 declare("falcon_ui_live_probe", "open_instance", ["engine_readback"], ["mouse_interaction", "ui_display"])
+declare("falcon_runtime_trace", "open_instance", ["engine_readback"],
+        ["audible_effect", "mouse_interaction"],
+        note="Live parameter snapshots and instrument-reported decisions only; missing private voice state is not inferred.")
+declare("falcon_native_ui_accept", "owned_vst3_host", [],
+        ["mouse_interaction", "ui_display", "open_instance"],
+        note="Inspect the payload: native capture and queued mouse messages may be unsupported. Physical mouse and visual correctness are not certified.")
 declare("falcon_native_ui_roundtrip", "owned_vst3_host", ["native_readback", "save_reload"],
         ["mouse_interaction", "ui_display", "open_instance"])
 declare("falcon_native_stems", "owned_vst3_host", ["offline_render", "dsp_measured", "native_readback"],

@@ -469,3 +469,61 @@ def test_readonly_midi_query_needs_no_mutation_session():
         )
     )
     assert result.total_count == 0
+
+
+def test_runtime_trace_preserves_false_and_reports_unsupported_instead_of_guessing():
+    lua, d = dispatcher()
+    lua.execute("function wait(ms) end")
+    result = request(lua, d, "runtime_trace", {
+        "duration_ms": 20, "interval_ms": 10,
+        "watch": [{"selector": "Program", "name": "Bypass"},
+                  {"selector": "Program", "name": "VoiceCount"}],
+    })
+    assert len(result.samples) == 3
+    assert result.samples[1]["values"][1].value is False
+    assert result.unsupported[1].name == "VoiceCount"
+    assert len(result.events) == 0
+    assert "unobserved" in result.actual_sample_selection
+
+
+def test_runtime_trace_collects_only_explicit_instrument_reports_and_bounds_memory():
+    lua, d = dispatcher()
+    lua.execute("""
+      function wait(ms)
+        for i=1,1100 do
+          falcon_trace_event({note=60, sample='sample.wav', legato_triggered=false,
+                             envelope_restarted=true, reason='fresh voice', ignored='not copied'})
+        end
+      end
+    """)
+    result = request(lua, d, "runtime_trace", {"duration_ms": 10, "interval_ms": 10})
+    assert len(result.events) == 1024
+    assert result.dropped_events == 76
+    assert result.events[1].provenance == "instrument_reported"
+    assert result.events[1].legato_triggered is False
+    assert result.events[1].envelope_restarted is True
+    assert result.events[1].ignored is None
+    lua.globals().falcon_trace_event(table(lua, {"sample": "outside capture"}))
+    assert len(result.events) == 1024
+
+
+def test_runtime_trace_rejects_unbounded_observation():
+    lua, d = dispatcher()
+    with pytest.raises(LuaError, match="duration out of range"):
+        request(lua, d, "runtime_trace", {"duration_ms": 10001})
+
+
+def test_runtime_trace_discovers_engine_layer_activity_without_inventing_sample_identity():
+    lua, d = dispatcher()
+    lua.execute("""
+      Program.layers={{name='Layer 0',displayName='Felt',
+        hasParameter=function(self,name) return name=='VoiceCount' end,
+        getParameter=function(self,name) return 2 end}}
+    """)
+    result = request(lua, d, "runtime_trace", {"duration_ms": 0})
+    layer = result.samples[1].active_layers[1]
+    assert layer.display_name == "Felt"
+    assert layer.voice_count == 2
+    assert layer.provenance == "engine_parameter"
+    assert layer.sample is None
+    assert "unobserved" in result.actual_sample_selection

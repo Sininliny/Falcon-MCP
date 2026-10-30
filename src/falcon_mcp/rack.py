@@ -144,6 +144,17 @@ def forget_missing(cache: dict, bundles: list[Path]) -> list[str]:
     return gone
 
 
+def select_probe_bundles(cache: dict, bundles: list[Path], query: str | None) -> list[Path]:
+    """Filter BEFORE loading DLLs; shell plugin names can only match metadata already in the cache."""
+    needle = (query or "").strip().casefold()
+    if not needle:
+        return bundles
+    return [b for b in bundles if needle in str(b).casefold() or any(
+        needle in str(p.get(k, "")).casefold()
+        for p in cache["bundles"].get(str(b), {}).get("plugins", [])
+        for k in ("name", "descriptive_name", "manufacturer_name"))]
+
+
 def plugin_rows(cache: dict, include_effects: bool = False, query: str | None = None) -> list[dict]:
     """One row per plugin (a shell bundle can hold several), instruments first, filtered by query."""
     rows = []
@@ -152,7 +163,10 @@ def plugin_rows(cache: dict, include_effects: bool = False, query: str | None = 
         if entry.get("error"):
             if needle and needle not in Path(path).name.lower():
                 continue
-            rows.append({"path": path, "status": "failed", "error": entry["error"]})
+            rows.append({"path": path, "status": "failed", "error": entry["error"],
+                         "probe_state": entry.get("probe_state", "error"), "availability": "unknown",
+                         "last_load": entry.get("last_load"),
+                         "next": "Probe failure does not prove unavailability; retry with a longer timeout or render the exact path."})
             continue
         plugins = entry.get("plugins") or []
         for plugin in plugins:
@@ -165,6 +179,7 @@ def plugin_rows(cache: dict, include_effects: bool = False, query: str | None = 
             row = {"name": plugin.get("name"), "vendor": plugin.get("manufacturer_name"),
                    "kind": "instrument" if plugin.get("is_instrument") else "effect",
                    "category": plugin.get("category"), "version": plugin.get("version"), "path": path}
+            row["probe_state"] = entry.get("probe_state", "loaded")
             if len(plugins) > 1:
                 row["plugin_name"] = plugin.get("name")
             rows.append(row)
@@ -186,6 +201,8 @@ def resolve_plugin(cache: dict, plugin: str, plugin_name: str | None = None) -> 
     needle = plugin.lower().strip()
     exact, partial = [], []
     for path, entry in cache["bundles"].items():
+        if not entry.get("plugins") and entry.get("error") and needle in Path(path).stem.lower():
+            partial.append((Path(path), {"name": Path(path).stem, "probe_state": entry.get("probe_state", "error")}))
         for row in entry.get("plugins") or []:
             names = [str(row.get(k) or "").lower() for k in ("name", "descriptive_name")] + [Path(path).stem.lower()]
             if plugin_name and row.get("name") != plugin_name:

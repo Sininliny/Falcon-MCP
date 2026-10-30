@@ -9,6 +9,26 @@ local pending = nil
 local playing = false
 local sequenceGeneration = 0
 local sequenceError = ""
+local runtimeTrace = nil
+
+-- Optional instrument/extension hook. Call at the actual routing/legato/envelope decision,
+-- not in an upstream MIDI observer. Closed library scripts do not expose these decisions.
+function falcon_trace_event(event)
+    if not runtimeTrace or type(event) ~= "table" then return end
+    if #runtimeTrace.events >= 1024 then runtimeTrace.dropped=runtimeTrace.dropped+1;return end
+    local row={provenance="instrument_reported"}
+    local ok,t=pcall(getTime)
+    if ok then row.engine_time_ms=t end
+    for _,key in ipairs({"event_id","note","channel","layer","keygroup","sample",
+                         "legato_triggered","legato_reason","envelope_restarted","envelope",
+                         "parameter","value","reason"}) do
+        local value=event[key]
+        if type(value)=="boolean" or (type(value)=="number" and value==value and math.abs(value)<1e100) then
+            row[key]=value
+        elseif type(value)=="string" then row[key]=string.sub(value,1,512) end
+    end
+    runtimeTrace.events[#runtimeTrace.events+1]=row
+end
 -- Assigned from the first authenticated request's random host UUID. Lua table
 -- addresses and getTime can both repeat after a script reload.
 local bridgeInstance=nil
@@ -19,7 +39,7 @@ local collections = {parts=true, layers=true, keygroups=true, oscillators=true,
     inserts=true, auxs=true, sends=true, mods=true, eventProcessors=true, children=true}
 local mutations = {set_parameters=true, edit_effect=true, load_sample=true,
     playback=true, purge=true, route=true, midi=true, play=true, panic=true,
-    set_connection=true}
+    set_connection=true, runtime_trace=true}
 
 local function check(condition, message)
     if not condition then error(message) end
@@ -427,6 +447,67 @@ function handlers.midi(a)
     elseif a.kind == "program_change" then programChange(a.value,a.channel or 1)
     else error("Unsupported MIDI message") end
     return {sent=true}
+end
+
+function handlers.runtime_trace(a)
+    local duration=a.duration_ms or 1000
+    local interval=a.interval_ms or 20
+    check(type(duration)=="number" and duration>=0 and duration<=10000,"Trace duration out of range")
+    check(type(interval)=="number" and interval>=10 and interval<=1000,"Trace interval out of range")
+    local watches=a.watch or {}
+    if #watches==0 then
+        local selector=a.program_selector or "Synth.parts[1].program"
+        local program=resolve(selector)
+        for index,_ in ipairs(safeProperty(program,"layers") or {}) do
+            if #watches>=64 then break end
+            watches[#watches+1]={selector=selector..".layers["..index.."]",name="VoiceCount"}
+        end
+    end
+    check(#watches<=64,"Too many watched targets")
+    local targets={}
+    for _,w in ipairs(watches) do
+        local node=resolve(w.selector)
+        local exists=node:hasParameter(w.name)
+        targets[#targets+1]={node=node,selector=w.selector,name=w.name,available=exists,
+            display_name=safeProperty(node,"displayName") or safeProperty(node,"name")}
+    end
+    local capture={events={},dropped=0}
+    runtimeTrace=capture
+    local result={samples={},events=capture.events,unsupported={},scope="Live parameter snapshots and explicit instrument reports"}
+    local ok,err=pcall(function()
+        if a.notes and #a.notes>0 then handlers.play({notes=a.notes,channel=a.channel or 1}) end
+        local elapsed=0
+        while true do
+            local row={elapsed_ms=elapsed,values={},active_layers={}}
+            local clock_ok,clock=pcall(getTime)
+            if clock_ok then row.engine_time_ms=clock end
+            for _,w in ipairs(targets) do
+                if w.available then
+                    local success,value=pcall(function() return w.node:getParameter(w.name) end)
+                    local item={selector=w.selector,name=w.name,available=success,display_name=w.display_name}
+                    if success then item.value=value else item.error=tostring(value) end
+                    row.values[#row.values+1]=item
+                    if success and w.name=="VoiceCount" and type(value)=="number" and value>0 then
+                        row.active_layers[#row.active_layers+1]={selector=w.selector,display_name=w.display_name,
+                            voice_count=value,provenance="engine_parameter"}
+                    end
+                end
+            end
+            result.samples[#result.samples+1]=row
+            if elapsed>=duration then break end
+            local step=math.min(interval,duration-elapsed)
+            wait(step);elapsed=elapsed+step
+        end
+    end)
+    runtimeTrace=nil
+    if not ok then error(err) end
+    for _,w in ipairs(targets) do
+        if not w.available then result.unsupported[#result.unsupported+1]={selector=w.selector,name=w.name} end
+    end
+    result.dropped_events=capture.dropped
+    result.actual_sample_selection="unobserved unless reported by instrument hook; VoiceCount is aggregate activity only"
+    result.legato_and_envelope="unobserved unless reported at the instrument's actual decision point"
+    return result
 end
 
 function handlers.panic(a)

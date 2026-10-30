@@ -279,6 +279,10 @@ def _summary(item: dict) -> dict:
 def analyze_set(rate: int, windows: list[dict], full, targets: list[dict], repeat=None, dry=None,
                 no_space=None) -> dict:
     """Shared analysis for native and offline stems. targets: [{name, without?, solo?, ...meta}]."""
+    arrays = [t[k] for t in targets for k in ("solo", "without") if t.get(k) is not None]
+    arrays += [a for a in (repeat, dry, no_space) if a is not None]
+    if any(len(a) != len(full) for a in arrays):
+        raise ValueError("Stem frame counts differ; all renders must have the same performance and duration")
     repeat_info = stems.repeatability(full, repeat, rate) if repeat is not None else {
         "deterministic": None, "note": "No repeat render; residual metrics assume a deterministic instrument"}
     assumed = repeat_info if repeat is not None else {"deterministic": True}
@@ -288,6 +292,10 @@ def analyze_set(rate: int, windows: list[dict], full, targets: list[dict], repea
                                     repeat=assumed, cache=cache)
         rows.append({**{k: v for k, v in target.items() if k not in ("without", "solo")}, "contribution": result})
     out = {"repeatability": repeat_info, "targets": [_summary(r) for r in rows],
+           "transitions": {"scope": "RMS before/after MIDI onsets; not runtime legato evidence",
+                           "full": stems.transition_levels(full, rate, windows),
+                           "solo": [{"name": t["name"], "notes": stems.transition_levels(t["solo"], rate, windows)}
+                                    for t in targets if t.get("solo") is not None]},
            "table": stems.ascii_table(rows) if rows else None}
     if dry is not None:
         out["effects"] = _summary({"name": "all insert effects + sends",
@@ -312,6 +320,18 @@ def analyze_set(rate: int, windows: list[dict], full, targets: list[dict], repea
         findings.append(f"stereo: {out['stereo_origin']['verdict']}")
     out["findings"] = findings or ["every target is audible above the heuristic thresholds"]
     return out
+
+
+def export_previews(rate, full, targets, directory, dry=None, no_space=None):
+    pairs = []
+    for target in targets:
+        for kind in ("without", "solo"):
+            if target.get(kind) is not None:
+                pairs.append((target["name"], kind, target[kind]))
+    pairs += [("effects", key, audio) for key, audio in (("dry", dry), ("no_space", no_space)) if audio is not None]
+    return [{"name": name, "comparison": f"full vs {kind}",
+             **stems.matched_preview_pair(full, audio, rate, directory, f"pair-{i:02d}")}
+            for i, (name, kind, audio) in enumerate(pairs)]
 
 
 def _windows(notes: list[dict] | None, events: list[dict] | None, end: float) -> list[dict]:
@@ -356,6 +376,7 @@ def register_stems(mcp, config, audit, host):
         buffer_size: Annotated[int, Field(ge=32, le=4096)] = 512,
         expected_revision: Revision | None = None,
         keep_audio: bool = True,
+        include_matched_previews: bool = True,
         wait_seconds: Annotated[float, Field(ge=0, le=MAX_WAIT_SECONDS)] = DEFAULT_WAIT_SECONDS,
         render_timeout_seconds: Annotated[float, Field(ge=10, le=1800)] | None = None,
         resume_job_id: Annotated[str, Field(pattern=r"^stems-[a-f0-9]{12}$")] | None = None,
@@ -374,7 +395,10 @@ def register_stems(mcp, config, audit, host):
         (audible/masked/inaudible/silent). Also reports where the stereo image comes from.
         Performance: notes (as falcon_native_render), events (perform timeline) or a phrase name
         (legato, retrigger, sustain_pedal, pedal_wash, dense_chords, polyphony, cross_channel, expression).
-        Keeps WAV stems under the audio root for falcon_listen; nothing plays through speakers.
+        Keeps raw WAV stems and, by default, separate loudness-matched A/B listening WAVs (full vs
+        solo/without/dry/no-space). include_matched_previews=False avoids extra files; keep_audio=False
+        disables listening previews too. Matching attenuates, preserves relative timing and applies common
+        sample-peak headroom; it is not true-peak mastering. Nothing plays through speakers.
         Runs as a background job: if it is not finished within wait_seconds (default 40, below the usual
         60 s client timeout) it returns status "running" with a job_id; collect the report with
         falcon_native_stems_result(job_id) or falcon_native_job_result(job_id). Every finished render is
@@ -407,7 +431,8 @@ def register_stems(mcp, config, audit, host):
         key = {"part": part, "notes": notes_payload, "events": events, "phrase": phrase,
                "phrase_root": phrase_root, "seconds": seconds, "targets": targets,
                "groups": [g.model_dump() for g in groups or []], "dry": include_dry, "no_space": include_no_space,
-               "master": include_master, "repeat": check_repeat, "rate": sample_rate, "buffer": buffer_size}
+               "master": include_master, "repeat": check_repeat, "rate": sample_rate, "buffer": buffer_size,
+               "matched_previews": include_matched_previews}
 
         async def job(run, progress, checkpoint):
             stem_dir = config.audio_root.resolve() / run  # WAV stems and the event file of this run.
@@ -517,6 +542,7 @@ def register_stems(mcp, config, audit, host):
                         data, rate = await asyncio.to_thread(read_audio, path, 60)
                         audio[name], paths[name] = data, str(path)
                         renders.append({"render": name, "edits": applied, "peak": round(result.get("peak", 0.0), 5),
+                                        "integrity": result.get("integrity"),
                                         "path": str(path) if keep_audio else None,
                                         "state_changed_by_render": bool(result.get("state_changed_by_render"))})
                     finally:
@@ -555,12 +581,18 @@ def register_stems(mcp, config, audit, host):
             progress["stage"] = "analysing stems"
             analysis = await asyncio.to_thread(analyze_set, rate, windows, audio["full"], target_inputs,
                                                audio.get("repeat"), audio.get("dry"), audio.get("no_space"))
+            if keep_audio and include_matched_previews:
+                analysis["listening_pairs"] = await asyncio.to_thread(
+                    export_previews, rate, audio["full"], target_inputs, stem_dir / "matched",
+                    audio.get("dry"), audio.get("no_space"))
             unreliable = [f"silencing_overridden: the {r['render']} render did not stay silenced ("
                           + "; ".join(r["silencing_overridden"][:3]) + "); the instrument script rewrote it, so that "
                           "comparison understates the target" for r in renders if r.get("silencing_overridden")]
             if unreliable:
                 analysis["findings"] = unreliable + [f for f in analysis["findings"]
                                                      if not f.startswith("every target is audible")]
+            analysis["findings"] = [f"{r['render']}: {w}" for r in renders
+                                    for w in (r.get("integrity") or {}).get("warnings", [])] + analysis["findings"]
             report = {
                 "scope": {"environment": "Owned VST3 instance (not the standalone/DAW on screen)", "session_id": session_id,
                           "part": part, "revision": initial, "revision_unchanged": unchanged,
@@ -601,7 +633,7 @@ def register_stems(mcp, config, audit, host):
         """
         return await jobs.wait(job_id, wait_seconds)
 
-    @mcp.tool(annotations=READ)
+    @mcp.tool(annotations={**READ, "readOnlyHint": False, "idempotentHint": False})
     async def falcon_stem_analyze(
         full_path: str,
         targets: Annotated[list[StemInput], Field(max_length=16)] | None = None,
@@ -610,6 +642,7 @@ def register_stems(mcp, config, audit, host):
         repeat_path: str | None = None,
         notes: Annotated[list[RenderNote], Field(max_length=64)] | None = None,
         events: Annotated[list[dict[str, Any]], Field(max_length=4000)] | None = None,
+        include_matched_previews: bool = True,
     ) -> dict[str, Any]:
         """Contribution analysis of stems you already have (DAW exports, falcon_record_test, native renders).
 
@@ -617,7 +650,8 @@ def register_stems(mcp, config, audit, host):
         without_path (mix with the target muted) and/or solo_path (target alone). dry_path = effects off,
         no_space_path = reverb/delay off, repeat_path = a second identical full render for the null test.
         notes/events give onset/release times for attack/held/tail windows (without them every region is
-        treated as held). Same report as falcon_native_stems; read-only.
+        treated as held). Creates a managed report and, by default, loudness-matched listening copies;
+        include_matched_previews=False avoids the extra WAV files. Original files are never modified.
         """
         def load(path):
             if path is None:
@@ -652,6 +686,10 @@ def register_stems(mcp, config, audit, host):
         result = await asyncio.to_thread(analyze_set, rate, windows, full, inputs, loaded.get("repeat"),
                                          loaded.get("dry"), loaded.get("no_space"))
         run = f"stems-{uuid.uuid4().hex[:12]}"
+        if include_matched_previews:
+            result["listening_pairs"] = await asyncio.to_thread(
+                export_previews, rate, full, inputs, config.audio_root / run / "matched",
+                loaded.get("dry"), loaded.get("no_space"))
         result.update(scope={"environment": "Offline files", "files_verified": "Read from FALCON_AUDIO_ROOT; "
                              "the tool cannot check that they share one performance"}, limitations=LIMITS)
         result["report_path"] = save(result, run)

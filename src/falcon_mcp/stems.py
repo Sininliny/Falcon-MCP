@@ -8,6 +8,7 @@ measurement with heuristic wording for steering edits; none of it is a perceptua
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import numpy as np
 from scipy import signal
@@ -81,6 +82,43 @@ def loudness(audio: np.ndarray, rate: int) -> tuple[float | None, str]:
         weighted = signal.lfilter(b, a, weighted, axis=0)
     power = float(np.sum(np.mean(weighted**2, axis=0)))
     return -0.691 + 10 * math.log10(max(power, 1e-30)), "lkfs_ungated"
+
+
+def matched_preview_pair(a, b, rate: int, directory: Path, tag: str) -> dict:
+    """Separate listening copies; attenuate to equal ungated LKFS, then apply common sample-peak headroom."""
+    import soundfile as sf
+
+    if len(a) != len(b):
+        raise ValueError("Matched A/B needs equal frame counts; do not silently trim different performances")
+    la, method = loudness(a, rate)
+    lb, _ = loudness(b, rate)
+    if la is None or lb is None:
+        return {"status": "untested", "reason": "One side is silent; loudness matching would be misleading"}
+    target = min(la, lb)
+    ga, gb = target - la, target - lb
+    peak = max(float(np.abs(a).max()) * 10 ** (ga / 20), float(np.abs(b).max()) * 10 ** (gb / 20))
+    headroom = min(0.0, -1.0 - 20 * math.log10(max(peak, 1e-30)))
+    directory.mkdir(parents=True, exist_ok=True)
+    outputs = {}
+    for side, data, gain in (("a", a, ga + headroom), ("b", b, gb + headroom)):
+        path = directory / f"{tag}-{side}.wav"
+        sf.write(path, data * 10 ** (gain / 20), rate, subtype="FLOAT")
+        outputs[f"{side}_path"] = str(path)
+        outputs[f"{side}_gain_db"] = round(gain, 3)
+    return {"status": "matched", **outputs, "method": method, "matched_lkfs": round(target + headroom, 3),
+            "original_a_lkfs": round(la, 3), "original_b_lkfs": round(lb, 3),
+            "shared_headroom_db": round(headroom, 3), "sample_peak_ceiling_dbfs": -1.0,
+            "limitations": "Same-duration ungated K-weighted match; true peak and perceptual equality are not verified. Originals unchanged."}
+
+
+def transition_levels(audio, rate: int, windows: list[dict]) -> list[dict]:
+    """Level around each MIDI join, not evidence of actual legato/envelope/sample selection."""
+    def level(a, b):
+        segment = audio[max(0, round(a * rate)):max(0, round(b * rate))]
+        return None if not len(segment) else round(10 * math.log10(max(float(np.mean(segment ** 2)), 1e-24)), 2)
+
+    return [{"note": w.get("note"), "on": w["on"], "before_rms_dbfs": level(w["on"] - .05, w["on"] - .005),
+             "after_rms_dbfs": level(w["on"] + .005, w["on"] + .05)} for w in windows[:64]]
 
 
 def _loudness_pair(a: np.ndarray, b: np.ndarray, rate: int) -> tuple[float | None, float | None, str]:

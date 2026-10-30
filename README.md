@@ -34,6 +34,10 @@ or a saved project scan. It exports an offline interactive HTML explorer, groupe
 ordered JSON/Markdown and simplified Mermaid/PlantUML. Inspect modulation/routing per module instead
 of overlaying every wire on one diagram. See [instrument structure export](docs/instrument-structure.md).
 
+For trustworthy reference rendering, loudness-matched layer A/B, MIDI-side trace and parameter
+readback, see [Little Branch diagnostics](docs/little-branch-diagnostics.md). Private voice/legato
+telemetry and final native UI screenshot acceptance remain separate, explicitly untested scopes.
+
 ### Claude Desktop on Windows
 
 Install the Python environment above first. In Claude Desktop, open **Settings → Developer → Edit Config** and back up the file before editing. The usual path is `%APPDATA%\Claude\claude_desktop_config.json`. Microsoft Store installations may use `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Claude\claude_desktop_config.json`; use the file opened by **Edit Config**, rather than assuming the profiles are interchangeable.
@@ -140,6 +144,7 @@ The server exposes **56 tools**, structured schemas, the `falcon://capabilities`
 | `falcon_status`, `falcon_setup`, `falcon_reconcile` | Connection, persistent deployment, uncertain-write recovery. |
 | `falcon_bind_instance`, `falcon_capture_status` | Pin inspected runtime/Program targets; observe recording readiness and completion. |
 | `falcon_native_host`, `falcon_native_file`, `falcon_native_edit`, `falcon_native_render`, `falcon_native_connections` | Own a separate VST3 session; native preset I/O, guarded parameter/connection edits and direct offline audio (notes plus pedal/CC/bend controllers). |
+| `falcon_runtime_trace`, `falcon_native_ui_accept` | Live Falcon layer voice-count/parameter traces and optional instrument reports; actual native editor screenshots and window-message interactions on an isolated desktop. See [diagnostic scope](docs/little-branch-diagnostics.md). |
 | `falcon_mix_context` | Render-over-backing check: per-band masking, presence, stereo position and levels. See [mix and capture](docs/mix-and-capture.md). |
 | `falcon_midi_capture`, `falcon_performance_profile` | Record the player's live MIDI in the open Falcon for offline replay (`falcon_native_perform(performance_path=...)`); velocity/pedal profile and touch curve. |
 | `falcon_build_instrument`, `falcon_accept_instrument`, `falcon_revision` | Controlled analog structures, role-specific acceptance, revision-bound publishing. |

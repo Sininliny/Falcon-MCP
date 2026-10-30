@@ -193,16 +193,20 @@ def register_perform(mcp, config, audit, host):
                                      reset_controllers, ramp_rate_hz, expected_revision, tag)
 
     async def evaluate(events, sections, seconds, meta, compiled, audio, rate, wav, include_table):
+        from .performance_trace import trace_midi
+
         report = await asyncio.to_thread(analyze, audio, rate, events, seconds, meta["name"] if sections else None,
                                          sections)
         # Pedal-extended note windows: held-pedal phrases are chords to a pitch tracker.
         voices = listen.max_overlap([(w["on"], w["sound_off"]) for w in sounding_windows(events, seconds)])
         heard = await asyncio.to_thread(listen.listen, audio, rate, None, None, None, False, voices)
         full = {"phrase": meta, "events": events, "sections": sections, "summary": summarize(events, compiled),
+                "input_trace": trace_midi(compiled),
                 **report, "listening": {k: heard.get(k) for k in ("level", "description", "findings")}}
         saved = wav.with_suffix(".perform.json")
         await asyncio.to_thread(atomic_json, saved, full)
         view = {"status": report["status"], "checks": report["checks"], "timeline": report["timeline"],
+                "input_trace": full["input_trace"],
                 "summary": full["summary"], "listening": {"description": heard.get("description"),
                                                          "findings": heard.get("findings")},
                 "full_report": str(saved)}
@@ -291,7 +295,8 @@ def register_perform(mcp, config, audit, host):
         return {"scope": SCOPE, "phrase": meta, "path": str(wav), "mid_path": files["mid_path"],
                 "revision": result.get("revision"), "revision_number": result.get("revision_number"),
                 "render": {"seconds": length, "sample_rate": sample_rate, "buffer_size": result.get("buffer_size"),
-                           "midi_events": result.get("midi_events"), "peak": result.get("peak")},
+                           "midi_events": result.get("midi_events"), "peak": result.get("peak"),
+                           "integrity": result.get("integrity")},
                 **view, "limitations": LIMITATIONS,
                 "next": "falcon_listen(path) for one note in detail; change one parameter and re-run the same "
                         "phrase to compare checks"}
@@ -325,6 +330,7 @@ def register_perform(mcp, config, audit, host):
             revision = revision or result.get("revision")
             view = await evaluate(timeline, sections, length, meta, compiled, audio, rate, wav, False)
             rows.append({"phrase": name, "status": view["status"], "issues": _trim(view["checks"]),
+                         "integrity": result.get("integrity"),
                          "path": str(wav), "mid_path": files["mid_path"], "full_report": view["full_report"]})
         order = {"fail": 0, "warn": 1, "info": 2, "unknown": 2, "ok": 3}
         overall = min((r["status"] for r in rows), key=lambda s: order.get(s, 3))

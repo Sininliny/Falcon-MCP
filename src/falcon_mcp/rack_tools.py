@@ -98,6 +98,12 @@ class NoteSweep(BaseModel):
         return rack.sweep_events(notes, self.velocities, self.hold_seconds, self.gap_seconds, self.channel)
 
 
+class RackHostError(RuntimeError):
+    def __init__(self, message, failure_kind):
+        super().__init__(message)
+        self.failure_kind = failure_kind
+
+
 def _kill_tree(process):
     if process.returncode is not None:
         return
@@ -127,8 +133,10 @@ class RackRunner:
         env = os.environ.copy()
         env.update(FALCON_RACK_LOG=str(log),
                    PYTHONPATH=str(Path(__file__).resolve().parents[1]) + os.pathsep + env.get("PYTHONPATH", ""))
+        interactive = op == "editor" and not request.get("instrument") and request.get("window_mode") == "interactive"
+        modules = ["falcon_mcp.rack_worker"] if interactive else ["falcon_mcp.desktop_worker", "falcon_mcp.rack_worker"]
         process = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "falcon_mcp.rack_worker", op, str(request_path), str(result_path),
+            sys.executable, "-m", *modules, op, str(request_path), str(result_path),
             stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
             env=env, creationflags=0x08000000 if os.name == "nt" else 0)
         self.audit.event("rack_worker_start", op=op, run=run, pid=process.pid, log=str(log))
@@ -171,17 +179,18 @@ class RackRunner:
         except TimeoutError:
             _kill_tree(process)
             await process.wait()
-            raise RuntimeError(f"Rack {op} timed out after {timeout:.0f} s; log: {log}") from None
+            raise RackHostError(f"Rack {op} timed out after {timeout:.0f} s; log: {log}", "timeout") from None
         except asyncio.CancelledError:
             _kill_tree(process)
             raise
         try:
             reply = json.loads(result_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            raise RuntimeError(f"Rack worker exited ({process.returncode}) without a result; the plugin may have "
-                               f"crashed. Log {log}:\n{self.log_tail(log)}") from None
+            raise RackHostError(f"Rack worker exited ({process.returncode}) without a result; the plugin may have "
+                                f"crashed. Log {log}:\n{self.log_tail(log)}",
+                                "crashed" if process.returncode else "invalid_result") from None
         if not reply.get("ok"):
-            raise RuntimeError(f"{reply.get('error')} (log: {log})")
+            raise RackHostError(f"{reply.get('error')} (log: {log})", "plugin_error")
         return reply["result"]
 
     async def probe(self, bundles: list[Path], cache: dict, progress: dict, timeout: float) -> dict:
@@ -244,11 +253,14 @@ class RackRunner:
                 if "done" in row:
                     rack.merge_probe(cache, Path(row["done"]), {k: v for k, v in row.items() if k != "done"})
                     remaining.remove(row["done"])
+                    failed += bool(row.get("error"))
             if current:
                 hung = current
                 reason = (f"probe timed out after {timeout:.0f} s (license or dialog?)" if timed_out
                           else f"plugin crashed the probe process (exit {process.returncode})")
-                rack.merge_probe(cache, Path(hung), {"error": reason})
+                rack.merge_probe(cache, Path(hung), {"error": reason,
+                                                    "probe_state": "timeout" if timed_out else "crashed",
+                                                    "availability": "unknown"})
                 remaining.remove(hung)
                 failed += 1
             elif remaining and not started:
@@ -325,6 +337,7 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         if task.exception() is not None:
             exc = task.exception()
             return {"status": "failed", "job_id": job_id, "kind": job["kind"], "error": str(exc),
+                    "failure_kind": getattr(exc, "failure_kind", "error"),
                     "error_type": type(exc).__name__}
         return {"status": "done", "job_id": job_id, "kind": job["kind"], **task.result()}
 
@@ -353,6 +366,8 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
 
     async def rack_render(target: dict, files: dict, length: float, folder: Path, sample_rate: int,
                           buffer_size: int, warmup: float, settle: float, compiled: list, progress: dict) -> dict:
+        from .performance_trace import trace_midi
+
         progress.update(stage=f"rendering {target['label']}")
         wav = folder / f"{target['label']}.wav"
         request = {"bundle": target["bundle"], "plugin_name": target["plugin_name"], "state": target["state"],
@@ -370,7 +385,9 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         out = result["renders"][0]
         if out["midi_sha256"] != files["midi_sha256"]:
             raise RuntimeError("Rack worker rendered a different timeline")
-        warnings = []
+        warnings = list(out.get("integrity", {}).get("warnings", []))
+        if any(not stage["verified"] for stage in result.get("parameter_readback", [])):
+            warnings.append("Requested plugin parameters differ from effective readback; inspect parameter_readback for clamping or later rewrites.")
         if out["silent"]:
             warnings.append("Render is silent: wrong state (no instrument loaded?), wrong MIDI channel, or the "
                             "library had not finished loading (raise settle_seconds).")
@@ -380,7 +397,16 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         if target.get("is_instrument") is False:
             warnings.append("The catalog lists this plugin as an effect, not an instrument.")
         audit.event("rack_render", plugin=target["name"], path=out["path"], peak_dbfs=out["peak_dbfs"])
+        async with runner.scan_lock:
+            cache = rack.load_cache(runner.cache_path)
+            if target["bundle"] in cache["bundles"]:
+                cache["bundles"][target["bundle"]]["last_load"] = {"status": "loaded", "at": time.time(),
+                                                                "plugin": result["plugin"].get("name")}
+                rack.save_cache(runner.cache_path, cache)
         return {"label": target["label"], "plugin": result["plugin"], "state": target["state_info"],
+                "parameter_readback": result.get("parameter_readback", []),
+                "processing_prepared_before_state": result.get("processing_prepared_before_state", False),
+                "input_trace": trace_midi(compiled),
                 "instrument": result.get("instrument"), "program": result.get("program"), "parameters_applied": result["parameters_applied"], "load_seconds": result["load_seconds"],
                 "settle": result["settle"], **out, "warnings": warnings}
 
@@ -402,9 +428,12 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
             raise RuntimeError("The native worker did not confirm the timeline (midi_sha256 missing); restart "
                                "falcon_native_host after updating.")
         return {"label": "falcon", "path": str(wav), "peak": result.get("peak"),
+                "integrity": result.get("integrity"),
                 "revision": result.get("revision"), "revision_number": result.get("revision_number"),
-                "session_id": session_id, "warnings": [] if (result.get("peak") or 0) > 1e-4 else
-                ["Falcon render is silent: check the loaded Multi and the Part MIDI channel."]}
+                "session_id": session_id,
+                "warnings": result.get("integrity", {}).get("warnings", []) +
+                ([] if (result.get("peak") or 0) > 1e-4 else
+                 ["Falcon render is silent: check the loaded Multi and the Part MIDI channel."])}
 
     def prepare(compiled: list, tag: str) -> tuple[Path, dict]:
         run = f"{tag}-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
@@ -424,7 +453,9 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         """List the VST3 plugins installed on this computer (instruments by default) for falcon_rack_render.
 
         Looks in the standard VST3 folders (Windows: Common Files\\VST3 and %LOCALAPPDATA%\\Programs\\Common\\VST3)
-        plus FALCON_RACK_VST3_PATHS and `folders`. New or updated plugins are loaded once, each in a separate
+        plus FALCON_RACK_VST3_PATHS and `folders`. query filters bundle paths/cached names BEFORE probing;
+        it never probes unrelated plugins. Unknown shell names require the bundle path or an explicit full scan.
+        New or updated plugins are loaded once, each in a separate
         process, to read name, vendor and instrument/effect; results are cached, so later scans are instant.
         A plugin that crashes or hangs (e.g. a license dialog) is listed as failed and skipped. VST2-only
         plugins are not supported. Probing many plugins can take minutes: it runs as a job (falcon_rack_job).
@@ -433,14 +464,18 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
             bundles = await asyncio.to_thread(rack.find_bundles,
                                               [Path(f) for f in folders or []] + rack.default_vst3_dirs())
             cache = rack.load_cache(runner.cache_path)
-            stale = rack.stale_bundles(cache, bundles, refresh)
+            selected = rack.select_probe_bundles(cache, bundles, query)
+            stale = rack.stale_bundles(cache, selected, refresh)
 
         def listing(extra: dict) -> dict:
             cache_now = rack.load_cache(runner.cache_path)
-            rows = rack.plugin_rows(cache_now, include_effects, query)
+            rows = rack.plugin_rows(cache_now, include_effects)
+            rows = [r for r in rows if r["path"] in {str(b) for b in selected}]
             return {"scope": "Installed VST3 plugins found on disk; loaded once each to read metadata",
                     "folders": [str(f) for f in rack.default_vst3_dirs()] + list(folders or []),
-                    "bundles": len(bundles), "plugins": rows[:200], "listed": len(rows), **extra,
+                    "bundles": len(selected), "discovered_bundles": len(bundles),
+                    "probe_scope": "targeted" if query and query.strip() else "all",
+                    "plugins": rows[:200], "listed": len(rows), **extra,
                     "next": "falcon_rack_render(plugin=<name>, ...) or falcon_rack_state to save an instrument "
                             "selection (Kontakt libraries need one)"}
 
@@ -476,6 +511,7 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         overwrite: bool = False,
         timeout_minutes: Annotated[float, Field(ge=1, le=120)] = 30.0,
         wait_seconds: Wait = 3.0,
+        window_mode: Literal["background", "interactive"] = "background",
     ) -> dict[str, Any]:
         """Open a plugin's own window on this computer so the user can set it up (e.g. load Noire in Kontakt),
         then save its state as <home>/rack/states/<name>.vstpreset when the window is closed.
@@ -490,6 +526,8 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         window as if dragged there, the window closes after instrument_wait_seconds, and the state is saved.
         Rejects unchanged or empty-looking state. State changes are a heuristic, not proof of instrument identity.
         """
+        if not instrument and window_mode != "interactive":
+            raise ValueError("Manual setup requires window_mode='interactive'; background loading needs instrument= or a saved state")
         target = resolve(PluginSpec(plugin=plugin, plugin_name=plugin_name, state=from_state, instrument=instrument,
                                     instrument_wait_seconds=instrument_wait_seconds))
         output = runner.state_root / f"{name}.vstpreset"
@@ -522,6 +560,7 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
                                                   "state": target["state"], "output": str(output),
                                                   "instrument": target["instrument"],
                                                   "instrument_wait_seconds": instrument_wait_seconds,
+                                                  "window_mode": window_mode,
                                                   "close_after_seconds": timeout_minutes * 60,
                                                   "window_status": str(window_status)},
                                        run, timeout_minutes * 60 + 180, watch=(window_status, on_window))
@@ -640,6 +679,12 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         async def work():
             ref_out = await rack_render(ref, files, length, folder, sample_rate, buffer_size, warmup_seconds,
                                         settle_seconds, compiled, progress)
+            integrity = ref_out.get("integrity", {})
+            if integrity.get("status") == "failed" or integrity.get("pitch", {}).get("sample_rate_ratio_suspected"):
+                return {"scope": SCOPE, "renders": {"reference": ref_out}, "compared": False,
+                        "error": "Reference integrity is unverified (file mismatch or sample-rate-like pitch shift). "
+                                 "Repeat the same state/MIDI at 44100 and 48000 Hz and verify tuning before comparing timbre.",
+                        "reason_code": "reference_integrity_unverified", **files}
             if cand:
                 cand_out = await rack_render(cand, files, length, folder, sample_rate, buffer_size, warmup_seconds,
                                              settle_seconds, compiled, progress)
@@ -649,6 +694,9 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
             silent = [o["label"] for o in (ref_out, cand_out) if o.get("silent") or
                       any("silent" in w for w in o.get("warnings", []))]
             renders = {"reference": ref_out, "candidate": cand_out}
+            if (cand_out.get("integrity") or {}).get("status") == "failed":
+                return {"scope": SCOPE, "renders": renders, "compared": False,
+                        "error": "Candidate file rate/frame count/duration mismatch; see integrity", **files}
             if silent:
                 return {"scope": SCOPE, "renders": renders, "compared": False,
                         "error": f"Not compared: silent render(s) {silent}; see warnings", **files}

@@ -16,6 +16,24 @@ SESSION = "b" * 32
 OSC = "Synth.parts[1].program.layers[1].keygroups[1].oscillators[1]"
 
 
+async def test_native_visual_tool_requires_complete_drag_coordinates(config):
+    tools = ui_tools(config, host=object())
+    from falcon_mcp.ui_tools import PointerAction
+
+    with pytest.raises(ValueError, match="end_x"):
+        await tools["falcon_native_ui_accept"](session_id=SESSION,
+                                               actions=[PointerAction(kind="drag", x=10, y=20)])
+
+
+async def test_runtime_trace_rejects_notes_outliving_observation(config):
+    from falcon_mcp.ui_tools import TraceNote, Watch
+
+    tools = ui_tools(config, bridge=object())
+    with pytest.raises(ValueError, match="finish within"):
+        await tools["falcon_runtime_trace"](watch=[Watch(selector="Program", names=["VoiceCount"])],
+                                            seconds=0.1, notes=[TraceNote(note=60, duration_ms=500)])
+
+
 def program_xml(script: str, script_data: str = "<ScriptData />") -> str:
     multi = json.loads(files("falcon_mcp").joinpath("data/builder-v1.json").read_text(encoding="utf-8"))["multi_xml"]
     program = multi[multi.find("<Program"):multi.find("</Program>") + len("</Program>")]
@@ -232,6 +250,8 @@ async def test_falcon_ui_check_tool_saves_full_report_and_leads_with_scope(confi
     assert next(iter(result)) == "scope"
     saved = Path(result["full_report"]).read_text(encoding="utf-8")
     assert json.loads(saved)["scripts"][0]["widgets"]
+    assert result["visual_acceptance"]["status"] == "untested"
+    assert not json.loads(saved)["visual_acceptance"]["native_screenshot_checked"]
     with pytest.raises(ValueError):
         await tools["falcon_ui_check"](path=str(tmp_path / "missing.uvip"))
 

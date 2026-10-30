@@ -100,6 +100,8 @@ class _Plugin:
             if not live.any():
                 continue
             f0 = 440.0 * 2 ** ((note - 69) / 12)
+            if self.base.startswith("RateBug") and sample_rate == 48000:
+                f0 *= 48000 / 44100
             amp = (velocity / 127) ** 1.5 * self.gain * np.exp(-1.5 * np.clip(t, 0, None))
             if end is not None:
                 amp = amp * np.where(index >= end, np.exp(-np.clip(index - end, 0, None) / sample_rate / 0.08), 1.0)

@@ -174,6 +174,10 @@ async def test_native_stems_classifies_layers_effects_and_restores(config):
     # Solo of Body muted exactly the other two layers.
     solo_body = result["targets"][0]["paths"]["solo"]
     assert solo_body.endswith("solo-0.wav")
+    assert result["listening_pairs"]
+    assert result["transitions"]["full"]
+    pair = next(p for p in result["listening_pairs"] if p["status"] == "matched")
+    assert Path(pair["a_path"]).exists() and Path(pair["b_path"]).exists()
 
 
 @pytest.mark.asyncio

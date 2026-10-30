@@ -29,6 +29,9 @@ client's 60 s call limit. They return `status: "running"` and a `job_id` when no
 
 ## Switching sounds inside a plugin
 
+For clock/pitch warnings, effective parameter readback and targeted probing, see
+[Little Branch diagnostics](little-branch-diagnostics.md). Render success is not reference integrity or sound-quality acceptance.
+
 - `state` takes a `.vstpreset`/`.state` path, a name saved by `falcon_rack_state`, or the name of one of the
   plugin's presets from `falcon_rack_presets` (exact name, or a unique part of `folder/name`).
 - `program` (0-127), optional `bank` (CC0/CC32) and `program_channel`: a MIDI program change sent after
@@ -47,6 +50,11 @@ client's 60 s call limit. They return `status: "running"` and a `job_id` when no
 
 ## Inputs
 
+Windows workers now initialize plugins on a separate non-input desktop, so their windows do not cover
+the user's work or take input focus. This includes automatic `instrument=` loading. Manual editor setup
+must explicitly pass `window_mode="interactive"`; the host does not force it to the foreground or topmost.
+See [background and visual diagnostic scope](little-branch-diagnostics.md#native-ui-and-isolated-background-workers).
+
 - `midi_path`: `.mid`/`.midi` (every channel message is kept: notes, CC, pedal, pitch bend, pressure,
   program change; sustain and pitch bend are reset at t=0) or a perform timeline `.json`.
 - `events`: the perform event schema used by `falcon_native_perform` (up to 60 s, like that tool).
@@ -61,7 +69,7 @@ Each run writes `<audio root>/rack/<run>/timeline.events.json`, `timeline.mid` a
 ## Typical flow (Noire vs Falcon)
 
 1. `falcon_rack_scan()` and find the Kontakt row.
-2. `falcon_rack_state(plugin="Kontakt 8", name="noire")`; the user loads Noire and closes the window. If
+2. `falcon_rack_state(plugin="Kontakt 8", name="noire", window_mode="interactive")`; the user loads Noire and closes the window. If
    nobody closes it within `timeout_minutes`, it is closed automatically and the state is saved anyway
    (`closed_by_timeout: true`). On Windows the worker finds its window, moves it on screen if needed and
    brings it to the front and puts the instruction in its title (Kontakt 8 needs 50-60 s to show it); if no

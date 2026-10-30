@@ -177,6 +177,46 @@ async def test_scan_survives_crashing_and_hanging_plugins(tools):
     assert [r["name"] for r in again["plugins"]] == ["Fx"]
 
 
+async def test_targeted_scan_never_probes_unrelated_plugins_and_keeps_cache(tools, config):
+    good = await _finish(tools, await tools["falcon_rack_scan"](query="Good", wait_seconds=0))
+    assert good["probed_now"] == 1 and good["bundles"] == 1 and good["probe_scope"] == "targeted"
+    cache_path = config.runtime.parent / "rack/plugins.json"
+    assert [Path(k).stem for k in rack.load_cache(cache_path)["bundles"]] == ["Good"]
+    bright = await _finish(tools, await tools["falcon_rack_scan"](query="Bright", wait_seconds=0))
+    assert bright["probed_now"] == 1
+    assert {Path(k).stem for k in rack.load_cache(cache_path)["bundles"]} == {"Good", "Bright"}
+    missing = await tools["falcon_rack_scan"](query="NotInstalled")
+    assert missing["bundles"] == 0 and missing["probed_now"] == 0
+    assert len(rack.load_cache(cache_path)["bundles"]) == 2
+
+
+def test_probe_timeout_does_not_block_direct_name_load(tmp_path):
+    plugin = tmp_path / "Kontakt 8.vst3"
+    plugin.write_bytes(b"plugin")
+    cache = _cache(tmp_path, {plugin: {"error": "probe timed out", "probe_state": "timeout"}})
+    assert rack.resolve_plugin(cache, "Kontakt 8")[0] == plugin
+    row = rack.plugin_rows(cache)[0]
+    assert row["probe_state"] == "timeout" and row["availability"] == "unknown"
+
+
+async def test_rate_shift_is_reported_and_blocks_a_misleading_reference_compare(tools, tmp_path):
+    from falcon_mcp.rack_tools import PluginSpec
+
+    plugin = tmp_path / "RateBug.vst3"
+    plugin.write_bytes(b"plugin")
+    request = {"plugin": str(plugin), "sweep": rack_sweep(notes=[69]), "warmup_seconds": 0, "settle_seconds": 5}
+    shifted = await _finish(tools, await tools["falcon_rack_render"](sample_rate=48000, **request))
+    assert shifted["status"] == "done", shifted
+    assert shifted["render"]["integrity"]["pitch"]["sample_rate_ratio_suspected"]
+    assert shifted["render"]["warnings"] and shifted["render"]["processing_prepared_before_state"]
+    normal = await _finish(tools, await tools["falcon_rack_render"](sample_rate=44100, **request))
+    assert normal["render"]["integrity"]["status"] == "ok"
+    compared = await _finish(tools, await tools["falcon_rack_compare"](
+        reference=PluginSpec(plugin=str(plugin)), falcon_session_id=tools["host"].session_id,
+        sweep=rack_sweep(notes=[69]), sample_rate=48000, warmup_seconds=0, settle_seconds=5))
+    assert not compared["compared"] and compared["reason_code"] == "reference_integrity_unverified"
+
+
 async def test_render_sweep_settles_and_chunks(tools, tmp_path):
     await _finish(tools, await tools["falcon_rack_scan"](probe_timeout_seconds=4, wait_seconds=0))
     out = await _finish(tools, await tools["falcon_rack_render"](
@@ -196,10 +236,10 @@ async def test_render_sweep_settles_and_chunks(tools, tmp_path):
 
 async def test_state_editor_then_render_with_saved_state(tools):
     await _finish(tools, await tools["falcon_rack_scan"](probe_timeout_seconds=4, wait_seconds=0))
-    saved = await _finish(tools, await tools["falcon_rack_state"](plugin="Good", name="quiet"))
+    saved = await _finish(tools, await tools["falcon_rack_state"](plugin="Good", name="quiet", window_mode="interactive"))
     assert saved["status"] == "done" and saved["state_path"].endswith("quiet.vstpreset")
     with pytest.raises(ValueError, match="exists"):
-        await tools["falcon_rack_state"](plugin="Good", name="quiet")
+        await tools["falcon_rack_state"](plugin="Good", name="quiet", window_mode="interactive")
     loud = await _finish(tools, await tools["falcon_rack_render"](
         plugin="Good", sweep=rack_sweep(notes=[60]), warmup_seconds=0, settle_seconds=5))
     quiet = await _finish(tools, await tools["falcon_rack_render"](
@@ -273,7 +313,7 @@ async def test_live_findings_unload_hang_first_note_editor_timeout_falcon(tools)
     assert sticky["status"] == "done", sticky
     assert not sticky["render"]["silent"]
     # An editor nobody closes is closed at the time limit and its state is still saved.
-    saved = await _finish(tools, await tools["falcon_rack_state"](plugin="Patient", name="late",
+    saved = await _finish(tools, await tools["falcon_rack_state"](plugin="Patient", name="late", window_mode="interactive",
                                                                   timeout_minutes=0.03))
     assert saved["status"] == "done" and saved["closed_by_timeout"] is True
     with pytest.raises(ValueError, match="falcon_session_id"):

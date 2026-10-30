@@ -104,7 +104,7 @@ class Engine:
                "FALCON_VST3_PATH": str(plugin), "FAKE_SCRIPT_MODE": mode,
                "PYTHONPATH": os.pathsep.join([str(fake), str(src), os.environ.get("PYTHONPATH", "")])}
         self.tmp = tmp_path
-        self.process = subprocess.Popen([sys.executable, "-m", "falcon_mcp.native_worker", "engine"],
+        self.process = subprocess.Popen([sys.executable, "-m", "falcon_mcp.desktop_worker", "falcon_mcp.native_worker", "engine"],
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                         env=env)
         self.ready = json.loads(self.process.stdout.readline())

@@ -8,6 +8,7 @@ Probe progress is appended to the result file as JSON lines so the parent can te
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 import time
@@ -73,9 +74,11 @@ def probe(request: dict, result_path: Path):
                     names = [None]
                 for name in names:
                     loaded.append(_load(bundle, name if len(names) > 1 else None))
-                row = {"done": bundle, "plugins": [_describe(plugin) for plugin in loaded]}
+                row = {"done": bundle, "plugins": [_describe(plugin) for plugin in loaded],
+                       "probe_state": "slow" if time.monotonic() - started > 30 else "loaded"}
             except Exception as exc:  # noqa: BLE001 - recorded per bundle; the scan continues
-                row = {"done": bundle, "error": f"{type(exc).__name__}: {exc}"[:400]}
+                row = {"done": bundle, "error": f"{type(exc).__name__}: {exc}"[:400],
+                       "probe_state": "error", "error_type": type(exc).__name__, "availability": "unknown"}
             row["seconds"] = round(time.monotonic() - started, 2)
             out.write(json.dumps(row) + "\n")
             out.flush()
@@ -104,8 +107,29 @@ def _apply_parameters(plugin, parameters: dict) -> dict:
     return applied
 
 
+def parameter_readback(plugin, requested: dict, stage: str) -> dict:
+    rows = []
+    for key, wanted in requested.items():
+        effective = getattr(plugin, key)
+        if isinstance(effective, (float, int, bool, str)):
+            actual = effective
+        else:
+            actual = str(effective)
+        if isinstance(wanted, bool):
+            matches = isinstance(actual, bool) and actual == wanted
+        elif isinstance(wanted, (int, float)):
+            try:
+                matches = math.isclose(float(actual), wanted, rel_tol=1e-5, abs_tol=1e-7)
+            except (ValueError, TypeError):
+                matches = False
+        else:
+            matches = str(actual) == wanted
+        rows.append({"parameter": key, "requested": wanted, "effective": actual, "matched": matches})
+    return {"stage": stage, "verified": all(r["matched"] for r in rows), "items": rows}
+
+
 def _surface_window(status_path: Path, wait_seconds: float = 180.0) -> dict:
-    """Find this process's plugin window, put it on screen and in front, and report what happened.
+    """Find this process's manual editor and show it without activation or promotion.
 
     A process started in the background may not take the foreground on Windows, so the window can open
     behind other windows or off screen; a process in another session (a service) has no visible window at all.
@@ -148,13 +172,11 @@ def _surface_window(status_path: Path, wait_seconds: float = 180.0) -> dict:
         user32.SetWindowTextW(hwnd, f"[Falcon MCP: set up the sound, then close this window] {title.value}")
         moved = False
         if not user32.MonitorFromWindow(hwnd, 0):  # MONITOR_DEFAULTTONULL: not on any screen
-            user32.SetWindowPos(hwnd, 0, 80, 80, 0, 0, 0x0001 | 0x0004)  # SWP_NOSIZE | SWP_NOZORDER
+            user32.SetWindowPos(hwnd, 0, 80, 80, 0, 0, 0x0001 | 0x0004 | 0x0010)  # NOSIZE | NOZORDER | NOACTIVATE
             moved = True
-        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-        user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0003)  # HWND_TOPMOST, SWP_NOMOVE | SWP_NOSIZE
-        user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, 0x0003)  # back to HWND_NOTOPMOST, but now in front
-        foreground = bool(user32.SetForegroundWindow(hwnd))
-        user32.FlashWindow(hwnd, True)
+        user32.ShowWindow(hwnd, 4)  # SW_SHOWNOACTIVATE
+        user32.SetWindowPos(hwnd, 1, 0, 0, 0, 0, 0x0013)  # HWND_BOTTOM, NOACTIVATE | NOMOVE | NOSIZE
+        foreground = False
         rect = wintypes.RECT()
         user32.GetWindowRect(hwnd, ctypes.byref(rect))
         status.update(window_found=True, title=title.value, rect=[rect.left, rect.top, rect.right, rect.bottom],
@@ -352,6 +374,7 @@ def _save_state(plugin, request: dict, result_path: Path, opened: float, **extra
     os.replace(temp, target)
     result_path.write_text(json.dumps({"ok": True, "result": {
         "state_path": str(target), "format": kind, "bytes": len(data),
+        "window_policy": request.get("window_policy"),
         "editor_open_seconds": round(time.time() - opened, 1), **extra,
         "plugin": _describe(plugin)}}), encoding="utf-8")
     _terminate()  # while the plugin is still referenced, so its destructor never runs
@@ -419,15 +442,22 @@ def render(request: dict, result_path: Path):
 
     from .perform import read_timeline
     from .rack import CHUNK_SECONDS, MAX_RACK_SECONDS, chunk_messages
+    from .render_integrity import inspect_render, validate_audio_block
 
     loaded = time.monotonic()
     plugin = _load(request["bundle"], request.get("plugin_name"))
+    rate, block = request["sample_rate"], request["buffer_size"]
+    # Establish the requested processing rate BEFORE a sample library restores its state.
+    # This avoids restoring into an unprepared default-rate host; integrity checks still verify the result.
+    _reset(plugin, rate, block)
     _apply_state(plugin, request.get("state"))
     instrument = _load_instrument(plugin, request)
     applied = _apply_parameters(plugin, request.get("parameters"))
+    writes = parameter_readback(plugin, request.get("parameters") or {}, "after_write")
     program = _select_program(plugin, request)
     load_seconds = time.monotonic() - loaded
     settled = settle(plugin, request)
+    after_settle = parameter_readback(plugin, request.get("parameters") or {}, "after_settle")
     rate, block = request["sample_rate"], request["buffer_size"]
     renders = []
     for job in request["renders"]:
@@ -445,6 +475,7 @@ def render(request: dict, result_path: Path):
                 end = min(start + CHUNK_SECONDS, length)
                 audio = plugin(chunk_messages(messages, start, end), duration=end - start, sample_rate=rate,
                                num_channels=2, buffer_size=block, reset=False)
+                validate_audio_block(audio, rate, end - start)
                 block_peak = np.abs(audio).max(axis=0) if audio.size else np.zeros(1)
                 if onset is None and audio.size:
                     loud = np.flatnonzero(np.abs(audio).max(axis=0) > 10 ** (-60 / 20))
@@ -456,15 +487,22 @@ def render(request: dict, result_path: Path):
                 out.write(audio.T)
                 start = end
         rms = (energy / max(frames * 2, 1)) ** 0.5
+        integrity = inspect_render(target, rate, length, messages)
         renders.append({"path": str(target), "frames": frames, "seconds": round(frames / rate, 3),
                         "peak_dbfs": round(20 * np.log10(max(peak, 1e-12)), 2),
                         "rms_dbfs": round(20 * np.log10(max(rms, 1e-12)), 2), "silent": peak < 1e-4,
                         "first_sound_seconds": onset, "midi_messages": len(messages),
                         "midi_sha256": job["midi_sha256"],
+                        "integrity": integrity,
                         "render_seconds": round(time.monotonic() - started, 2)})
     result_path.write_text(json.dumps({"ok": True, "result": {
         "plugin": _describe(plugin), "load_seconds": round(load_seconds, 2), "settle": settled,
-        "parameters_applied": applied, "program": program, "instrument": instrument, "renders": renders}},
+        "parameters_applied": applied,
+        "parameter_readback": [writes, after_settle,
+                               parameter_readback(plugin, request.get("parameters") or {}, "after_render")],
+        "processing_prepared_before_state": True,
+        "window_policy": request.get("window_policy"),
+        "program": program, "instrument": instrument, "renders": renders}},
         allow_nan=False), encoding="utf-8")
     _terminate()  # while the plugin is still referenced, so its destructor never runs
 
@@ -474,6 +512,12 @@ def main(argv: list[str]):
     _quiet_stdout()
     request = json.loads(request_path.read_text(encoding="utf-8"))
     try:
+        from .window_policy import isolate_desktop
+
+        # Only an explicit manual setup request may create windows on the user's desktop.
+        interactive = op == "editor" and not request.get("instrument") and request.get("window_mode") == "interactive"
+        policy = {"mode": "interactive", "desktop_isolated": False} if interactive else isolate_desktop()
+        request["window_policy"] = policy
         {"probe": probe, "editor": editor, "render": render}[op](request, result_path)
     except Exception as exc:
         traceback.print_exc()

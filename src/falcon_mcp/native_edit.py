@@ -37,6 +37,52 @@ def verify_changes(readback: dict, changes: list[dict]) -> bool:
     return True
 
 
+def load_parameter_readback(expected, effective, limit: int = 100) -> dict:
+    """Compare indexed numeric/bool attributes after a native load/settle, not just Program names.
+
+    Rewrites may be clamps, version conversions or instrument scripts; the diff does not guess which.
+    """
+    def walk(root):
+        stack = [(root, "")]
+        while stack:
+            node, path = stack.pop()
+            yield path, node
+            counts, children = {}, []
+            for child in node:
+                counts[child.tag] = counts.get(child.tag, 0) + 1
+                children.append((child, f"{path}/{child.tag}[{counts[child.tag]}]".lstrip("/")))
+            stack.extend(reversed(children))
+
+    actual = dict(walk(effective))
+    differences, checked, changed = [], 0, 0
+    definitions = _module_definitions()
+    for path, node in walk(expected):
+        for name, requested in node.attrib.items():
+            kind = definitions.get(node.tag, {}).get(name, {}).get("type")
+            if kind not in {"float", "int", "integer", "bool", "boolean"}:
+                continue
+            checked += 1
+            other = actual.get(path)
+            value = other.get(name) if other is not None else None
+            try:
+                if kind in {"bool", "boolean"}:
+                    left, right = requested.lower(), str(value).lower()
+                    valid = {"1", "true", "0", "false"}
+                    matched = left in valid and right in valid and (left in {"1", "true"}) == (right in {"1", "true"})
+                else:
+                    matched = math.isclose(float(requested), float(value), rel_tol=1e-5, abs_tol=1e-7)
+            except (TypeError, ValueError):
+                matched = False
+            if not matched:
+                changed += 1
+                if len(differences) < limit:
+                    differences.append({"selector": path, "parameter": name, "requested": requested,
+                                        "effective": value, "reason": "changed_after_load_or_settle"})
+    return {"status": "changed" if changed else "matched" if checked else "untested", "checked": checked,
+            "changed": changed, "items": differences, "truncated": changed > len(differences),
+            "scope": "Indexed numeric/bool XML attributes after load/settle; private parameters and causes are not inferred"}
+
+
 def edit_node(root, selector: str, changes: list[dict], *, connection_guarded: bool = False) -> dict:
     if len(selector) > 1024 or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*(\[[1-9][0-9]*\])?(/[A-Za-z][A-Za-z0-9_]*(\[[1-9][0-9]*\])?)*", selector):
         raise ValueError("Use an exact child path with 1-based [indices]; no recursive or parent selectors")

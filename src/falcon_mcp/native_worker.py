@@ -1,4 +1,4 @@
-"""Owned native plugin engine and independent startup supervisor. Never opens an editor."""
+"""Owned native engine and supervisor. Editor inspection is explicit and desktop-isolated."""
 
 from __future__ import annotations
 
@@ -104,7 +104,7 @@ def supervise(root: Path):
                     shadow = ET.tostring(tree, encoding="utf-8", xml_declaration=True)
                     write_bytes(default, shadow)
             child = subprocess.Popen(
-                [sys.executable, "-m", "falcon_mcp.native_worker", "engine"],
+                [sys.executable, "-m", "falcon_mcp.desktop_worker", "falcon_mcp.native_worker", "engine"],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log,
                 creationflags=0x08000000 if os.name == "nt" else 0,
             )
@@ -166,6 +166,9 @@ def supervise(root: Path):
 
 
 def engine(root: Path):
+    from .window_policy import isolate_desktop
+
+    window_policy = isolate_desktop()
     # Keep native/Lua prints out of the JSON protocol, including C-level stdout.
     protocol = os.fdopen(os.dup(sys.stdout.fileno()), "w", encoding="utf-8", buffering=1)
     log = (root / "worker.log").open("ab", buffering=0)
@@ -187,6 +190,9 @@ def engine(root: Path):
     def current():
         return parse_xml(state_xml(plugin.raw_state))
 
+    def revision():
+        return revision_number
+
     def summary():
         tree = current()
         parts = program_nodes(tree)
@@ -202,7 +208,7 @@ def engine(root: Path):
             {"part": i, "name": p.find("Program").get("DisplayName", "Program")}
             for i, p in enumerate(parts, 1) if p.find("Program") is not None
         ], "scope": "Owned VST3 instance", "plugin": plugin.name,
-            "plugin_path": str(plugin_path), "plugin_sha256": plugin_hash}
+            "plugin_path": str(plugin_path), "plugin_sha256": plugin_hash, "window_policy": window_policy}
 
     def apply(tree):
         nonlocal revision_number
@@ -277,6 +283,11 @@ def engine(root: Path):
                     raise RuntimeError("Native load readback differs; inspect session before further editing")
                 result["removed_mcp_launchers"] = removed
                 result["settle"] = settled
+                from .native_edit import load_parameter_readback
+
+                result["parameter_readback"] = load_parameter_readback(tree, current())
+                result["warnings"] = ["Native load changed indexed parameter values; inspect parameter_readback before computing levels."] \
+                    if result["parameter_readback"]["changed"] else []
             elif op == "save":
                 tree = current()
                 strip_bridges(tree)
@@ -309,6 +320,7 @@ def engine(root: Path):
                 import soundfile as sf
 
                 from .perform import read_timeline
+                from .render_integrity import inspect_render, validate_audio_block
 
                 events = []
                 render_revision = content_fingerprint(current())
@@ -327,10 +339,13 @@ def engine(root: Path):
                     raise ValueError("buffer_size must be 32..4096")
                 audio = plugin(sorted(events, key=lambda e: e[1]), duration=args["seconds"],
                                sample_rate=args["sample_rate"], num_channels=2, buffer_size=buffer_size)
+                validate_audio_block(audio, args["sample_rate"], args["seconds"])
                 sf.write(args["path"], audio.T, args["sample_rate"], subtype="FLOAT")
+                integrity = inspect_render(Path(args["path"]), args["sample_rate"], args["seconds"], events)
                 after = content_fingerprint(current())
                 changed = aliases.rendered(render_revision, after)
                 result = {"path": args["path"], "frames": audio.shape[1], "peak": float(np.abs(audio).max()),
+                          "integrity": integrity,
                           "midi_events": len(events), "buffer_size": buffer_size,
                           "midi_sha256": args.get("midi_sha256") if args.get("midi_path") else None,
                           "revision": render_revision, "revision_after": after,
@@ -408,8 +423,29 @@ def engine(root: Path):
                 if structure is None:
                     structure = StructureSession(root, plugin)
                 result = structure.handle(args, current, apply, lambda: state_xml(plugin.raw_state),
-                                          lambda: revision_number)
+                                          revision)
                 result["revision_number"] = revision_number
+            elif op == "ui_accept":
+                from .native_visual import inspect_editor
+
+                before = bytes(plugin.raw_state)
+                before_revision = content_fingerprint(current())
+                try:
+                    result = inspect_editor(plugin, root / "visual" / uuid.uuid4().hex, args)
+                    result["window_policy"] = window_policy
+                finally:
+                    plugin.raw_state = before
+                    settle_scripts(SETTLE_SECONDS)
+                result["state_restored"] = bytes(plugin.raw_state) == before
+                result["revision"] = content_fingerprint(current())
+                result["semantic_state_restored"] = result["revision"] == before_revision
+                if not result["semantic_state_restored"]:
+                    revision_number += 1
+                    connection_plans.clear()
+                    aliases.clear()
+                from .bridge import atomic_json
+
+                atomic_json(Path(result["progress_report"]), result)
             elif op == "benchmark":
                 from .native_perf import benchmark
 
