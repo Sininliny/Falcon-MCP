@@ -387,26 +387,53 @@ def _level_db(audio) -> float:
     return round(20 * np.log10(max(rms, 1e-12)), 2)
 
 
-def _reset(plugin, rate: int, block: int):
-    """reset() plus 1 s of silence: some instruments (UADx Ravel) ignore notes that arrive right after a reset,
-    which dropped the first note of every timeline and every settle probe."""
-    plugin.reset()
-    plugin([], duration=1.0, sample_rate=rate, num_channels=2, buffer_size=block, reset=False)
+SOFT_RESET_DRAIN_SECONDS = 6.0
+
+
+def _reset(plugin, rate: int, block: int, mode: str = "soft"):
+    """Return the instrument to silence before a probe or a render.
+
+    "soft" (default): sustain off, all notes off and all sound off on every channel, then silence until the tail
+    has died (at least 1 s, at most SOFT_RESET_DRAIN_SECONDS). The plugin instance and its prepared sample rate
+    stay as they are.
+    "reinstantiate": pedalboard's reset(). For instruments pedalboard cannot tell whether reset() clears audio,
+    so it DESTROYS the plugin and creates a new one at 44100 Hz, restores the saved state into it and warms it
+    up at 44100 Hz before the next call prepares the requested rate. Plugins that fix their playback rate while
+    a state/library loads (Kontakt is the suspect for the 2026-10 48 kHz A4 = 479 Hz renders) then play
+    48000/44100 sharp. Kept only to compare against the old behaviour.
+    Both end with >= 1 s of silence: some instruments (UADx Ravel) ignore notes that arrive right after a reset."""
+    if mode == "reinstantiate":
+        plugin.reset()
+        plugin([], duration=1.0, sample_rate=rate, num_channels=2, buffer_size=block, reset=False)
+        return
+    off = []
+    for channel in range(16):
+        off += [(bytes([0xB0 + channel, 64, 0]), 0.0), (bytes([0xB0 + channel, 123, 0]), 0.0),
+                (bytes([0xB0 + channel, 120, 0]), 0.0)]
+    audio = plugin(off, duration=1.0, sample_rate=rate, num_channels=2, buffer_size=block, reset=False)
+    drained = 1.0
+    while drained < SOFT_RESET_DRAIN_SECONDS and _level_db(audio[:, -max(1, rate // 10):]) > -100:
+        audio = plugin([], duration=0.5, sample_rate=rate, num_channels=2, buffer_size=block, reset=False)
+        drained += 0.5
 
 
 def settle(plugin, request: dict) -> dict:
     """Render a short probe note until its level stops changing: sample-based instruments (Kontakt and
-    others) keep loading samples in the background after the state is set."""
+    others) keep loading samples in the background after the state is set. The last probe's pitch is
+    measured too, so a wrong internal sample rate shows up even when the MIDI has no isolated notes."""
     import numpy as np
+
+    from .render_integrity import probe_pitch
 
     channel, note, velocity = request["probe"]
     rate, block = request["sample_rate"], request["buffer_size"]
+    mode = request.get("host_reset", "soft")
     deadline = time.monotonic() + request["settle_seconds"]
     time.sleep(min(request["warmup_seconds"], request["settle_seconds"]))
     messages = [(bytes([0x90 + channel, note, velocity]), 0.0), (bytes([0x80 + channel, note, 0]), 0.6)]
-    levels, stable = [], False
+    levels, stable, audio = [], False, None
     while True:
-        _reset(plugin, rate, block)
+        _reset(plugin, rate, block, mode)
         audio = plugin(messages, duration=1.2, sample_rate=rate, num_channels=2, buffer_size=block, reset=False)
         levels.append(_level_db(audio))
         if len(levels) >= 2 and levels[-1] > -80 and abs(levels[-1] - levels[-2]) <= 0.5:
@@ -415,9 +442,66 @@ def settle(plugin, request: dict) -> dict:
         if time.monotonic() > deadline:
             break
         time.sleep(0.5)
+    pitch = probe_pitch(audio, rate, note, 0.0, 0.6) if audio is not None and channel != 9 else None
     return {"stable": stable, "probe": {"channel": channel + 1, "note": note, "velocity": velocity},
             "probe_levels_db": levels, "silent": bool(levels and max(levels) <= -80),
-            "peak_probe_db": float(np.max(levels)) if levels else None}
+            "peak_probe_db": float(np.max(levels)) if levels else None, "probe_pitch": pitch}
+
+
+def _probe_once(plugin, request: dict, rate: int) -> dict | None:
+    from .render_integrity import probe_pitch
+
+    channel, note, velocity = request["probe"]
+    block = request["buffer_size"]
+    _reset(plugin, rate, block, request.get("host_reset", "soft"))
+    audio = plugin([(bytes([0x90 + channel, note, velocity]), 0.0), (bytes([0x80 + channel, note, 0]), 0.6)],
+                   duration=1.2, sample_rate=rate, num_channels=2, buffer_size=block, reset=False)
+    return probe_pitch(audio, rate, note, 0.0, 0.6)
+
+
+def _restate_at_rate(plugin, request: dict):
+    """Prepare the requested rate, then hand the plugin its own state again so a library reloads at that rate."""
+    rate, block = request["sample_rate"], request["buffer_size"]
+    _reset(plugin, rate, block, "soft")
+    plugin.raw_state = plugin.raw_state
+    _apply_parameters(plugin, request.get("parameters"))
+
+
+def rate_guard(plugin, request: dict, settled: dict) -> tuple[dict, dict]:
+    """If the probe plays at a sample-rate ratio, collect evidence and try one remedy before rendering.
+
+    Evidence: the same probe at the suspected rate (in tune there + off at the target = the plugin kept that rate).
+    Remedy: re-prepare the target rate, restore the plugin's own state, settle again, probe again."""
+    pitch = settled.get("probe_pitch") or {}
+    guard = {"probe_before": pitch, "triggered": bool(pitch.get("rate_like_host_rate")), "remedy": None,
+             "resolved": None}
+    if not guard["triggered"]:
+        return guard, settled
+    rate = request["sample_rate"]
+    other = pitch["rate_like_host_rate"]
+    try:
+        guard["probe_at_suspected_rate"] = _probe_once(plugin, request, other)
+    except Exception as exc:  # noqa: BLE001 - evidence only
+        guard["probe_at_suspected_rate"] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+    at_other = guard["probe_at_suspected_rate"]
+    shift = f"{pitch['cents_error']:+.1f} cents off at {rate} Hz"
+    if at_other.get("status") == "ok":
+        guard["diagnosis"] = (f"Probe is in tune at {other} Hz but {shift}: the plugin kept {other} Hz internally "
+                              f"after the host prepared {rate} Hz.")
+    else:
+        guard["diagnosis"] = (f"Probe is {shift}; at {other} Hz it was not clean either "
+                              f"({at_other.get('cents_error', at_other.get('status'))}), so the cause is not established.")
+    try:
+        _restate_at_rate(plugin, request)
+        guard["remedy"] = "state_restored_at_target_rate"
+        settled = {**settle(plugin, {**request, "warmup_seconds": 0}), "first_attempt": settled}
+        after = settled.get("probe_pitch") or {}
+        guard["probe_after"] = after
+        guard["resolved"] = after.get("status") == "ok" and not after.get("rate_like_host_rate")
+    except Exception as exc:  # noqa: BLE001 - the render still runs and is marked unusable
+        guard["remedy"] = f"failed: {type(exc).__name__}: {exc}"
+        guard["resolved"] = False
+    return guard, settled
 
 
 def _select_program(plugin, request: dict) -> dict | None:
@@ -442,21 +526,33 @@ def render(request: dict, result_path: Path):
 
     from .perform import read_timeline
     from .rack import CHUNK_SECONDS, MAX_RACK_SECONDS, chunk_messages
-    from .render_integrity import inspect_render, validate_audio_block
+    from .render_integrity import inspect_render, validate_audio_block, write_sidecar
 
     loaded = time.monotonic()
     plugin = _load(request["bundle"], request.get("plugin_name"))
     rate, block = request["sample_rate"], request["buffer_size"]
     # Establish the requested processing rate BEFORE a sample library restores its state.
     # This avoids restoring into an unprepared default-rate host; integrity checks still verify the result.
-    _reset(plugin, rate, block)
-    _apply_state(plugin, request.get("state"))
+    mode = request.get("host_reset", "soft")
+    _reset(plugin, rate, block, "soft")
+    restated = None
+    if request.get("state"):
+        _apply_state(plugin, request.get("state"))
+    else:
+        # load_plugin instantiated (and warmed up) the plugin at 44100 Hz; hand it its default state again now
+        # that the requested rate is prepared, like a state file would be.
+        try:
+            plugin.raw_state = plugin.raw_state
+            restated = True
+        except Exception:  # noqa: BLE001 - plugins without a readable state keep their default
+            restated = False
     instrument = _load_instrument(plugin, request)
     applied = _apply_parameters(plugin, request.get("parameters"))
     writes = parameter_readback(plugin, request.get("parameters") or {}, "after_write")
     program = _select_program(plugin, request)
     load_seconds = time.monotonic() - loaded
     settled = settle(plugin, request)
+    guard, settled = rate_guard(plugin, request, settled)
     after_settle = parameter_readback(plugin, request.get("parameters") or {}, "after_settle")
     rate, block = request["sample_rate"], request["buffer_size"]
     renders = []
@@ -468,7 +564,7 @@ def render(request: dict, result_path: Path):
         target.parent.mkdir(parents=True, exist_ok=True)
         peak, energy, frames, started = 0.0, 0.0, 0, time.monotonic()
         onset = None
-        _reset(plugin, rate, block)
+        _reset(plugin, rate, block, mode)
         with sf.SoundFile(str(target), "w", samplerate=rate, channels=2, subtype="FLOAT") as out:
             start = 0.0
             while start < length - 1e-9:
@@ -487,7 +583,10 @@ def render(request: dict, result_path: Path):
                 out.write(audio.T)
                 start = end
         rms = (energy / max(frames * 2, 1)) ** 0.5
-        integrity = inspect_render(target, rate, length, messages)
+        final_probe = (guard.get("probe_after") if guard["triggered"] else None) or settled.get("probe_pitch")
+        integrity = inspect_render(target, rate, length, messages, probe=final_probe)
+        integrity["rate_guard"] = guard
+        write_sidecar(target, integrity)
         renders.append({"path": str(target), "frames": frames, "seconds": round(frames / rate, 3),
                         "peak_dbfs": round(20 * np.log10(max(peak, 1e-12)), 2),
                         "rms_dbfs": round(20 * np.log10(max(rms, 1e-12)), 2), "silent": peak < 1e-4,
@@ -500,7 +599,8 @@ def render(request: dict, result_path: Path):
         "parameters_applied": applied,
         "parameter_readback": [writes, after_settle,
                                parameter_readback(plugin, request.get("parameters") or {}, "after_render")],
-        "processing_prepared_before_state": True,
+        "processing_prepared_before_state": True, "host_reset": mode, "rate_guard": guard,
+        "default_state_restored_at_rate": restated,
         "window_policy": request.get("window_policy"),
         "program": program, "instrument": instrument, "renders": renders}},
         allow_nan=False), encoding="utf-8")

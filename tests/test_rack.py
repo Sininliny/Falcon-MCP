@@ -215,6 +215,40 @@ async def test_rate_shift_is_reported_and_blocks_a_misleading_reference_compare(
         reference=PluginSpec(plugin=str(plugin)), falcon_session_id=tools["host"].session_id,
         sweep=rack_sweep(notes=[69]), sample_rate=48000, warmup_seconds=0, settle_seconds=5))
     assert not compared["compared"] and compared["reason_code"] == "reference_integrity_unverified"
+    guard = shifted["render"]["rate_guard"]
+    assert guard["triggered"] and guard["resolved"] is False and "in tune at 44100" in guard["diagnosis"]
+    assert shifted["render"]["comparison_usable"] is False
+    # The saved record makes a later plain comparison refuse the same file.
+    with pytest.raises(ValueError, match="reference_integrity_unusable"):
+        await tools["falcon_midi_compare"](midi_path=shifted["timeline"]["mid_path"],
+                                           reference_path=shifted["render"]["path"],
+                                           candidate_path=normal["render"]["path"], wait_seconds=10)
+
+
+@pytest.mark.parametrize("host_reset", ["soft", "reinstantiate"])
+async def test_instrument_reinstantiated_at_44k_plays_sharp_at_48k(tools, tmp_path, host_reset):
+    """The suspected Kontakt mechanism: pedalboard's reset() rebuilds instruments at 44100 Hz and restores
+    their state there; a plugin that keeps that rate plays 48000/44100 sharp (A4 = 479 Hz). The soft reset
+    keeps the instance prepared at the requested rate."""
+    plugin = tmp_path / "Latch.vst3"
+    plugin.write_bytes(b"plugin")
+    out = await _finish(tools, await tools["falcon_rack_render"](
+        plugin=str(plugin), sweep=rack_sweep(notes=[69]), sample_rate=48000, warmup_seconds=0,
+        settle_seconds=5, host_reset=host_reset))
+    assert out["status"] == "done", out
+    render = out["render"]
+    assert render["host_reset"] == host_reset
+    if host_reset == "soft":
+        assert render["comparison_usable"] and not render["rate_guard"]["triggered"]
+        assert render["settle"]["probe_pitch"]["measured_hz"] == pytest.approx(440, abs=1)
+    else:
+        guard = render["rate_guard"]
+        assert guard["probe_before"]["measured_hz"] == pytest.approx(479, abs=1.5)
+        assert guard["probe_at_suspected_rate"]["status"] == "ok" and guard["resolved"] is False
+        assert not render["comparison_usable"]
+        assert "probe_sample_rate_like_pitch_shift" in render["integrity"]["unusable_reasons"]
+        assert render["integrity"]["pitch"]["sample_rate_ratio_suspected"]
+    assert Path(render["path"] + ".integrity.json").is_file()
 
 
 async def test_render_sweep_settles_and_chunks(tools, tmp_path):

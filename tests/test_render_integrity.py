@@ -31,9 +31,12 @@ def test_pitch_clock_check_does_not_confuse_correct_headers_with_correct_audio(t
     assert report["pitch"]["sample_rate_ratio_suspected"] == warning
     row = report["pitch"]["notes"][0]
     assert row["measured_hz"] == pytest.approx(hz, abs=1)
-    assert report["status"] == ("warning" if warning else "ok")
+    assert report["status"] == ("failed" if warning else "ok")
+    assert report["comparison_usable"] is not warning
     if warning:
         assert "does not identify the cause" in report["warnings"][-1]
+        assert report["unusable_reasons"] == ["sample_rate_like_pitch_shift"]
+        assert report["pitch"]["suspected_internal_rate"] == 44100
 
 
 def test_wrong_header_duration_polyphony_and_bends_are_explicit(tmp_path):
@@ -108,3 +111,58 @@ def test_stem_analysis_refuses_different_lengths_and_preview_can_be_disabled():
 
     with pytest.raises(ValueError, match="frame counts"):
         analyze_set(16000, [], tone(16000), [{"name": "short", "solo": tone(16000)[:-1]}])
+
+
+def test_rate_like_shifts_cover_both_directions_but_not_octaves():
+    from falcon_mcp.render_integrity import matching_rate, rate_like_shifts
+
+    assert rate_like_shifts(48000)[44100] == pytest.approx(146.7, abs=0.1)
+    assert rate_like_shifts(44100)[48000] == pytest.approx(-146.7, abs=0.1)
+    assert 48000 not in rate_like_shifts(96000)  # an exact octave looks like a tracker octave error
+    assert matching_rate([146.0, 150.1], 48000) == 44100
+    assert matching_rate([146.0, -146.0], 48000) is None
+    assert matching_rate([20.0], 48000) is None
+
+
+def test_probe_pitch_flags_the_kontakt_symptom_without_any_midi_notes(tmp_path):
+    from falcon_mcp.render_integrity import probe_pitch
+
+    sharp = probe_pitch(tone(48000, 440 * 48000 / 44100, 1.2).T, 48000, 69, 0.0, 0.6)
+    assert sharp["rate_like_host_rate"] == 44100 and sharp["measured_hz"] == pytest.approx(479, abs=1)
+    fine = probe_pitch(tone(48000, 440, 1.2), 48000, 69, 0.0, 0.6)
+    assert fine["status"] == "ok" and fine["rate_like_host_rate"] is None and not fine["offset_too_large"]
+    # A pedalled piano phrase gives the MIDI check nothing to measure; the probe still decides.
+    path = tmp_path / "pedal.wav"
+    sf.write(path, tone(48000, 440 * 48000 / 44100), 48000, subtype="FLOAT")
+    pedal = [(bytes([0xB0, 64, 127]), 0.0)] + NOTES
+    report = inspect_render(path, 48000, 2, pedal, probe=sharp)
+    assert report["pitch"]["status"] == "untested"
+    assert not report["comparison_usable"] and report["unusable_reasons"] == ["probe_sample_rate_like_pitch_shift"]
+
+
+def test_uniform_offset_that_is_not_a_rate_ratio_is_still_unusable(tmp_path):
+    path = tmp_path / "transposed.wav"
+    t = np.arange(48000 * 3) / 48000
+    up = 2 ** (100 / 1200)  # a whole tuning offset of +100 cents
+    left = np.where(t < 1.4, np.sin(2 * np.pi * 440 * up * t), np.sin(2 * np.pi * 523.25 * up * t)) * 0.2
+    sf.write(path, np.column_stack([left, left]), 48000, subtype="FLOAT")
+    notes = [(bytes([0x90, 69, 80]), .05), (bytes([0x80, 69, 0]), 1.35),
+             (bytes([0x90, 72, 80]), 1.5), (bytes([0x80, 72, 0]), 2.9)]
+    report = inspect_render(path, 48000, 3, notes)
+    assert report["pitch"]["global_offset"] and report["unusable_reasons"] == ["global_pitch_offset"]
+
+
+def test_sidecar_gate_refuses_unusable_and_ignores_changed_files(tmp_path):
+    from falcon_mcp.render_integrity import gate_files, reference_gate, write_sidecar
+
+    path = tmp_path / "ref.wav"
+    sf.write(path, tone(48000, 440 * 48000 / 44100), 48000, subtype="FLOAT")
+    write_sidecar(path, inspect_render(path, 48000, 2, NOTES))
+    gate = reference_gate(path)
+    assert gate["checked"] and gate["usable"] is False
+    with pytest.raises(ValueError, match="reference_integrity_unusable"):
+        gate_files({"reference": path}, allow_unverified=False)
+    assert gate_files({"reference": path}, allow_unverified=True)["reference"]["usable"] is False
+    sf.write(path, tone(48000, 440, 2.5), 48000, subtype="FLOAT")  # re-rendered: the old record is void
+    assert reference_gate(path)["checked"] is False
+    assert reference_gate(tmp_path / "external.wav")["usable"] is None

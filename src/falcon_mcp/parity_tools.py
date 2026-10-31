@@ -8,7 +8,7 @@ from typing import Annotated, Any
 
 from pydantic import Field
 
-from . import parity
+from . import parity, render_integrity
 from .audio import read_audio
 from .result_scope import declare
 
@@ -32,6 +32,7 @@ def register_parity(mcp, config) -> None:
         centroid_tolerance_pct: Annotated[float, Field(ge=0.5, le=50)] = 5.0,
         band_tolerance_db: Annotated[float, Field(ge=0.5, le=12)] = 2.0,
         max_lag_seconds: Annotated[float, Field(ge=0, le=5)] = 2.0,
+        allow_unverified_audio: bool = False,
     ) -> dict[str, Any]:
         """Check whether offline renders match a standalone/VST reference of the same MIDI (pass/fail).
 
@@ -40,10 +41,15 @@ def register_parity(mcp, config) -> None:
         too short), peak, spectral centroid and octave-band balance. verdict is consistent, inconsistent or
         untestable (rate mismatch, silence, too little overlap). Not bit equality: realtime and offline
         renders differ in buffer size and free-running modulation phase. Same notes, velocities,
-        controllers and sample rate are required; nothing is resampled or normalized.
+        controllers and sample rate are required; nothing is resampled or normalized. A file whose render
+        check (<file>.integrity.json) marked it unusable (wrong rate/length, sample-rate-like pitch shift) is
+        refused unless allow_unverified_audio=true; integrity_gate shows what was checked.
         """
         reference = config.audio_path(reference_path)
         paths = [config.audio_path(p) for p in candidate_paths]
+        gates = render_integrity.gate_files(
+            {"reference": Path(reference), **{f"candidate {p}": Path(q) for p, q in zip(candidate_paths, paths)}},
+            allow_unverified_audio)
         loaded = await asyncio.gather(*(asyncio.to_thread(read_audio, p, 60) for p in [reference, *paths]))
         names = [Path(p).name for p in candidate_paths]
         if len(set(names)) != len(names):
@@ -51,4 +57,4 @@ def register_parity(mcp, config) -> None:
         report = await asyncio.to_thread(
             parity.compare, loaded[0], dict(zip(names, loaded[1:])), loudness_tolerance_db,
             centroid_tolerance_pct, band_tolerance_db, max_lag_seconds)
-        return {"reference": str(reference), **report}
+        return {"reference": str(reference), **report, "integrity_gate": gates}
