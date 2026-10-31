@@ -9,7 +9,7 @@ on the same MIDI or the same single notes, without rendering in a DAW.
    plugin window on the desktop; tell the user to load the instrument and close the window. Or pass a
    `.vstpreset` path exported from a DAW as `state`.
 3. Start the owned Falcon session and load the candidate (`falcon_native_host`, `falcon_native_file`).
-4. `falcon_rack_compare(reference={"plugin": ..., "state": ...}, falcon_session_id=..., sweep={...})` for
+4. `falcon_rack_compare(reference={"plugin": ..., "state": ...}, falcon_instance_id=..., sweep={...})` for
    single notes across keys and velocities, or `midi_path=...` for a passage. The Falcon side renders at most 60 s including `tail_seconds`; a
    sweep of 15 notes with hold 2 s and gap 1.5 s fits. Falcon itself cannot be a rack plugin.
    If it returns `status: "running"`, call `falcon_rack_job(job_id)`.

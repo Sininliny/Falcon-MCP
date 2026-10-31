@@ -7,7 +7,7 @@ playability with `falcon_native_perf_benchmark`.
 Loop:
 1. `falcon_perf_static(path, passage="dense_chords")` on the saved file. Look for per-voice (keygroup)
    FX, heavy modules, and polyphony below the passage's sounding-note count.
-2. `falcon_native_perf_benchmark(session_id, passage=..., buffer_size=<the user's live buffer>,
+2. `falcon_native_perf_benchmark(instance_id, passage=..., buffer_size=<the user's live buffer>,
    attribute="auto")`. Use `pedal_wash` or `polyphony` for pianos and pads, `retrigger` for plucks and
    drums, and the user's own events for a real part.
 3. Read `scope`, then `verdict`, `findings`, `per_note` and `attribution`. Change one thing, then re-run

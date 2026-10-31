@@ -32,7 +32,8 @@ class NativeHost:
     def status(self):
         active = self.process is not None and self.process.returncode is None
         return {
-            "running": active, "session_id": self.session_id if active else None,
+            "running": active, "instance_id": self.session_id if active else None,
+            "session_id": self.session_id if active else None,
             "scope": "MCP-owned VST3 instance; not the open standalone/DAW instance",
             "log": str(self.log) if self.log else None,
             "note": "Use native_file/native_edit/native_render here; Lua bridge tools still address standalone.",
@@ -93,7 +94,7 @@ class NativeHost:
 
     def _check(self, session_id):
         if not self.status()["running"] or session_id != self.session_id:
-            raise RuntimeError("Native session changed/stopped; inspect native_host status and use its session_id")
+            raise RuntimeError("Native session changed/stopped; inspect native_host status and use its instance_id")
 
     async def request(self, session_id: str, op: str, args: dict, timeout: float | None = None):
         async with self.lock:

@@ -11,7 +11,7 @@ Keep four deliverables distinct: instrument sound, performance routing, library 
 
 ## Choose the execution context
 
-- For automated load/save and repeatable audio rendering, use `falcon_native_host`, `falcon_native_file`, `falcon_native_edit`, and `falcon_native_render`. They control a separate owned VST3 instance, guarded by its returned `session_id`, without opening an editor or driving the desktop. Read [native sessions and reference matching](references/native-and-reference.md) before using this path.
+- For automated load/save and repeatable audio rendering, use `falcon_native_host`, `falcon_native_file`, `falcon_native_edit`, and `falcon_native_render`. They control a separate owned VST3 instance, guarded by its returned `instance_id`, without opening an editor or driving the desktop. Read [native sessions and reference matching](references/native-and-reference.md) before using this path.
 - For the already-open standalone/DAW instance, use the Lua bridge workflow below. Native-host tools cannot capture its unsaved state. Never assume the two contexts contain the same Program. Public Lua Program/Multi save/load remains unavailable.
 - For an uploaded/local reference, `falcon_analyze_reference` selects exact timestamps and preserves the target instrument and requested changes. `falcon_compare_reference` compares subsequent renders/captures; `falcon_audio_meter` provides compact level evidence. These tools support agents without native audio input. Read the same reference for interpretation limits.
 

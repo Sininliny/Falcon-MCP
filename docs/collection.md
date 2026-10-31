@@ -8,7 +8,7 @@ they sound.
 
 ## Tools
 
-- `falcon_native_collection(session_id, instruments, keys?, velocities?, hold_seconds=1.5, tail_seconds=1.5,
+- `falcon_native_collection(instance_id, instruments, keys?, velocities?, hold_seconds=1.5, tail_seconds=1.5,
   check_repeat=true, keep_audio=false, wait_seconds=40)` (owned VST3 session). `instruments` is a list of
   2..8 `{name, path, part}` entries, each a local unprotected `.uvip` (replaces `part`) or `.uvim`.
   Keys default to 36, 48, 60, 72, 84 and velocities to 40, 80, 120. Each cell is one held note rendered on

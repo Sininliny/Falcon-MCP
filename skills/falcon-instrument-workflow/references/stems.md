@@ -2,7 +2,7 @@
 
 Use after the sound basically works and before adding more layers.
 
-1. `falcon_native_stems(session_id, phrase=...)` with a phrase that exercises the question:
+1. `falcon_native_stems(instance_id, phrase=...)` with a phrase that exercises the question:
    `sustain_pedal` / `pedal_wash` for resonance and clarity under pedal, `dense_chords` for masking,
    `retrigger` for hammer/transient layers. Targets default to every Layer; use `groups` for
    "Body", "Modes", "Noise" sets.
