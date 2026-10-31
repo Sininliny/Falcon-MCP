@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "template_id": "wavetable-v1",
+  "falcon_version": "27.0.2",
+  "verified": false,
+  "source": "Program/Layer/Keygroup/AnalogADSR come from the native-validated analog-v1 builder template. The WaveTableOscillator element is assembled from the indexed parameter list (data/parameters.json) plus the persistent fields below; it has not been read back from a Falcon-saved file yet.",
+  "oscillator_tag": "WaveTableOscillator",
+  "path_attribute": "WavetablePath",
+  "unverified_fields": ["WavetablePath"],
+  "fixed_attributes": {
+    "NoteTracking": "1",
+    "BaseNote": "60",
+    "WaveIndex": "0",
+    "FadeWaveIndex": "1"
+  },
+  "connections": [
+    {"Name": "PitchBendMod", "Ratio": "2", "Source": "@PitchBend", "Destination": "Pitch", "Mapper": "",
+     "ConnectionMode": "0", "Bypass": "0", "Inverted": "0"}
+  ],
+  "upgrade": "Save one Program with a Wavetable oscillator from Falcon and pass it as template_from: its element (every attribute Falcon persisted, including the real media path field) replaces this template and only the path and listed parameters are rewritten."
+}
