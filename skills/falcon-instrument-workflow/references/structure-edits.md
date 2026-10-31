@@ -52,7 +52,7 @@ CPU per voice: check with `falcon_native_perf_benchmark` before saving.
 ## Example: velocity-bright felt tone per key
 
 ```json
-{"action": "preview", "session_id": "...", "target": "Engine[1]/Synth[1]/Children[1]/Part[1]/Program[1]/Layers[1]/Layer[1]",
+{"action": "preview", "instance_id": "...", "target": "Engine[1]/Synth[1]/Children[1]/Part[1]/Program[1]/Layers[1]/Layer[1]",
  "scope": "keygroups", "module": "MoogFilter", "label": "Felt Tone", "position": "end",
  "parameters": [{"name": "Freq", "value": 900.0}, {"name": "KeyTracking", "value": 0.5}],
  "modulations": [{"source": "velocity", "destination": "Freq", "ratio": 0.5}]}

@@ -3,7 +3,7 @@
 Single notes do not prove an instrument plays well. After the timbre is close, run the performance suite on
 the owned host before acceptance:
 
-1. `falcon_native_perform_suite(session_id)` for a scorecard (retrigger, legato, sustain_pedal, dense_chords,
+1. `falcon_native_perform_suite(instance_id)` for a scorecard (retrigger, legato, sustain_pedal, dense_chords,
    polyphony, expression). Use `root` near the instrument's main range; add `cross_channel` with `channels`
    when several Parts are routed.
 2. For each `warn`/`fail`, re-run that phrase with `falcon_native_perform(phrase=..., include_table=true)` to

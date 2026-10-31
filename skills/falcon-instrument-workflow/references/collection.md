@@ -3,7 +3,7 @@
 Use before choosing between several instruments of one kind, or when a library looks larger than it sounds.
 
 1. Start a fresh owned host (`falcon_native_host(action="start")`) so only the loaded Program answers channel 1.
-2. `falcon_native_collection(session_id, instruments=[{name, path}, ...])`. Defaults: keys 36-84 in octaves,
+2. `falcon_native_collection(instance_id, instruments=[{name, path}, ...])`. Defaults: keys 36-84 in octaves,
    velocities 40/80/120. If it returns `status: "running"`, call `falcon_native_collection_result(job_id)`
    until `status` is `"done"`; do not edit the session meanwhile.
 3. Read `clusters` (shared core recordings), `same_instrument_groups`, `shared_matrix`, `findings`.

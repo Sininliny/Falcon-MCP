@@ -176,7 +176,7 @@ The server exposes **56 tools**, structured schemas, the `falcon://capabilities`
 - Keep the audio engine processing. Host plugin sleep pauses both launcher and mailbox polling.
 - Wrapper MIDI channels are 1..16; native `MidiEvent` channels are 0..15. `post_event.delta` is milliseconds. Apply sample offsets at voice start; later calls cannot reposition an already-playing voice.
 - Use a distinct runtime home for each Falcon instance. Multiple MCP clients serialize access to one mailbox through OS locks.
-- Native tools use their returned `session_id` and native child paths. Lua tools use the standalone bridge instance and Lua selectors. Edits in one context do not appear in the other. Stop the owned host when finished.
+- Native tools use their returned `instance_id` and native child paths. Lua tools use the standalone bridge instance and Lua selectors. Edits in one context do not appear in the other. Stop the owned host when finished.
 
 Example parameter write, after reading the target definition/value:
 

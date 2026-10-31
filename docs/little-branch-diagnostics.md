@@ -123,7 +123,7 @@ flags for native screenshot and mouse checks. Offline layout/callback tests cann
 bounds, clipping, scaling, text contrast or interaction. `falcon_ui_live_probe` tests parameter callbacks,
 not mouse hit boxes.
 
-`falcon_native_ui_accept(session_id=...)` explicitly opens the actual owned Falcon editor **on the
+`falcon_native_ui_accept(instance_id=...)` explicitly opens the actual owned Falcon editor **on the
 worker's isolated Windows desktop**, captures its client area to PNG and closes it. Inspect the returned
 image before choosing client-pixel coordinates. Optional `actions` support `click` (x,y) and `drag`
 (x,y,end_x,end_y), with child-window hit testing. Each action returns before/after native parameter

@@ -702,6 +702,10 @@ def create_server(config: Config | None = None) -> FastMCP:
     from .result_scope import install_result_scope
 
     install_result_scope(mcp, cfg, bridge, native_host)
+    # After result_scope: advertise session_id as instance_id for relays that drop session_id.
+    from .session_alias import install_session_alias
+
+    install_session_alias(mcp)
     # Audit at the protocol boundary, so rejected input/unknown tools are logged too.
     for request_type, original in list(mcp._mcp_server.request_handlers.items()):
 

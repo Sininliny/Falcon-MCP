@@ -12,7 +12,7 @@ report each result with its layer. Never write "UI verified" when only the model
    - Low-confidence findings rest on auto-layout estimates; give the widgets explicit `bounds`.
 2. `falcon_ui_live_probe(script_selector, widget, values, watch)` with the targets listed under `controls`.
    `observed` confirms the callback path in real Falcon; `inconclusive` is not a pass.
-3. `falcon_native_ui_roundtrip(session_id, part)` after saving: `save_reload: kept` means engine and script
+3. `falcon_native_ui_roundtrip(instance_id, part)` after saving: `save_reload: kept` means engine and script
    state survive reload in the owned VST3 instance.
 4. Mouse input is never tested by these tools. Ask the user for one manual drag of each control type, or
    state in the release notes that mouse interaction was not tested.

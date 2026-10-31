@@ -20,7 +20,7 @@ re-implement what pedalboard already does. So the rack is a thin layer over the 
 | `falcon_rack_scan` | Finds `*.vst3` in the standard folders (Windows: `Common Files\VST3`, `%LOCALAPPDATA%\Programs\Common\VST3`), `FALCON_RACK_VST3_PATHS` and `folders`. New or updated plugins are loaded once each to read name, vendor, instrument/effect; cached in `<home>/rack/plugins.json`. |
 | `falcon_rack_state` | Opens the plugin's own window on the desktop. The user sets it up (load Noire in Kontakt) and closes it; the state is saved as `<home>/rack/states/<name>.vstpreset`. With `instrument=<.nki>` no user is needed. |
 | `falcon_rack_render` | Renders one plugin (+ state, + optional exposed parameters) from `midi_path`, `events` or `sweep`. |
-| `falcon_rack_compare` | Renders the reference plugin and the candidate from one timeline, then runs `falcon_midi_compare`. The candidate is the owned Falcon session (`falcon_session_id`) or another rack plugin. |
+| `falcon_rack_compare` | Renders the reference plugin and the candidate from one timeline, then runs `falcon_midi_compare`. The candidate is the owned Falcon session (`falcon_instance_id`) or another rack plugin. |
 | `falcon_rack_presets` | Lists the sounds a plugin can switch to without its window: saved states and its `.vstpreset` files (standard VST3 preset folders, `FALCON_RACK_PRESET_PATHS`, the bundle). |
 | `falcon_rack_job` | Waits for or collects any rack job (scan, state, render, compare). |
 
@@ -76,7 +76,7 @@ Each run writes `<audio root>/rack/<run>/timeline.events.json`, `timeline.mid` a
    window appears within 180 s (for example a server running as a service in
    session 0) the call fails at once with the session numbers instead of waiting for nobody. A `.vstpreset` exported from a DAW also works: pass its path as `state`.
 3. `falcon_native_host(action="start")`, load the candidate Multi with `falcon_native_file`.
-4. `falcon_rack_compare(reference={"plugin": "Kontakt 8", "state": "noire"}, falcon_session_id=...,
+4. `falcon_rack_compare(reference={"plugin": "Kontakt 8", "state": "noire"}, falcon_instance_id=...,
    sweep={...})` for a per-key, per-velocity view, or `midi_path=...` for a passage.
 5. Read `comparison.findings`, `velocity_curves`, `by_register`; change one thing in Falcon; repeat step 4.
 
@@ -96,7 +96,7 @@ Each run writes `<audio root>/rack/<run>/timeline.events.json`, `timeline.mid` a
 - Renders run in 30 s chunks without resetting the plugin between chunks, up to 30 minutes.
 - The owned Falcon session renders at most 60 s per call. Falcon itself is not played in the rack: in the
   live test Falcon.vst3 stalled there (its default Multi starts the MCP launcher, which only the owned
-  session strips), so the rack refuses it and points to `falcon_session_id`.
+  session strips), so the rack refuses it and points to `falcon_instance_id`.
 - Offline rendering (pedalboard uses non-realtime processing): no dropouts and no CPU limits. Only VST3 (no
   VST2). Silent renders are flagged and stop a comparison.
 - Results are DSP measurements, not a perceptual verdict.

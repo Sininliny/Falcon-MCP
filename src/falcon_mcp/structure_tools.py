@@ -162,7 +162,7 @@ def register_structure(mcp, config, audit, host):
         if action == "modules":
             return modules()
         if session_id is None:
-            raise ValueError(f"{action} requires the native session_id")
+            raise ValueError(f"{action} requires the native instance_id")
         if action == "history":
             return await host.request(session_id, "structure", {"action": "history"})
         if action == "rollback":

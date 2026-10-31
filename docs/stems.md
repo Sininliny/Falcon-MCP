@@ -89,7 +89,7 @@ and feature changes smaller than the repeat-to-repeat change are ignored.
 
 ## Typical use
 
-1. `falcon_native_stems(session_id, phrase="sustain_pedal")`.
+1. `falcon_native_stems(instance_id, phrase="sustain_pedal")`.
 2. Read `table` and `findings`: which layers are `inaudible` or `masked`, which roles each one actually plays,
    where the stereo image comes from, whether effects only add level.
 3. Change one thing (raise the resonance layer, cut the body's 2-4 kHz, shorten the room), rerun, compare.

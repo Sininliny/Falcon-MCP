@@ -316,7 +316,7 @@ async def test_live_findings_unload_hang_first_note_editor_timeout_falcon(tools)
     saved = await _finish(tools, await tools["falcon_rack_state"](plugin="Patient", name="late", window_mode="interactive",
                                                                   timeout_minutes=0.03))
     assert saved["status"] == "done" and saved["closed_by_timeout"] is True
-    with pytest.raises(ValueError, match="falcon_session_id"):
+    with pytest.raises(ValueError, match="falcon_instance_id"):
         await tools["falcon_rack_render"](plugin="Falcon", sweep=rack_sweep(notes=[60]))
 
 

@@ -56,7 +56,7 @@ def register_native(mcp, config, audit):
         Requires optional [host] dependency and a licensed Windows Falcon installation.
         Startup briefly removes MCP launchers from the saved default Multi and restores original
         bytes before returning; an independent supervisor restores on cancellation/failure.
-        Does not reload or control the open standalone/DAW session. Native tools use this session_id;
+        Does not reload or control the open standalone/DAW session. Native tools take its instance_id;
         existing Lua bridge tools retain their standalone target. Persistent Lua loops may stall
         offline rendering; timeouts stop the owned worker instead of driving the user's desktop.
         """
@@ -64,7 +64,7 @@ def register_native(mcp, config, audit):
             return await host.start()
         if action == "stop":
             if session_id is None:
-                raise ValueError("stop requires the inspected session_id")
+                raise ValueError("stop requires the inspected instance_id")
             return await host.stop(session_id)
         result = host.status()
         if result["running"]:

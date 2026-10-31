@@ -51,7 +51,7 @@ declare("falcon_rack_render", "rack_plugin_host", ["offline_render", "plugin_set
         ["third_party_state", "realtime_cpu", "perceptual_quality"])
 declare("falcon_rack_compare", "rack_plugin_host", ["offline_render", "plugin_settled", "dsp_measured"],
         ["third_party_state", "realtime_cpu", "perceptual_quality"],
-        note="A Falcon side named by falcon_session_id is rendered by the owned VST3 session (falcon_native_host).")
+        note="A Falcon side named by falcon_instance_id is rendered by the owned VST3 session (falcon_native_host).")
 declare("falcon_rack_job", "rack_plugin_host")
 declare("falcon_rack_presets", "rack_plugin_host", ["file_hash"], ["third_party_state"],
         note="Lists preset files on disk; does not load the plugin.")
@@ -349,8 +349,8 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
             raise ValueError(str(exc)) from exc
         if bundle.stem.lower().startswith("falcon"):
             # Live test 2026-10-23: Falcon.vst3 stalls in the rack (its default Multi starts the MCP launcher).
-            raise ValueError("Falcon is not played in the rack: use falcon_native_host and pass its session_id as "
-                             "falcon_session_id to falcon_rack_compare")
+            raise ValueError("Falcon is not played in the rack: use falcon_native_host and pass its instance_id as "
+                             "falcon_instance_id to falcon_rack_compare")
         state = runner.state_path(spec.state, bundle, row)
         instrument = Path(spec.instrument).expanduser().resolve() if spec.instrument else None
         if instrument is not None and not instrument.is_file():
@@ -659,7 +659,7 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         sweeps give a clean per-key/per-velocity comparison. Runs as a job; collect with falcon_rack_job.
         """
         if (candidate is None) == (falcon_session_id is None):
-            raise ValueError("Pass exactly one candidate: falcon_session_id (owned Falcon session) or candidate")
+            raise ValueError("Pass exactly one candidate: falcon_instance_id (owned Falcon session) or candidate")
         if midi_compare_run is None:
             raise RuntimeError("falcon_midi_compare is not available in this server")
         if note_range and note_range[1] < note_range[0]:

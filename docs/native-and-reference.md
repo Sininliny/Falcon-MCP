@@ -25,7 +25,7 @@ The native context does not require a Master launcher or any mouse/editor intera
 
 | Tool | Operation |
 |---|---|
-| `falcon_native_host` | Start/status/stop a supervised, separate Falcon VST3 instance; returns `session_id`. |
+| `falcon_native_host` | Start/status/stop a supervised, separate Falcon VST3 instance; returns `instance_id`. |
 | `falcon_native_file` | Native load/save for a Program (`.uvip`) or Multi (`.uvim`); Program replacement preserves that Part's routing. |
 | `falcon_native_edit` | Browse native child paths/attributes; edit existing indexed numeric/bool parameters with exact old-value guards and native readback. |
 | `falcon_native_structure` | Add whitelisted insert modules (filter, chorus, amp, tremolo, saturation) with preview, revision guard, readback, mandatory before/after render and rollback. See [structure edits](structure-edits.md). |
@@ -34,13 +34,13 @@ The native context does not require a Master launcher or any mouse/editor intera
 | `falcon_compare_reference` | Compare a later capture/render with the saved range; separate level from spectral balance. |
 | `falcon_audio_meter` | Per-channel peaks/RMS, estimated true-peak headroom, LUFS, clipping and mono evidence. |
 
-Owned-session calls require its exact `session_id`. Native selectors are child paths starting at `Engine/Synth`, not `Synth.parts[1]` Lua selectors. Definitions used for native edits come from the official offline index; they are not live UVIScript definitions. Invalid metadata/structure edits and unknown parameter types are rejected.
+Owned-session calls require its exact `instance_id`. The parameter used to be called `session_id`; that name is still accepted, but some cloud-to-device relays reserve `session_id` and drop it, so pass `instance_id` (`falcon_instance_id` on `falcon_rack_compare`). Native selectors are child paths starting at `Engine/Synth`, not `Synth.parts[1]` Lua selectors. Definitions used for native edits come from the official offline index; they are not live UVIScript definitions. Invalid metadata/structure edits and unknown parameter types are rejected.
 
 Load uses an explicitly selected local `.uvip`/`.uvim` with unprotected UTF-8 UVI4 XML. Save outputs stay under `<FALCON_MCP_HOME>/presets`. Existing destinations require their inspected SHA-256 and receive a backup. Native serialization preserves instrument structures/scripts/state; resource collection, UFS packaging and native preview association are not implemented. Reopen saved files, render, and validate dependencies after moving a release.
 
 Startup is a guarded transaction: a saved default containing the live MCP poller would make the offline host hang or share its mailbox. A separate supervisor backs up the default, removes only MCP launchers temporarily, starts the child, and restores original bytes before reporting ready. It also restores on failure/EOF; a concurrent external default save is preserved and reported as a conflict. Avoid launching another Falcon instance during startup. The already-open Falcon session is never reloaded.
 
-Imported Multis have MCP launchers removed; ordinary user scripts remain. Persistent Lua pollers/animation loops can still stall this offline host. Operations time out and terminate the owned process tree; inspect worker logs and saved results before retrying writes. This is not universal scripted-preset compatibility. Startup backups, worker logs and the last native checkpoint remain under `<home>/native-host/<session_id>`.
+Imported Multis have MCP launchers removed; ordinary user scripts remain. Persistent Lua pollers/animation loops can still stall this offline host. Operations time out and terminate the owned process tree; inspect worker logs and saved results before retrying writes. This is not universal scripted-preset compatibility. Startup backups, worker logs and the last native checkpoint remain under `<home>/native-host/<instance_id>`.
 
 ## Relative media and portable libraries
 
@@ -79,7 +79,7 @@ Many instruments run a Lua script that writes envelope, pan and similar paramete
 
 `falcon_native_sweep`, `falcon_native_param_sweep` and `falcon_native_stems` run as background jobs (`jobs.py`). The call waits up to `wait_seconds` (default 40, below the usual 60 s client timeout) and otherwise returns `status: "running"` with `done`/`total` and a `job_id`; `falcon_native_job_result(job_id)` collects any of them (`falcon_native_stems_result` still works for stems). A client timeout does not cancel the job, so temporary edits are always restored. Only one job runs per native session.
 
-Every finished unit (sweep cell, parameter value, stem render) is saved to `<home>/reports/<job_id>.checkpoint.json`; stem WAVs stay in the run folder until the run finishes. After a failure, or after the server or owned host restarted (a new `session_id` is fine), call the same tool with the same arguments plus `resume_job_id`. The worker refuses the resume if the session state is no longer the checkpointed revision. Stems restores read each attribute before writing it back: if the instrument script rewrote a silenced value during the render (seen on Glacier and Polar Current EP for the Aux return Gain), the restore still succeeds and that render lists `silencing_overridden`, with a `silencing_overridden` finding, because its comparison understates the target. `render_timeout_seconds` (10..1800) sets the per-request limit for these tools; the default for every native request is 120 s, or `FALCON_NATIVE_REQUEST_TIMEOUT`. Past the limit the worker is stopped, as before.
+Every finished unit (sweep cell, parameter value, stem render) is saved to `<home>/reports/<job_id>.checkpoint.json`; stem WAVs stay in the run folder until the run finishes. After a failure, or after the server or owned host restarted (a new `instance_id` is fine), call the same tool with the same arguments plus `resume_job_id`. The worker refuses the resume if the session state is no longer the checkpointed revision. Stems restores read each attribute before writing it back: if the instrument script rewrote a silenced value during the render (seen on Glacier and Polar Current EP for the Aux return Gain), the restore still succeeds and that render lists `silencing_overridden`, with a `silencing_overridden` finding, because its comparison understates the target. `render_timeout_seconds` (10..1800) sets the per-request limit for these tools; the default for every native request is 120 s, or `FALCON_NATIVE_REQUEST_TIMEOUT`. Past the limit the worker is stopped, as before.
 
 Reproduce the real stdio workflow using an explicit test Multi and an isolated validation home:
 
