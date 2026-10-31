@@ -76,11 +76,18 @@ def register_native(mcp, config, audit):
         session_id: Session, action: Literal["load", "save"], kind: Literal["program", "multi"],
         path: str, part: Annotated[int, Field(ge=1, le=128)] = 1,
         expected_sha256: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")] | None = None,
+        program_context: Literal["scene", "part"] = "scene",
+        allow_script_control_changes: bool = False,
     ) -> dict[str, Any]:
         """Load/save .uvip Programs and .uvim Multis in the OWNED VST3 session, with native state readback.
 
-        Load reads an explicit local unprotected XML preset. Program load replaces one existing Part;
-        Multi load replaces all Parts/Master. Embedded MCP loops are removed to prevent mailbox collisions.
+        Load reads an explicit local unprotected XML preset. Program load replaces one Part: by default
+        (program_context="scene") with a fresh Part exactly as a one-instrument Play scene saved by Falcon
+        has it (all MIDI inputs/channels, unity gain, aux sends off, ProgramPath as filed), so a .uvip and
+        its Play .uvim render alike; "part" keeps the existing Part and its routing (older behaviour).
+        Multi load replaces all Parts/Master. After load and settling, saved script control values
+        (ScriptProcessor knob attributes) are compared with the file; if a script rewrote any, the load is
+        rejected and the previous state restored unless allow_script_control_changes=true. Embedded MCP loops are removed to prevent mailbox collisions.
         Save exports native serialized state, not a public Lua save call; outputs stay under <home>/presets.
         Existing files require expected_sha256 and get a backup. Resources are not collected; verify
         sample/image/IR paths and reopen saved files. Does not save the separate standalone/DAW instance.
@@ -103,6 +110,8 @@ def register_native(mcp, config, audit):
             raise ValueError(f"{kind} requires {suffix}; choose the correct load/save kind")
         return await host.request(session_id, action, {
             "kind": kind, "path": str(target), "part": part, "expected_sha256": expected_sha256,
+            **({"program_context": program_context, "allow_script_control_changes": allow_script_control_changes}
+               if action == "load" else {}),
         })
 
     @mcp.tool(annotations=WRITE)

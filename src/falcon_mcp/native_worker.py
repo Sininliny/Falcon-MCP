@@ -24,6 +24,9 @@ from .native_state import (
     program_nodes,
     replace_program,
     replace_state_xml,
+    scene_part,
+    script_control_readback,
+    script_controls,
     state_xml,
     strip_bridges,
 )
@@ -261,9 +264,13 @@ def engine(root: Path):
                     program = incoming.find("Program")
                     if program is None or incoming.find("Engine") is not None:
                         raise ValueError("Load a .uvip Program with kind=program; use kind=multi for .uvim")
-                    program.set("ProgramPath", source.as_posix())
                     tree = current()
-                    replace_program(tree, program, args["part"])
+                    if args.get("program_context", "scene") == "scene":
+                        # Same Part a one-instrument Play scene saved by Falcon has; ProgramPath stays as filed.
+                        scene_part(tree, program, args["part"])
+                    else:
+                        program.set("ProgramPath", source.as_posix())
+                        replace_program(tree, program, args["part"])
                 else:
                     program_nodes(incoming)
                     engine_node = incoming.find("Engine")
@@ -274,8 +281,26 @@ def engine(root: Path):
                     tree = incoming
                 expected = [p.find("Program").get("DisplayName", "Program") for p in program_nodes(tree)
                             if p.find("Program") is not None]
+                requested_controls = script_controls(tree)
+                before_state, before_source = plugin.raw_state, loaded_source
                 apply(tree)
                 settled = settle_scripts(float(args.get("settle_seconds", SETTLE_SECONDS)))
+                controls = script_control_readback(requested_controls, script_controls(current()))
+                if controls["changed"] and not args.get("allow_script_control_changes"):
+                    # A script rewrote its own saved knobs during load (e.g. a controller value of 0 replayed
+                    # into onController). Renders would not match the file, so put the previous state back.
+                    plugin.raw_state = before_state
+                    revision_number += 1
+                    connection_plans.clear()
+                    aliases.clear()
+                    settle_scripts(float(args.get("settle_seconds", SETTLE_SECONDS)))
+                    write_bytes(root / "session.uvim", state_xml(plugin.raw_state))
+                    loaded_source = before_source
+                    shown = ", ".join(f"{i['control']} {i['requested']} -> {i['effective']}" for i in controls["items"][:6])
+                    raise RuntimeError(
+                        f"Load rejected: {controls['changed']} saved script control(s) changed during load/settle "
+                        f"({shown}); the previous session state was restored. Renders would not match the file "
+                        "or a standalone load. Pass allow_script_control_changes=true to keep such a load.")
                 loaded_source = {"path": str(source), "sha256": source_hash, "kind": args["kind"],
                                  "native_revision": content_fingerprint(current())}
                 result = summary()
@@ -286,8 +311,13 @@ def engine(root: Path):
                 from .native_edit import load_parameter_readback
 
                 result["parameter_readback"] = load_parameter_readback(tree, current())
+                result["script_controls"] = controls
+                result["program_context"] = args.get("program_context", "scene") if args["kind"] == "program" else None
                 result["warnings"] = ["Native load changed indexed parameter values; inspect parameter_readback before computing levels."] \
                     if result["parameter_readback"]["changed"] else []
+                if controls["changed"]:
+                    result["warnings"].append("Saved script controls changed during load (kept on request); renders "
+                                              "will not match the file or a standalone load.")
             elif op == "save":
                 tree = current()
                 strip_bridges(tree)
