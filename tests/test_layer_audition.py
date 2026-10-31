@@ -5,13 +5,12 @@ import numpy as np
 import pytest
 import soundfile as sf
 from mcp.server.fastmcp import FastMCP
+from test_stems import LAYER, LAYERS, NOTES, RATE, SESSION, XML, FakeHost
 
 from falcon_mcp import layer_audition as la
 from falcon_mcp.audit import AuditLog
 from falcon_mcp.layer_audition_tools import ControllerSpec, RoleGroup, register_layer_audition, variant
 from falcon_mcp.native_tools import RenderNote
-
-from test_stems import LAYER, LAYERS, NOTES, RATE, SESSION, XML, FakeHost
 
 SPARE = LAYER.format(i=3, name="Spare").replace('Mute="0"', 'Mute="1"', 1)
 XML_SPARE = XML.replace("</Layers>", SPARE + "</Layers>")

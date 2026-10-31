@@ -6,7 +6,6 @@ import asyncio
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from . import layer_audition as la
@@ -16,7 +15,6 @@ from .bridge import atomic_json
 from .jobs import DEFAULT_WAIT_SECONDS, MAX_WAIT_SECONDS, jobs_for
 from .native_tools import RenderNote
 from .stem_tools import StatePatch, _categories, _related, analyze_set, discover, read_nodes, silence_change
-from .sweep_tools import _cast
 
 WRITE = {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False}
 Session = Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]
@@ -81,14 +79,14 @@ def variant(notes: list[dict], events: list[dict] | None, controller: Controller
     if controller is None or controller.kind == "parameter":
         return {"events": events} if events else {"notes": notes}
     if controller.kind == "velocity":
-        velocity = int(round(value))
+        velocity = round(value)
         if events:
             return {"events": [{**e, "velocity": velocity} if e.get("type") == "note" else e for e in events]}
         return {"notes": [{**n, "velocity": velocity} for n in notes]}
     base = events or notes_to_events(notes)
     kept = [e for e in base if not (e.get("type") == "cc" and e.get("controller") == controller.controller
                                     and int(e.get("channel", 1)) == controller.channel)]
-    return {"events": [{"type": "cc", "time": 0.0, "controller": controller.controller, "value": int(round(value)),
+    return {"events": [{"type": "cc", "time": 0.0, "controller": controller.controller, "value": round(value),
                         "channel": controller.channel}] + kept}
 
 
@@ -296,7 +294,7 @@ def register_layer_audition(mcp, config, audit, host):
                     if not boolean and low <= high and not (low <= lo <= high and low <= hi <= high):
                         raise ValueError(f"{controller.name}: {lo}..{hi} is outside the indexed range {low}..{high}")
                     for side, value in (("min", lo), ("max", hi)):
-                        cast = bool(value) if boolean else (int(round(value)) if definition["type"] in ("int", "integer")
+                        cast = bool(value) if boolean else (round(value) if definition["type"] in ("int", "integer")
                                                             else float(value))
                         extra[side] = [(controller.selector, controller.parameter, cast, definition["type"])]
                     controller_values = {"min": lo, "max": hi}
