@@ -133,6 +133,33 @@ def replace_program(multi: ET.Element, program: ET.Element, part: int) -> None:
 
 
 
+def strip_part_automation(multi: ET.Element, part: int) -> int:
+    """Drop host-automation slots that target Part `part`; returns how many were removed.
+
+    Falcon keeps an <Engine><Automation> list of AutomationConnection entries (targetPath
+    "/uvi/Part 0/Program/<script>", parameterName "<knob>"). When another Program goes into that Part,
+    slots naming the previous instrument's script knobs remain, and Falcon zeroes the new script's
+    knobs while resolving them. A Play scene saved by Falcon carries no such slots, so neither does a
+    Program loaded like one. Slots for other Parts are kept; an empty Automation element is removed.
+    """
+    parts = program_nodes(multi)
+    if not 1 <= part <= len(parts):
+        raise ValueError("Part index is outside this Multi; create/rout Parts before loading")
+    name = parts[part - 1].get("Name", f"Part {part - 1}")
+    prefix = f"/uvi/{name}/"
+    removed = 0
+    for parent in multi.iter():
+        for automation in [c for c in parent if c.tag == "Automation"]:
+            stale = [c for c in automation.findall("AutomationConnection")
+                     if c.get("targetPath", "").startswith(prefix) or c.get("targetPath") == prefix[:-1]]
+            for connection in stale:
+                automation.remove(connection)
+            removed += len(stale)
+            if stale and not len(automation):
+                parent.remove(automation)
+    return removed
+
+
 # Part attributes Falcon 27.0.2 writes when it saves a one-instrument scene (.uvim) from the browser.
 # A Program loaded "like a Play scene" gets a fresh Part with these values instead of inheriting the
 # Default Multi's Part (which pins MIDI input/channel 0). Name is kept from the replaced Part.

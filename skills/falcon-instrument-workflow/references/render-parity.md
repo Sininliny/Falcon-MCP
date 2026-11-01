@@ -4,6 +4,8 @@ The baseline is Falcon standalone or the Falcon VST in a DAW. Owned-host renders
 
 - `falcon_native_file(kind="program")` loads a `.uvip` into a fresh scene-style Part by default
   (`program_context="scene"`), so it renders like its Play `.uvim`. `"part"` keeps the existing Part.
+  It also drops host-automation slots left on that Part by the previous instrument
+  (`stale_automation_removed`); those slots are what zeroed the new script's knobs.
 - A load is rejected (previous state restored) when a script rewrote its saved knobs during load, for
   example all CC-mapped macros at 0. Read `script_controls` in the reply. Only pass
   `allow_script_control_changes=true` when the rewrite is intended.
