@@ -107,7 +107,9 @@ def register_voice_trace(mcp, config) -> None:
         trace_path is the kit's JSON (default: <FALCON_MCP_HOME>/traces/voice-trace.voice-trace.json);
         trace_text accepts pasted console output with 'FVT {...}' lines. performance_path (.mid or perform
         timeline .json) aligns keys with the MIDI and lists notes the script never received. segment:
-        all | last_transport | last_init | mark:<label>.
+        all | last_render | last_transport | last_init | mark:<label>. For owned-host renders
+        (falcon_native_perform) use last_render: each render restarts the engine clock, and the host's
+        load path can send one extra note (60, velocity 127) before the render that last_init would include.
         """
         if trace_text:
             trace = voice_trace.parse_trace(trace_text)
@@ -119,8 +121,8 @@ def register_voice_trace(mcp, config) -> None:
                                  "and wait at least flush_ms of engine time.")
             trace = await asyncio.to_thread(voice_trace.load_trace, path)
             source = str(path)
-        if not (segment in ("all", "last_transport", "last_init") or segment.startswith("mark:")):
-            raise ValueError("segment must be all, last_transport, last_init or mark:<label>")
+        if not (segment in ("all", "last_render", "last_transport", "last_init") or segment.startswith("mark:")):
+            raise ValueError("segment must be all, last_render, last_transport, last_init or mark:<label>")
         midi = None
         if performance_path:
             from .midi_compare import load_performance
