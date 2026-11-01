@@ -50,11 +50,16 @@ async def test_real_stdio_initialize_tools_resource_and_validation(config):
                 "falcon_rack_job"} <= names
         assert {"falcon_voice_trace_kit", "falcon_voice_trace_analyze"} <= names
         assert "falcon_delivery" in names
-        assert len(names) == 112
         assert {"falcon_runtime_trace", "falcon_native_ui_accept", "falcon_render_parity"} <= names
         assert {"falcon_audition_create", "falcon_audition_choose", "falcon_audition_migration",
                 "falcon_audition_history"} <= names
         assert "falcon_layer_audition" in names
+        # No hand-maintained tool count: stdio must expose exactly what create_server() registers.
+        # Do not append new tools above; test_result_scope checks every registered tool is declared.
+        from falcon_mcp.server import create_server
+
+        registered = {t.name for t in create_server(config)._tool_manager.list_tools()}
+        assert names == registered and len(names) > 100
         assert (config.runtime / "falcon_bridge.lua").is_file()
         assert all(t.outputSchema is not None for t in tools.tools)
         preset = config.runtime.parent / "export-test.uvip"
@@ -80,6 +85,7 @@ async def test_real_stdio_initialize_tools_resource_and_validation(config):
         assert result.isError
         capabilities = await client.read_resource("falcon://capabilities")
         assert "model_loaded" in capabilities.contents[0].text
+        assert json.loads(capabilities.contents[0].text)["tool_count"] == len(names)
         result = await client.call_tool("falcon_api_coverage", {"query": "playNote"})
         assert not result.isError and result.structuredContent["total_count"] > 0
         for _ in range(3):

@@ -602,6 +602,7 @@ def create_server(config: Config | None = None) -> FastMCP:
             "documented_modules": 182,
             "documented_parameters": 3066,
             "version": __version__,
+            "tool_count": len(mcp._tool_manager.list_tools()),
             "api_coverage": "falcon_api_coverage: direct JSON tools + native Lua extension (persistent bootstrap deployment)",
             "installation": "falcon_setup: one-time Master bootstrap/default-Multi setup and no-GUI deployment verification",
             "project_parser": "All public nodes, parameters, connections, routes and sample metadata; completeness is reported",

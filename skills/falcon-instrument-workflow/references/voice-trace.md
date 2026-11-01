@@ -1,3 +1,7 @@
+---
+read_when: When finding out why legato did or did not trigger, whether an envelope restarted, when the old voice released, who owns an auxiliary voice, or what happened in a fast reversal.
+---
+
 # Voice trace (per-note legato, envelope and voice ownership)
 
 Use when legato, retrigger, fast reversals or auxiliary voices misbehave in an instrument script you

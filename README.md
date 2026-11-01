@@ -90,25 +90,17 @@ Replace `yourname` and the checkout path; do not rely on `~`, `%USERPROFILE%` or
 
 Use the same `FALCON_MCP_HOME` as the installed Master launcher. The Python executable and runtime home are independent locations and may use different drives; the home must identify the actual prepared runtime. If Codex already controls that Falcon instance, reuse its home and optional `FALCON_AUDIO_PYTHON` setting. Different Falcon instances need separate homes; multiple clients of one instance share the mailbox lock and must still bind their intended target. Claude Desktop starts its own stdio server; do not launch an extra `serve` process manually.
 
-Install the [English agent skill](skills/falcon-instrument-workflow/SKILL.md) separately. From the repository root, package the whole folder, including `references/`. On Windows PowerShell:
-
-```powershell
-New-Item -ItemType Directory -Force .runtime | Out-Null
-Compress-Archive -Path .\skills\falcon-instrument-workflow -DestinationPath .\.runtime\falcon-instrument-workflow.zip -Force
-```
-
-On macOS or Linux, run `zip` from `skills/` so the archive has no extra `skills/` parent:
+Install the [English agent skill](skills/falcon-instrument-workflow/SKILL.md) separately. The Windows installer does this for detected agents. To package it by hand, run from the repository root (any OS):
 
 ```sh
-mkdir -p .runtime
-cd skills
-zip -r ../.runtime/falcon-instrument-workflow.zip falcon-instrument-workflow
-cd ..
+python scripts/build_skill.py --zip .runtime/falcon-instrument-workflow.zip
 ```
 
-Enable **Code execution and file creation** under **Settings → Capabilities**. Go to **Customize → Skills → Add skill → Upload a skill**, select the ZIP, and enable the skill. The archive must contain `falcon-instrument-workflow/SKILL.md` and its supporting files. Copying the folder to `%USERPROFILE%\.claude\skills\` on Windows or `~/.claude/skills/` on macOS/Linux installs it for local Claude Code workflows; that alone does not install the account-level skill used by Desktop chat. See [Claude's skill installation guide](https://support.claude.com/en/articles/12512180-use-skills-in-claude).
+This adds the generated reference index to `SKILL.md`, writes the built folder to `.runtime/skill-build/falcon-instrument-workflow`, and zips it with forward-slash names under a single `falcon-instrument-workflow/` parent. The ZIP is a build output and is not kept in the repository.
 
-When active Claude tasks are finished, fully quit and reopen Claude Desktop to load the MCP configuration, then start a new conversation. Check that Falcon appears under local MCP servers and that tool discovery exposes 56 tools. For the open Falcon instance, call `falcon_status`, confirm the runtime and Program names, and bind before editing. If disconnected, follow [manual bridge initialization](docs/one-time-setup.md#manual-initialization). On Windows, owned VST3 tools work in their separate context without a standalone bridge. Configuration loading and skill availability are separate checks; a valid JSON file or ZIP alone does not prove either is active.
+Enable **Code execution and file creation** under **Settings → Capabilities**. Go to **Customize → Skills → Add skill → Upload a skill**, select the ZIP, and enable the skill. The archive must contain `falcon-instrument-workflow/SKILL.md` and its supporting files. Copying the built folder (`.runtime/skill-build/falcon-instrument-workflow`) to `%USERPROFILE%\.claude\skills\` on Windows or `~/.claude/skills/` on macOS/Linux installs it for local Claude Code workflows; that alone does not install the account-level skill used by Desktop chat. See [Claude's skill installation guide](https://support.claude.com/en/articles/12512180-use-skills-in-claude).
+
+When active Claude tasks are finished, fully quit and reopen Claude Desktop to load the MCP configuration, then start a new conversation. Check that Falcon appears under local MCP servers and that tool discovery lists the Falcon tools (`falcon_capabilities` reports `tool_count`). For the open Falcon instance, call `falcon_status`, confirm the runtime and Program names, and bind before editing. If disconnected, follow [manual bridge initialization](docs/one-time-setup.md#manual-initialization). On Windows, owned VST3 tools work in their separate context without a standalone bridge. Configuration loading and skill availability are separate checks; a valid JSON file or ZIP alone does not prove either is active.
 
 ## Capabilities
 
@@ -137,7 +129,7 @@ The offline index contains 182 module classes, 3,066 parameter definitions, and 
 
 ## MCP tools
 
-The server exposes **56 tools**, structured schemas, the `falcon://capabilities` resource, and the `refine_timbre` prompt. Use tool discovery for full arguments and constraints. The resource's `workflow_support` distinguishes implemented paths, public API gaps and unsupported workflows. See [production safety](docs/production-safety.md) for connection previews, controlled building, acceptance and publishing.
+The server exposes the tools below (tool discovery lists them all; `falcon_capabilities` reports `tool_count`), structured schemas, the `falcon://capabilities` resource, and the `refine_timbre` prompt. Use tool discovery for full arguments and constraints. The resource's `workflow_support` distinguishes implemented paths, public API gaps and unsupported workflows. See [production safety](docs/production-safety.md) for connection previews, controlled building, acceptance and publishing.
 
 | Tools | Purpose |
 |---|---|

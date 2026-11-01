@@ -1,3 +1,7 @@
+---
+read_when: When working on sound design, macros or release packaging.
+---
+
 # Instrument design and release guidance
 
 Use these as design options and validation criteria, not mandatory layer counts or a fixed aesthetic.

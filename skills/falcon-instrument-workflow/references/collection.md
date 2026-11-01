@@ -1,3 +1,7 @@
+---
+read_when: When checking whether several instruments share recordings or are really the same instrument.
+---
+
 # Are these instruments really different?
 
 Use before choosing between several instruments of one kind, or when a library looks larger than it sounds.

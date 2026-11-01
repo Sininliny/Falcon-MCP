@@ -30,7 +30,7 @@ When a new Falcon build ships, treat it as unvalidated until the live checks in 
 | `scripts/smoke_*.py` | Live checks against a licensed Falcon through real MCP stdio. Not run in CI. |
 | `scripts/check_*.py` | Repository gates: English-only text, version agreement. |
 | `scripts/install-windows.ps1`, `install-windows.cmd`, `scripts/configure_clients.py` | Windows installer and the config merger it calls. |
-| `skills/falcon-instrument-workflow/` | Agent skill shipped to Claude and Codex. Must stay in sync with tool behavior. |
+| `skills/falcon-instrument-workflow/` | Agent skill shipped to Claude and Codex. Must stay in sync with tool behavior. Packaged by `scripts/build_skill.py`; the ZIP is never committed. |
 | `tests/` | Offline pytest suite; synthetic audio only. |
 | `docs/examples/`, `scripts/run_examples.py` | Minimal behavior examples (call sequences with expectations and recorded outputs) and their stdio runner. Offline examples run in pytest; owned-host ones with `--live`. |
 
@@ -53,7 +53,7 @@ Every result passes through `result_scope`, which states which context answered,
 2. Write the docstring for an agent: what it does, which context it uses, what it does not verify. Keep results compact text and numbers; text-only agents cannot listen.
 3. Register the module in `create_server()` **before** `install_result_scope`. Pass `native_host` from `register_native` when the tool needs the owned host.
 4. Declare the tool's scope profile with `result_scope.declare(...)` (see [declaring a new tool](result-scope.md#declaring-a-new-tool)). `tests/test_result_scope.py` fails for undeclared tools.
-5. Update the tool count and name set in `tests/test_protocol.py` (currently 112), the README tool table, the skill (`SKILL.md` and the matching file in `references/`) and the topic doc under `docs/`.
+5. Document the tool in the README tool table (add it to the row of its area, or a new row next to related tools, not at the end), in the skill's matching file under `references/` (or a new reference file, see [Parallel pull requests](#parallel-pull-requests)) and in the topic doc under `docs/`. Do not write tool counts anywhere and do not add the tool to `tests/test_protocol.py`: the protocol test compares stdio with the registry, and `tests/test_result_scope.py` catches undeclared tools.
 6. Lua changes: edit `src/falcon_mcp/lua/*.lua`, add a `tests/test_lua.py` case (runs under `lupa`), and remember that the open instance only picks them up after a runtime deployment (`falcon_setup(verify_watch=true)` or `falcon_mcp setup --verify-reload`).
 7. Run the checks in [Tests and CI](#tests-and-ci), then the relevant live check.
 
@@ -75,10 +75,30 @@ Release steps:
 2. Run `python scripts/check_versions.py --strict`.
 3. Add `docs/changes-X.Y.Z.md` (new tools, behavior changes, limits). Historical change files keep their original wording.
 4. Run the full test suite and the live checks for the touched areas; record results in [validation records](validation.md) with their scope level (indexed, callable, minimally verified, production verified).
-5. Build artifacts: `python -m pip wheel . --no-deps -w dist` and the skill ZIP (the installer writes it to `.runtime/falcon-instrument-workflow.zip`).
+5. Build artifacts: `python -m pip wheel . --no-deps -w dist` and the skill ZIP with `python scripts/build_skill.py --zip .runtime/falcon-instrument-workflow.zip` (the installer does the same). Attach the ZIP to the release; do not commit it.
 6. Merge to `main` through a pull request with green CI.
 
 Semantic versioning: new tools or bridge protocol changes bump the minor version; fixes bump the patch.
+
+## Parallel pull requests
+
+Several pull requests are usually open at once. Files that every feature used to touch (the committed skill ZIP, the tool count, the skill's one-paragraph reference list) made almost every pair of them conflict. The rules below keep each pull request inside its own lines:
+
+- **Never commit the skill ZIP.** `skills/*.zip` is gitignored. `scripts/build_skill.py` builds the skill into `.runtime/skill-build` and, with `--zip`, the upload ZIP; the installer and releases call it.
+- **Do not edit the reference list in `SKILL.md`.** A new reference is a new file `skills/falcon-instrument-workflow/references/<topic>.md` that starts with front matter:
+
+  ```markdown
+  ---
+  read_when: When <the situation in which an agent should open this file>.
+  ---
+
+  # Title
+  ```
+
+  The packaged `SKILL.md` gets one generated bullet per reference, sorted by file name, in place of the `reference-index` marker. Edit the body of `SKILL.md` only when the core workflow itself changes. `python scripts/build_skill.py --check` and `tests/test_skill.py` reject a reference without `read_when`.
+- **No hand-maintained counts.** Do not write the number of tools in tests, the README or guides; `falcon_capabilities` reports the live `tool_count`. `tests/test_protocol.py` checks that stdio exposes exactly the registered tools, so it needs no edit for a new tool.
+- **Insert, do not append.** In shared tables and lists (README tool table, `server.py` registrations, `create_server()` imports) put new entries next to related ones rather than at the end, where every other pull request adds its line too.
+- **Release-only edits stay in the release pull request.** Version strings, `Guide version` lines and `docs/changes-X.Y.Z.md` change in the version-bump pull request, not in feature pull requests.
 
 ## Tests and CI
 
@@ -88,6 +108,7 @@ python -m venv .venv
 .venv\Scripts\python.exe -m ruff check src tests scripts
 .venv\Scripts\python.exe scripts/check_english.py
 .venv\Scripts\python.exe scripts/check_versions.py --strict
+.venv\Scripts\python.exe scripts/build_skill.py --check
 .venv\Scripts\python.exe -m pytest -q
 ```
 
@@ -115,7 +136,7 @@ Live checks need the Windows machine with a licensed Falcon 27.0.2. Run them fro
 Then, in a client:
 
 1. Fully quit and reopen the client after any package or config change. A running stdio server keeps old imports; for Claude Desktop, restarting the MCP server means restarting the app.
-2. Call `falcon_capabilities` and confirm the tool count, then `falcon_status`: `connected=true`, matching bridge version, `installation.current_build_loaded=true`.
+2. Call `falcon_capabilities` and confirm `tool_count` matches the tools your branch registers, then `falcon_status`: `connected=true`, matching bridge version, `installation.current_build_loaded=true`.
 3. Exercise the changed tools and read their `result_scope`.
 4. Record date, Falcon build, what passed and what was not checked in [validation records](validation.md).
 
@@ -137,7 +158,7 @@ Separate evidence levels. A passing unit test is not a live result, and a live r
 | Package | Creates `.venv` if missing, then `pip install -e ".[capture,host]"` (change with `-Extras`). Satisfied dependencies are not upgraded, so a running server's DLLs stay untouched. |
 | Runtime home | Sets the user variable `FALCON_MCP_HOME=<repo>\.runtime` (skip with `-NoUserEnv`) and runs `falcon_mcp prepare`. |
 | Detect agents | Claude Desktop: a profile folder under `%APPDATA%\Claude` or a Microsoft Store `Claude_*` package. Claude Code: the `claude` command, `%USERPROFILE%\.claude.json` or `%USERPROFILE%\.claude` (Claude Desktop's built-in Code mode uses these too). Codex: the `codex` command or `%USERPROFILE%\.codex`. Agents not found are skipped. |
-| Skill | For each detected agent, copies `skills/falcon-instrument-workflow` to `%USERPROFILE%\.claude\skills` (Claude Code) or `%USERPROFILE%\.agents\skills` (Codex), and builds `.runtime\falcon-instrument-workflow.zip`. Claude Desktop account skills cannot be installed from disk: upload the ZIP under **Customize > Skills**. |
+| Skill | Builds the skill with `scripts/build_skill.py` into `.runtime\skill-build`, then for each detected agent copies it to `%USERPROFILE%\.claude\skills` (Claude Code) or `%USERPROFILE%\.agents\skills` (Codex), and builds `.runtime\falcon-instrument-workflow.zip`. Claude Desktop account skills cannot be installed from disk: upload the ZIP under **Customize > Skills**. |
 | MCP config | `scripts/configure_clients.py` merges the `falcon` entry into each detected agent's config: every Claude Desktop profile, `%USERPROFILE%\.claude.json` (Claude Code user scope) and `%USERPROFILE%\.codex\config.toml`. Other servers and settings, and unmanaged env keys such as `FALCON_AUDIO_PYTHON`, are preserved. `.audio-venv` is used as `FALCON_AUDIO_PYTHON` when present and no value is set. |
 
 Before changing a config file or replacing a skill folder, the installer copies it to `.runtime\backups\<timestamp>\`; unchanged files are neither backed up nor rewritten. To roll back, copy the backup over the original. `CLAUDE_CONFIG_DIR` and `CODEX_HOME` are honored.
