@@ -1,0 +1,55 @@
+{
+  "id": "04-ab-choice",
+  "title": "Let the user choose between two versions",
+  "goal": "Build a fair, blind A/B from two renders of the same MIDI, record the user's choice and get the next-round target.",
+  "context": "offline",
+  "fixtures": [
+    {"kind": "tone", "path": "${audio}/warm.wav", "harmonics": 6, "level": 0.4,
+     "events": {"note": 57, "velocity": 100, "duration": 1.4}},
+    {"kind": "tone", "path": "${audio}/bright.wav", "harmonics": 40, "level": 0.1,
+     "events": {"note": 57, "velocity": 100, "duration": 1.4}},
+    {"kind": "library", "path": "${work}/Lib"}
+  ],
+  "live_equivalent": "Each candidate is a render from falcon_native_perform or falcon_native_render with controllers; both write the timeline sidecar that binds the candidates to identical MIDI.",
+  "steps": [
+    {
+      "id": "create",
+      "tool": "falcon_audition_create",
+      "why": "Candidates are bound to MIDI, controllers, preset hashes and sample rate, then loudness matched so level cannot win the vote.",
+      "args": {"question": "Which keeps the warmth but still cuts through?", "blind": true, "seed": 7,
+               "candidates": [
+                 {"name": "warm", "kind": "integrated_preset", "audio_path": "warm.wav",
+                  "preset_paths": ["${work}/Lib/Presets/Keys/Keys.uvip"]},
+                 {"name": "bright", "kind": "integrated_preset", "audio_path": "bright.wav",
+                  "preset_paths": ["${work}/Lib/Presets/Keys/Keys.uvip"]}]},
+      "expect": [
+        {"path": "status", "op": "eq", "value": "ready"},
+        {"path": "candidates", "op": "len_ge", "value": 2},
+        {"path": "candidates.0.name", "op": "exists", "value": false},
+        {"path": "audition_id", "op": "matches", "value": "^aud-"}
+      ]
+    },
+    {
+      "id": "choose",
+      "tool": "falcon_audition_choose",
+      "why": "Ask the user to listen to the A/B files, then record their letter and reason. Never pick by yourself without saying so (decided_by=agent).",
+      "args": {"audition_id": "${create.audition_id}", "choice": "A", "reason": "user: A, less harsh",
+               "keep": ["body"], "avoid": ["harsh top"]},
+      "expect": [
+        {"path": "integration.status", "op": "eq", "value": "integrated"},
+        {"path": "target_path", "op": "matches", "value": "target\\.json$"},
+        {"path": "next", "op": "exists"}
+      ]
+    },
+    {
+      "id": "history",
+      "tool": "falcon_audition_history",
+      "why": "The decision, reason and keep/avoid notes are stored with the audition for the next round.",
+      "args": {"audition_id": "${create.audition_id}"},
+      "expect": [
+        {"path": "session.choice.reason", "op": "eq", "value": "user: A, less harsh"}
+      ]
+    }
+  ],
+  "conclusion": "The audition files are matched in level and blind, so the user's choice reflects timbre. The choice is saved as target_path (target.json) with keep/avoid notes: the next falcon_audition_create with previous_audition_id carries it as the comparison point for the next round."
+}
