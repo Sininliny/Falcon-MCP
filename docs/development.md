@@ -52,7 +52,7 @@ Every result passes through `result_scope`, which states which context answered,
 2. Write the docstring for an agent: what it does, which context it uses, what it does not verify. Keep results compact text and numbers; text-only agents cannot listen.
 3. Register the module in `create_server()` **before** `install_result_scope`. Pass `native_host` from `register_native` when the tool needs the owned host.
 4. Declare the tool's scope profile with `result_scope.declare(...)` (see [declaring a new tool](result-scope.md#declaring-a-new-tool)). `tests/test_result_scope.py` fails for undeclared tools.
-5. Update the tool count and name set in `tests/test_protocol.py` (currently 102), the README tool table, the skill (`SKILL.md` and the matching file in `references/`) and the topic doc under `docs/`.
+5. Update the tool count and name set in `tests/test_protocol.py` (currently 103), the README tool table, the skill (`SKILL.md` and the matching file in `references/`) and the topic doc under `docs/`.
 6. Lua changes: edit `src/falcon_mcp/lua/*.lua`, add a `tests/test_lua.py` case (runs under `lupa`), and remember that the open instance only picks them up after a runtime deployment (`falcon_setup(verify_watch=true)` or `falcon_mcp setup --verify-reload`).
 7. Run the checks in [Tests and CI](#tests-and-ci), then the relevant live check.
 

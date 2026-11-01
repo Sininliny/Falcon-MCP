@@ -122,14 +122,45 @@ def save_cache(path: Path, cache: dict) -> None:
     os.replace(temp, path)
 
 
-def stale_bundles(cache: dict, bundles: list[Path], refresh: bool = False) -> list[Path]:
-    """Bundles that need a probe: new, changed since the last probe, or everything when refresh is set."""
+UNFINISHED_PROBES = {"timeout", "crashed"}
+PROBE_MEANING = {
+    "loaded": "Loaded and described within the usual time.",
+    "slow": "Loaded and described, but slower than usual (large library or license check); usable.",
+    "timeout": "Stopped after probe_timeout_seconds; may only be slow. Not proof the plugin is broken: retry "
+               "with a longer timeout or render it by path.",
+    "crashed": "The plugin crashed the probe process (real failure in this host, or a missing dependency).",
+    "error": "The plugin raised an error while loading (real failure; see error).",
+}
+
+
+def stale_bundles(cache: dict, bundles: list[Path], refresh: bool = False,
+                  retry_unfinished: bool = False) -> list[Path]:
+    """Bundles that need a probe: new, changed since the last probe, or everything when refresh is set.
+    retry_unfinished also re-probes timeouts/crashes (used when a query explicitly targets them)."""
     out = []
     for bundle in bundles:
         entry = cache["bundles"].get(str(bundle))
-        if refresh or entry is None or entry.get("signature") != signature(bundle):
+        if refresh or entry is None or entry.get("signature") != signature(bundle) or (
+                retry_unfinished and entry.get("probe_state") in UNFINISHED_PROBES):
             out.append(bundle)
     return out
+
+
+def probe_summary(cache: dict, bundles: list[Path]) -> dict:
+    """Counts per probe_state for the given bundles, with what each state means."""
+    counts: dict[str, int] = {}
+    for bundle in bundles:
+        entry = cache["bundles"].get(str(bundle))
+        state = "not_probed" if entry is None else entry.get("probe_state") or ("error" if entry.get("error")
+                                                                               else "loaded")
+        counts[state] = counts.get(state, 0) + 1
+    return {"counts": counts, "meaning": {k: PROBE_MEANING[k] for k in counts if k in PROBE_MEANING}}
+
+
+def disk_candidates(bundles: list[Path], name: str, limit: int = 8) -> list[str]:
+    """Bundle paths whose file name contains the name: a hint for a targeted scan, no plugin is loaded."""
+    needle = name.casefold().strip()
+    return [str(b) for b in bundles if needle and needle in b.name.casefold()][:limit]
 
 
 def merge_probe(cache: dict, bundle: Path, probe: dict) -> None:

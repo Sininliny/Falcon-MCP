@@ -96,6 +96,10 @@ CODES = {
     "plugin_settled": "A probe note was repeated until its level stopped changing (background loading done).",
     "third_party_state": "Which instrument/preset the third-party plugin played; only the state file hash is known.",
     "plugin_license": "Whether the plugin is licensed/activated beyond loading without an error.",
+    "free_space": "Free space on the destination volume was compared with the bytes the delivery needs.",
+    "write_permission": "A probe file was created and removed in the destination (and backup) folder.",
+    "resource_references": "Every *Path reference in the delivered .uvip/.uvim files was resolved on disk.",
+    "destination_licenses": "Whether the destination computer has the licensed UVI banks the presets use.",
 }
 
 TRANSPORT_UNCHECKED = ["external_midi_input", "part_routing", "audible_effect"]

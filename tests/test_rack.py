@@ -360,3 +360,60 @@ async def test_instrument_file_loads_without_user(tools, tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="Instrument file not found"):
         await tools["falcon_rack_render"](plugin="Good", instrument=str(tmp_path / "missing.nki"),
                                           sweep=rack_sweep(notes=[60]))
+
+
+# --------------------------------------------------------------------------- progress and failure kinds
+
+def test_worker_progress_health(tmp_path):
+    import time
+
+    from falcon_mcp.rack_tools import STALL_SECONDS, update_worker_progress
+
+    path = tmp_path / "render.progress.json"
+    progress = {}
+    update_worker_progress(progress, path, 5, 300)
+    assert progress["worker"]["stage"] == "starting" and progress["health"] == "ok"
+    path.write_text(json.dumps({"stage": "loading_plugin", "updated_at": time.time() - STALL_SECONDS - 5}))
+    update_worker_progress(progress, path, 200, 300)
+    assert progress["health"] == "slow" and "not a failure" in progress["health_note"]
+    path.write_text(json.dumps({"stage": "rendering", "percent": 40, "updated_at": time.time() - STALL_SECONDS - 5}))
+    update_worker_progress(progress, path, 200, 300)
+    assert progress["health"] == "stalled" and progress["worker"]["percent"] == 40
+    path.write_text(json.dumps({"stage": "rendering", "percent": 50, "updated_at": time.time()}))
+    update_worker_progress(progress, path, 200, 300)
+    assert progress["health"] == "ok" and progress["timeout_after_seconds"] == 300
+
+
+async def test_render_progress_file_and_timeout_stage(tools, config, monkeypatch):
+    from falcon_mcp.audit import AuditLog
+    from falcon_mcp.rack_tools import RackHostError, RackRunner
+
+    await _finish(tools, await tools["falcon_rack_scan"](query="Good", probe_timeout_seconds=4, wait_seconds=0))
+    out = await _finish(tools, await tools["falcon_rack_render"](
+        plugin="Good", sweep=rack_sweep(notes=[60]), warmup_seconds=0, settle_seconds=5))
+    folder = config.runtime.parent / "rack" / "runs" / Path(out["render"]["path"]).parent.name
+    final = json.loads((folder / "render.progress.json").read_text())
+    assert final["stage"] == "rendering" and final["percent"] == 100.0
+
+    runner = RackRunner(config, AuditLog(config.log_root))
+    hang = rack.default_vst3_dirs()[0] / "Hang.vst3"
+    progress = {}
+    with pytest.raises(RackHostError) as info:
+        await runner.call("render", {"bundle": str(hang), "plugin_name": None}, "hang-run", 3, progress=progress)
+    assert info.value.failure_kind == "timeout" and info.value.stage == "loading_plugin"
+    assert "loading_plugin" in str(info.value) and progress["worker"]["stage"] == "loading_plugin"
+
+
+async def test_targeted_scan_retries_timeouts_and_hints_unprobed(tools, config):
+    first = await _finish(tools, await tools["falcon_rack_scan"](query="Hang", probe_timeout_seconds=3,
+                                                                 wait_seconds=0))
+    assert first["probe_summary"]["counts"] == {"timeout": 1}
+    assert "Not proof" in first["probe_summary"]["meaning"]["timeout"]
+    again = await _finish(tools, await tools["falcon_rack_scan"](query="Hang", probe_timeout_seconds=3,
+                                                                 wait_seconds=0))
+    assert again["probed_now"] == 1  # a query retries its own timeout
+    untargeted = await tools["falcon_rack_scan"](query="Good", wait_seconds=0)
+    assert untargeted["status"] == "running"  # Good was never probed; Hang is not retried by it
+    await _finish(tools, untargeted)
+    with pytest.raises(ValueError, match="falcon_rack_scan\\(query='Bright'\\)"):
+        await tools["falcon_rack_render"](plugin="Bright", sweep=rack_sweep(notes=[60]))

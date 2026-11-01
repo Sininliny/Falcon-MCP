@@ -28,6 +28,27 @@ def _quiet_stdout():
         os.dup2(handle.fileno(), sys.stderr.fileno())
 
 
+_PROGRESS: dict = {"path": None, "started": None}
+
+
+def progress(stage: str, **fields):
+    """Atomically replace <run>/progress.json so the parent can report what a long job is doing right now
+    (loading, instrument, settling, rendering chunk i/n) and tell a slow load from a hang."""
+    path = _PROGRESS["path"]
+    if not path:
+        return
+    if _PROGRESS["started"] is None:
+        _PROGRESS["started"] = time.monotonic()
+    data = {"stage": stage, "worker_seconds": round(time.monotonic() - _PROGRESS["started"], 1),
+            "updated_at": time.time(), **fields}
+    temp = Path(f"{path}.{os.getpid()}.tmp")
+    try:
+        temp.write_text(json.dumps(data, allow_nan=False), encoding="utf-8")
+        os.replace(temp, path)
+    except (OSError, ValueError):
+        pass  # progress is advisory; never fail a render because of it
+
+
 def _load(bundle: str, plugin_name: str | None):
     from pedalboard import load_plugin
 
@@ -74,8 +95,9 @@ def probe(request: dict, result_path: Path):
                     names = [None]
                 for name in names:
                     loaded.append(_load(bundle, name if len(names) > 1 else None))
+                slow_after = float(request.get("slow_after_seconds", 30.0))
                 row = {"done": bundle, "plugins": [_describe(plugin) for plugin in loaded],
-                       "probe_state": "slow" if time.monotonic() - started > 30 else "loaded"}
+                       "probe_state": "slow" if time.monotonic() - started > slow_after else "loaded"}
             except Exception as exc:  # noqa: BLE001 - recorded per bundle; the scan continues
                 row = {"done": bundle, "error": f"{type(exc).__name__}: {exc}"[:400],
                        "probe_state": "error", "error_type": type(exc).__name__, "availability": "unknown"}
@@ -406,6 +428,8 @@ def settle(plugin, request: dict) -> dict:
     messages = [(bytes([0x90 + channel, note, velocity]), 0.0), (bytes([0x80 + channel, note, 0]), 0.6)]
     levels, stable = [], False
     while True:
+        progress("settling", attempts=len(levels), last_level_db=levels[-1] if levels else None,
+                 settle_limit_seconds=request["settle_seconds"])
         _reset(plugin, rate, block)
         audio = plugin(messages, duration=1.2, sample_rate=rate, num_channels=2, buffer_size=block, reset=False)
         levels.append(_level_db(audio))
@@ -445,21 +469,28 @@ def render(request: dict, result_path: Path):
     from .render_integrity import inspect_render, validate_audio_block
 
     loaded = time.monotonic()
+    progress("loading_plugin")
     plugin = _load(request["bundle"], request.get("plugin_name"))
     rate, block = request["sample_rate"], request["buffer_size"]
+    progress("applying_state", load_seconds=round(time.monotonic() - loaded, 1))
     # Establish the requested processing rate BEFORE a sample library restores its state.
     # This avoids restoring into an unprepared default-rate host; integrity checks still verify the result.
     _reset(plugin, rate, block)
     _apply_state(plugin, request.get("state"))
+    if request.get("instrument"):
+        progress("loading_instrument", file=Path(request["instrument"]).name)
     instrument = _load_instrument(plugin, request)
     applied = _apply_parameters(plugin, request.get("parameters"))
     writes = parameter_readback(plugin, request.get("parameters") or {}, "after_write")
     program = _select_program(plugin, request)
     load_seconds = time.monotonic() - loaded
+    progress("settling", load_seconds=round(load_seconds, 1), settle_limit_seconds=request["settle_seconds"])
     settled = settle(plugin, request)
     after_settle = parameter_readback(plugin, request.get("parameters") or {}, "after_settle")
     rate, block = request["sample_rate"], request["buffer_size"]
     renders = []
+    total_seconds = sum(float(job["seconds"]) for job in request["renders"])
+    done_seconds = 0.0
     for job in request["renders"]:
         messages = read_timeline(Path(job["midi_path"]), job["midi_sha256"], MAX_RACK_SECONDS)
         messages.sort(key=lambda m: m[1])
@@ -485,7 +516,11 @@ def render(request: dict, result_path: Path):
                 energy += float(np.sum(np.square(audio, dtype=np.float64)))
                 frames += audio.shape[1]
                 out.write(audio.T)
+                done_seconds += end - start
                 start = end
+                progress("rendering", rendered_seconds=round(done_seconds, 1), total_seconds=round(total_seconds, 1),
+                         percent=round(100 * done_seconds / max(total_seconds, 1e-9), 1),
+                         load_seconds=round(load_seconds, 1))
         rms = (energy / max(frames * 2, 1)) ** 0.5
         integrity = inspect_render(target, rate, length, messages)
         renders.append({"path": str(target), "frames": frames, "seconds": round(frames / rate, 3),
@@ -511,6 +546,7 @@ def main(argv: list[str]):
     op, request_path, result_path = argv[0], Path(argv[1]), Path(argv[2])
     _quiet_stdout()
     request = json.loads(request_path.read_text(encoding="utf-8"))
+    _PROGRESS["path"] = request.get("progress_path")
     try:
         from .window_policy import isolate_desktop
 

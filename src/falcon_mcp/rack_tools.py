@@ -33,6 +33,12 @@ Wait = Annotated[float, Field(ge=0, le=50)]
 DEFAULT_WAIT_SECONDS = 40.0
 MAX_FINISHED_JOBS = 16
 EXIT_GRACE_SECONDS = 15.0
+# A probe or load past this many seconds is reported as slow (still running, not failed). Kontakt 8 with a
+# library took 40-60 s to show its window in the 2026-10-23 live test.
+SLOW_PROBE_SECONDS = 30.0
+SLOW_LOAD_SECONDS = 60.0
+# A render/settle stage that has not updated its progress for this long is reported as stalled.
+STALL_SECONDS = 120.0
 STATE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$")
 SCOPE = ("Offline render of a third-party VST3 in a short-lived MCP-owned process (pedalboard, non-realtime); "
          "not the plugin open in a DAW, and the sound depends on the state (instrument/preset) it was given")
@@ -99,9 +105,66 @@ class NoteSweep(BaseModel):
 
 
 class RackHostError(RuntimeError):
-    def __init__(self, message, failure_kind):
+    def __init__(self, message, failure_kind, stage=None):
         super().__init__(message)
         self.failure_kind = failure_kind
+        self.stage = stage
+
+
+# What a failure kind means, so a slow plugin, a timeout and a real failure are never conflated.
+FAILURE_MEANING = {
+    "timeout": "Stopped by the MCP after its time limit. The plugin may only be slow (large library, license "
+               "check, dialog); this is not proof that it cannot load. Retry with a longer limit.",
+    "crashed": "The plugin process exited without a result (plugin crash). Other plugins are unaffected.",
+    "plugin_error": "The plugin or its host library raised an error while loading or rendering: a real failure "
+                    "for this plugin/state/request.",
+    "invalid_result": "The worker exited normally but wrote no readable result (disk full or a write error in "
+                      "the run folder?); check the log and free space.",
+}
+TIMEOUT_HINTS = {
+    "starting": "The worker never reported progress: python/pedalboard start-up or antivirus scanning.",
+    "loading_plugin": "The plugin DLL itself did not finish loading (license dialog or very slow start-up).",
+    "applying_state": "Restoring the state/preset did not finish.",
+    "loading_instrument": "The dropped library file did not finish loading; raise instrument_wait_seconds.",
+    "settling": "Samples were still loading; raise settle_seconds or check the library path.",
+    "rendering": "Offline rendering was slower than expected; shorten the timeline.",
+}
+
+
+def read_worker_progress(path: Path) -> dict | None:
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def update_worker_progress(progress: dict, path: Path, elapsed: float, timeout: float) -> None:
+    """Merge the worker's progress file into a job's progress dict and classify its health:
+    ok, slow (past the usual time but still within the limit) or stalled (no update for STALL_SECONDS)."""
+    worker = read_worker_progress(path)
+    progress["timeout_after_seconds"] = round(timeout, 1)
+    progress["worker_elapsed_seconds"] = round(elapsed, 1)
+    if worker is None:
+        progress["worker"] = {"stage": "starting"}
+        progress["health"] = "slow" if elapsed > SLOW_LOAD_SECONDS else "ok"
+        return
+    progress["worker"] = {k: v for k, v in worker.items() if k != "updated_at"}
+    quiet = max(0.0, time.time() - float(worker.get("updated_at") or time.time()))
+    stage = worker.get("stage")
+    if stage in ("loading_plugin", "applying_state", "loading_instrument") and quiet > STALL_SECONDS:
+        health = "slow"  # one blocking call; a large library can legitimately take minutes
+    elif quiet > STALL_SECONDS:
+        health = "stalled"
+    elif stage in ("loading_plugin", "applying_state") and elapsed > SLOW_LOAD_SECONDS:
+        health = "slow"
+    else:
+        health = "ok"
+    progress["health"] = health
+    progress["health_note"] = {
+        "ok": "Progressing normally.",
+        "slow": f"Slower than usual but still within the {timeout:.0f} s limit; not a failure yet.",
+        "stalled": f"No progress for {quiet:.0f} s; it will be stopped at {timeout:.0f} s if nothing changes.",
+    }[health]
 
 
 def _kill_tree(process):
@@ -128,6 +191,9 @@ class RackRunner:
         folder = self.root / "runs" / run
         folder.mkdir(parents=True, exist_ok=True)
         request_path, result_path, log = folder / f"{op}.request.json", folder / f"{op}.result.json", folder / "worker.log"
+        progress_path = folder / f"{op}.progress.json"
+        progress_path.unlink(missing_ok=True)
+        request = {**request, "progress_path": str(progress_path)}
         request_path.write_text(json.dumps(request), encoding="utf-8")
         result_path.unlink(missing_ok=True)
         env = os.environ.copy()
@@ -149,13 +215,18 @@ class RackRunner:
         except OSError:
             return ""
 
-    async def call(self, op: str, request: dict, run: str, timeout: float, watch=None) -> dict:
+    async def call(self, op: str, request: dict, run: str, timeout: float, watch=None,
+                   progress: dict | None = None) -> dict:
         """Run one worker request. watch=(path, callback): the callback gets the JSON in path once it appears
-        and may raise to stop the worker."""
+        and may raise to stop the worker. progress (a job's progress dict) receives the worker's stage."""
         process, result_path, log = await self.spawn(op, request, run)
+        progress_path = self.root / "runs" / run / f"{op}.progress.json"
+        started = time.monotonic()
         try:
-            deadline = time.monotonic() + timeout
+            deadline = started + timeout
             while process.returncode is None:
+                if progress is not None:
+                    update_worker_progress(progress, progress_path, time.monotonic() - started, timeout)
                 if time.monotonic() > deadline:
                     raise TimeoutError
                 if watch and watch[0].is_file():
@@ -179,7 +250,11 @@ class RackRunner:
         except TimeoutError:
             _kill_tree(process)
             await process.wait()
-            raise RackHostError(f"Rack {op} timed out after {timeout:.0f} s; log: {log}", "timeout") from None
+            last = read_worker_progress(progress_path) or {}
+            stage = last.get("stage", "starting")
+            raise RackHostError(
+                f"Rack {op} timed out after {timeout:.0f} s during '{stage}' (the worker was stopped). "
+                f"{TIMEOUT_HINTS.get(stage, '')} Log: {log}".replace("  ", " "), "timeout", stage=stage) from None
         except asyncio.CancelledError:
             _kill_tree(process)
             raise
@@ -200,7 +275,8 @@ class RackRunner:
         failed = 0
         while remaining:
             run = uuid.uuid4().hex
-            process, result_path, log = await self.spawn("probe", {"bundles": remaining}, run)
+            process, result_path, log = await self.spawn(
+                "probe", {"bundles": remaining, "slow_after_seconds": min(SLOW_PROBE_SECONDS, timeout / 2)}, run)
             seen, current, since, timed_out = 0, None, time.monotonic(), False
             reported, activity = 0, time.monotonic()
             lines: list[dict] = []
@@ -223,10 +299,20 @@ class RackRunner:
                         current = None
                         reported += 1
                         progress["probed"] = progress.get("probed", 0) + 1
+                        state = row.get("probe_state", "error" if row.get("error") else "loaded")
+                        progress.setdefault("outcomes", {})[state] = progress.get("outcomes", {}).get(state, 0) + 1
 
             try:
                 while True:
                     collect()
+                    if current:
+                        held = time.monotonic() - since
+                        progress.update(current_seconds=round(held, 1), probe_timeout_seconds=timeout,
+                                        current_health="slow" if held > min(SLOW_PROBE_SECONDS, timeout / 2)
+                                        else "loading")
+                    else:
+                        progress.pop("current_seconds", None)
+                        progress.pop("current_health", None)
                     if process.returncode is not None:
                         collect()  # lines written just before the exit
                         break
@@ -258,9 +344,11 @@ class RackRunner:
                 hung = current
                 reason = (f"probe timed out after {timeout:.0f} s (license or dialog?)" if timed_out
                           else f"plugin crashed the probe process (exit {process.returncode})")
-                rack.merge_probe(cache, Path(hung), {"error": reason,
-                                                    "probe_state": "timeout" if timed_out else "crashed",
-                                                    "availability": "unknown"})
+                kind = "timeout" if timed_out else "crashed"
+                rack.merge_probe(cache, Path(hung), {"error": reason, "probe_state": kind,
+                                                    "availability": "unknown",
+                                                    "seconds": round(time.monotonic() - since, 1)})
+                progress.setdefault("outcomes", {})[kind] = progress.get("outcomes", {}).get(kind, 0) + 1
                 remaining.remove(hung)
                 failed += 1
             elif remaining and not started:
@@ -336,9 +424,16 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
             jobs.pop(old)
         if task.exception() is not None:
             exc = task.exception()
-            return {"status": "failed", "job_id": job_id, "kind": job["kind"], "error": str(exc),
-                    "failure_kind": getattr(exc, "failure_kind", "error"),
-                    "error_type": type(exc).__name__}
+            kind = getattr(exc, "failure_kind", "error")
+            out = {"status": "failed", "job_id": job_id, "kind": job["kind"], "error": str(exc),
+                   "failure_kind": kind, "error_type": type(exc).__name__,
+                   "elapsed_seconds": round(time.monotonic() - job["started"], 1),
+                   "last_progress": job["progress"]}
+            if kind in FAILURE_MEANING:
+                out["failure_meaning"] = FAILURE_MEANING[kind]
+            if getattr(exc, "stage", None):
+                out["failed_stage"] = exc.stage
+            return out
         return {"status": "done", "job_id": job_id, "kind": job["kind"], **task.result()}
 
     def resolve(spec: PluginSpec) -> dict:
@@ -346,7 +441,13 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         try:
             bundle, plugin_name, row = rack.resolve_plugin(cache, spec.plugin, spec.plugin_name)
         except rack.RackError as exc:
-            raise ValueError(str(exc)) from exc
+            message = str(exc)
+            if message.startswith("No scanned plugin"):
+                on_disk = rack.disk_candidates(rack.find_bundles(rack.default_vst3_dirs()), spec.plugin)
+                if on_disk:
+                    message += (f". Found on disk but not probed yet: {on_disk}. Run falcon_rack_scan("
+                                f"query={spec.plugin!r}) to probe only that plugin, or pass the .vst3 path.")
+            raise ValueError(message) from exc
         if bundle.stem.lower().startswith("falcon"):
             # Live test 2026-10-23: Falcon.vst3 stalls in the rack (its default Multi starts the MCP launcher).
             raise ValueError("Falcon is not played in the rack: use falcon_native_host and pass its instance_id as "
@@ -381,7 +482,7 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         timeout = 180 + settle + warmup + 2 * length
         if target["instrument"]:
             timeout += 180 + target["instrument_wait_seconds"]  # window + drop + library load
-        result = await runner.call("render", request, folder.name, timeout)
+        result = await runner.call("render", request, folder.name, timeout, progress=progress)
         out = result["renders"][0]
         if out["midi_sha256"] != files["midi_sha256"]:
             raise RuntimeError("Rack worker rendered a different timeline")
@@ -459,13 +560,18 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         process, to read name, vendor and instrument/effect; results are cached, so later scans are instant.
         A plugin that crashes or hangs (e.g. a license dialog) is listed as failed and skipped. VST2-only
         plugins are not supported. Probing many plugins can take minutes: it runs as a job (falcon_rack_job).
+        probe_state per plugin (probe_summary explains them): loaded, slow (loaded, but slowly), timeout
+        (stopped at probe_timeout_seconds: maybe only slow, not proof of failure), crashed, error (real
+        failures). A query re-probes its own earlier timeouts/crashes. Running jobs report the plugin being
+        loaded and for how long (current_seconds, current_health).
         """
         async with runner.scan_lock:
             bundles = await asyncio.to_thread(rack.find_bundles,
                                               [Path(f) for f in folders or []] + rack.default_vst3_dirs())
             cache = rack.load_cache(runner.cache_path)
             selected = rack.select_probe_bundles(cache, bundles, query)
-            stale = rack.stale_bundles(cache, selected, refresh)
+            # A query names the plugin the user wants now: retry it if it previously timed out or crashed.
+            stale = rack.stale_bundles(cache, selected, refresh, retry_unfinished=bool(query and query.strip()))
 
         def listing(extra: dict) -> dict:
             cache_now = rack.load_cache(runner.cache_path)
@@ -475,6 +581,7 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
                     "folders": [str(f) for f in rack.default_vst3_dirs()] + list(folders or []),
                     "bundles": len(selected), "discovered_bundles": len(bundles),
                     "probe_scope": "targeted" if query and query.strip() else "all",
+                    "probe_summary": rack.probe_summary(cache_now, selected),
                     "plugins": rows[:200], "listed": len(rows), **extra,
                     "next": "falcon_rack_render(plugin=<name>, ...) or falcon_rack_state to save an instrument "
                             "selection (Kontakt libraries need one)"}
@@ -741,7 +848,12 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
 
     @mcp.tool(annotations=READ)
     async def falcon_rack_job(job_id: JobId, wait_seconds: Wait = DEFAULT_WAIT_SECONDS) -> dict[str, Any]:
-        """Wait for (or collect) a falcon_rack_scan / _state / _render / _compare job."""
+        """Wait for (or collect) a falcon_rack_scan / _state / _render / _compare job.
+
+        While running: worker.stage (loading_plugin, applying_state, loading_instrument, settling, rendering
+        with percent), health ok/slow/stalled and timeout_after_seconds. A failed job gives failure_kind
+        (timeout = stopped by the MCP, maybe only slow; crashed / plugin_error = real failures), failed_stage
+        and failure_meaning."""
         return await wait_for(job_id, wait_seconds)
 
     return runner

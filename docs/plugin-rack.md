@@ -84,6 +84,16 @@ Each run writes `<audio root>/rack/<run>/timeline.events.json`, `timeline.mid` a
 
 - One process per request (`rack_worker.py`). A plugin that crashes or hangs only ends that process. The scan
   records it as failed (crash, or timeout after `probe_timeout_seconds`, often a license dialog) and goes on.
+- `falcon_rack_scan(query=...)` probes only bundles whose path or cached name matches; it never loads other
+  plugins, and it re-probes its own earlier timeouts and crashes. Each plugin has a `probe_state`, explained in
+  `probe_summary`: `loaded`, `slow` (loaded, but slower than 30 s), `timeout` (stopped by the MCP: maybe only
+  slow, not proof of failure), `crashed` and `error` (real failures). A render with a name that is not in the
+  catalog lists matching bundles on disk and the targeted scan call to run.
+- Running jobs report progress from the worker: `worker.stage` (`loading_plugin`, `applying_state`,
+  `loading_instrument`, `settling` with attempts, `rendering` with `percent`), `health` (`ok`, `slow` = past
+  the usual time but within the limit, `stalled` = no update for 120 s) and `timeout_after_seconds`. A
+  failed job gives `failure_kind` (`timeout`, `crashed`, `plugin_error`, `invalid_result`), `failed_stage`
+  and `failure_meaning`, so a slow load, a timeout and a real plugin failure are not confused.
   Some plugins hang while unloading: the worker ends itself without unloading once its result is written, and
   the scan kills a worker that has reported everything but does not exit within 15 s.
 - Some instruments (UADx Ravel in the live test) ignore notes that arrive right after a reset, so every

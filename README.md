@@ -164,6 +164,7 @@ The server exposes **56 tools**, structured schemas, the `falcon://capabilities`
 | `falcon_scan_project`, `falcon_query_project`, `falcon_export_uml` | Project snapshots and diagrams. |
 | `falcon_diagnose_audio`, `falcon_spectrum`, `falcon_get_logs` | Signal diagnostics and audit access. |
 | `falcon_sample_audit` | Sample-source audit of `.uvip`/`.uvim` files without Falcon: sampling interval, velocity layers, per-layer normalization, truncated samples, channel layout, noise floor, recordings shared across instruments ([sample audit](docs/sample-audit.md)). |
+| `falcon_delivery` | Pre-delivery check of a library folder (free space, size, resource references, backups, permissions, locked files) and verified full or incremental copy with backup and rollback; findings say whether the environment, the content or the server is responsible ([delivery](docs/delivery.md)). |
 | `falcon_render_parity` | Check offline renders (`.uvip` or Play scene) against a standalone/VST recording of the same MIDI: aligned LUFS, centroid and octave-band verdict ([render parity](docs/render-parity.md)). |
 
 ## Operating rules
