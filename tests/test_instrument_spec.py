@@ -85,7 +85,7 @@ def test_example_compiles_to_falcon_serialization_and_reads_back():
     sources = {c.get("Source") for c in group.iter("SignalConnection")}
     assert {"Amp. Env", "@VoiceParam Velocity", "$Program/Macro 1", "$Layer/vibrato", "@PitchBend"} <= sources
     osc = group.find("Oscillators/MinBlepGenerator")
-    assert osc.get("Name") == "saw" and osc.get("Gain") == "0.5" and osc.get("Waveform") == "4"
+    assert osc.get("Name") == "saw" and osc.get("Gain") == "0.5" and osc.get("Waveform") == "1"
     assert root.find(".//Layer/ControlSignalSources/LFO").get("Freq") in {"5", "5.0"}
     assert validate_structure(root)["warnings"] == []
     assert s.readback(model, xml)["matches"]

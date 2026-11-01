@@ -216,6 +216,10 @@ def schema() -> dict:
              "set that field."),
             "index_only modules need allow_index_only=true and are judged by the native readback.",
             "A route lives on the module whose param it modulates (the destination owner).",
+            ("MinBlepGenerator Waveform (measured live, Falcon 27.0.2): 1 is saw-like (harmonics about 1/n), "
+             "4 is near-pure sine. Other values are unmeasured; render and listen before relying on them."),
+            ("Modulation ratios add in Falcon's own units; a velocity route can already open a filter fully "
+             "and leave a macro on the same parameter no audible range. Render the extremes."),
         ],
         "limits": LIMITS,
         "example": EXAMPLE,
@@ -232,7 +236,7 @@ EXAMPLE = {
         "keygroup_defaults": {"amp_envelope": {"attack": 0.4, "decay": 0.5, "sustain": 0.8, "release": 1.2}},
         "keygroups": [{
             "id": "all", "name": "All Keys",
-            "oscillators": [{"id": "saw", "module": "MinBlepGenerator", "params": {"Waveform": 4, "Gain": 0.5},
+            "oscillators": [{"id": "saw", "module": "MinBlepGenerator", "params": {"Waveform": 1, "Gain": 0.5},
                              "modulations": [{"source": "vibrato", "param": "Pitch", "ratio": 0.1}]}],
             "inserts": [{"id": "lp", "module": "MoogFilter", "params": {"Freq": 1800.0},
                          "modulations": [{"source": "cutoff", "param": "Freq", "ratio": 0.5},

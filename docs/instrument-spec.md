@@ -17,7 +17,7 @@ add insert, add connection, set value...) with "edit the spec, review the diff, 
     "keygroup_defaults": {"amp_envelope": {"attack": 0.4, "decay": 0.5, "sustain": 0.8, "release": 1.2}},
     "keygroups": [{
       "id": "all", "keys": [0, 127], "velocities": [1, 127],
-      "oscillators": [{"id": "saw", "module": "MinBlepGenerator", "params": {"Waveform": 4, "Gain": 0.5},
+      "oscillators": [{"id": "saw", "module": "MinBlepGenerator", "params": {"Waveform": 1, "Gain": 0.5},
                        "modulations": [{"source": "vibrato", "param": "Pitch", "ratio": 0.1}]}],
       "inserts": [{"id": "lp", "module": "MoogFilter", "params": {"Freq": 1800.0},
                    "modulations": [{"source": "cutoff", "param": "Freq", "ratio": 0.5},
@@ -51,6 +51,18 @@ Read from Falcon 27.0.2-saved presets and owned-host session files on the test m
 | route | `SignalConnection` in the owning module's `Connections`; sources `$Program/`, `$Layer/`, `$Keygroup/`, `@VoiceParam Velocity`, `@VoiceParam KeyFollow`, `@MIDI CC n`, `@PitchBend`; `ConnectionMode` 0 add / 1 absolute |
 | amp envelope | keygroup `AmpEnvMod` connection to Gain (as in the analog-v1 template) |
 | pitch bend | `PitchBendMod` on each oscillator's Pitch |
+
+## Measured behavior
+
+From the live smoke on Yingg (Falcon 27.0.2, 2026-11-01):
+
+- `MinBlepGenerator` `Waveform` 1 is saw-like (harmonics fall about 1/n), 4 is a near-pure sine. Other
+  values are not measured.
+- Routes to the same parameter add up. A velocity route of 0.3 on a 400 Hz `MoogFilter` already opened it
+  fully at velocity 100, leaving a macro on `Freq` no audible range on that keygroup.
+- With default params, `FmOscillator` sounded one octave below the played note.
+- A macro route to a keygroup `MoogFilter` raised the 500-1000 Hz band by about 14 dB on an unsaturated
+  keygroup.
 
 ## Evidence tiers
 
