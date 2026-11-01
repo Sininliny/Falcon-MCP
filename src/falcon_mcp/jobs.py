@@ -22,7 +22,7 @@ DEFAULT_WAIT_SECONDS = 40.0
 MAX_WAIT_SECONDS = 50.0
 MAX_FINISHED_JOBS = 8
 KINDS = ("stems", "sweep", "psweep", "collection", "gaincal")
-JOB_ID_PATTERN = r"^(stems|sweep|psweep|collection|gaincal)-[a-f0-9]{12}$"
+JOB_ID_PATTERN = r"^(stems|sweep|psweep|collection|layers|gaincal)-[a-f0-9]{12}$"
 
 
 def args_key(args: dict) -> str:

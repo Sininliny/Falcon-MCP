@@ -363,7 +363,7 @@ def engine(root: Path):
                 import soundfile as sf
 
                 from .perform import read_timeline
-                from .render_integrity import inspect_render, validate_audio_block
+                from .render_integrity import inspect_render, validate_audio_block, write_sidecar
 
                 events = []
                 render_revision = content_fingerprint(current())
@@ -385,6 +385,7 @@ def engine(root: Path):
                 validate_audio_block(audio, args["sample_rate"], args["seconds"])
                 sf.write(args["path"], audio.T, args["sample_rate"], subtype="FLOAT")
                 integrity = inspect_render(Path(args["path"]), args["sample_rate"], args["seconds"], events)
+                write_sidecar(Path(args["path"]), integrity)
                 after = content_fingerprint(current())
                 changed = aliases.rendered(render_revision, after)
                 result = {"path": args["path"], "frames": audio.shape[1], "peak": float(np.abs(audio).max()),

@@ -205,16 +205,53 @@ async def test_rate_shift_is_reported_and_blocks_a_misleading_reference_compare(
     plugin = tmp_path / "RateBug.vst3"
     plugin.write_bytes(b"plugin")
     request = {"plugin": str(plugin), "sweep": rack_sweep(notes=[69]), "warmup_seconds": 0, "settle_seconds": 5}
-    shifted = await _finish(tools, await tools["falcon_rack_render"](sample_rate=48000, **request))
+    shifted = await _finish(tools, await tools["falcon_rack_render"](sample_rate=48000, rate_fallback=False,
+                                                                     **request))
     assert shifted["status"] == "done", shifted
-    assert shifted["render"]["integrity"]["pitch"]["sample_rate_ratio_suspected"]
-    assert shifted["render"]["warnings"] and shifted["render"]["processing_prepared_before_state"]
+    render = shifted["render"]
+    assert render["integrity"]["pitch"]["sample_rate_ratio_suspected"] and render["comparison_usable"] is False
+    guard = render["rate_guard"]
+    assert guard["triggered"] and guard["resolved"] is False and "in tune at 44100" in guard["diagnosis"]
+    assert guard["probe_before"]["measured_hz"] == pytest.approx(479, abs=1.5)
+    assert render["warnings"] and Path(render["path"] + ".integrity.json").is_file()
     normal = await _finish(tools, await tools["falcon_rack_render"](sample_rate=44100, **request))
-    assert normal["render"]["integrity"]["status"] == "ok"
+    assert normal["render"]["integrity"]["status"] == "ok" and not normal["render"]["rate_guard"]["triggered"]
+    compared = await _finish(tools, await tools["falcon_rack_compare"](
+        reference=PluginSpec(plugin=str(plugin)), falcon_session_id=tools["host"].session_id,
+        sweep=rack_sweep(notes=[69]), sample_rate=48000, warmup_seconds=0, settle_seconds=5, rate_fallback=False))
+    assert not compared["compared"] and compared["reason_code"] == "reference_integrity_unverified"
+    # The saved record makes a later plain comparison refuse the same file.
+    with pytest.raises(ValueError, match="reference_integrity_unusable"):
+        await tools["falcon_midi_compare"](midi_path=shifted["timeline"]["mid_path"],
+                                           reference_path=render["path"],
+                                           candidate_path=normal["render"]["path"], wait_seconds=10)
+
+
+async def test_plugin_stuck_at_44k_is_rendered_there_and_resampled(tools, tmp_path):
+    """Kontakt under pedalboard stays at 44100 Hz (A4 = 479 Hz at 48 kHz). By default the rack renders at the
+    rate where the probe is in tune and resamples, and the result is checked like any other render."""
+    from falcon_mcp.rack_tools import PluginSpec
+
+    plugin = tmp_path / "RateBug.vst3"
+    plugin.write_bytes(b"plugin")
+    out = await _finish(tools, await tools["falcon_rack_render"](
+        plugin=str(plugin), sweep=rack_sweep(notes=[57, 69, 81]), sample_rate=48000, warmup_seconds=0,
+        settle_seconds=5))
+    assert out["status"] == "done", out
+    render = out["render"]
+    assert render["rate_guard"]["resolved"] and render["rate_guard"]["render_rate"] == 44100
+    assert render["render_rate_fallback"]["rendered_at"] == 44100
+    assert render["comparison_usable"] and render["integrity"]["status"] in {"ok", "warning"}
+    audio, rate = sf.read(render["path"])
+    assert rate == 48000 and len(audio) == round(48000 * out["timeline"]["seconds"])
+    hz = [n["measured_hz"] for n in render["integrity"]["pitch"]["notes"]]
+    assert hz and all(abs(1200 * np.log2(h / e)) < 5 for h, e in
+                      zip(hz, [n["expected_hz"] for n in render["integrity"]["pitch"]["notes"]], strict=True))
+    assert not list(Path(render["path"]).parent.glob("*.tmp.wav"))
     compared = await _finish(tools, await tools["falcon_rack_compare"](
         reference=PluginSpec(plugin=str(plugin)), falcon_session_id=tools["host"].session_id,
         sweep=rack_sweep(notes=[69]), sample_rate=48000, warmup_seconds=0, settle_seconds=5))
-    assert not compared["compared"] and compared["reason_code"] == "reference_integrity_unverified"
+    assert compared["compared"], compared
 
 
 async def test_render_sweep_settles_and_chunks(tools, tmp_path):

@@ -627,8 +627,10 @@ def create_server(config: Config | None = None) -> FastMCP:
                 "ui_checks": {"status": "implemented_unvalidated", "scope": "Static control-tree/mouse-blocking/contrast checks, live probe and native save/reload round trip (falcon_ui_check, falcon_ui_live_probe, falcon_native_ui_roundtrip); real mouse input is not tested"},
                 "performance_rendering": {"status": "implemented_unvalidated", "scope": "Owned-host offline render of timestamped notes/CC64/CC/bend/pressure on channels 1..16, canned phrases and performance checks (falcon_native_perform, falcon_native_perform_suite, falcon_perform_analyze); not realtime, not external MIDI input"},
                 "sample_audit": {"status": "implemented_unvalidated", "scope": "Static preset mapping plus DSP on referenced sample files: sampling interval, velocity layers, per-layer normalization, truncation, channel layout, noise floor, recordings shared across presets (falcon_sample_audit); not loops, release samples or UFS soundbanks"},
+                "sample_to_wavetable": {"status": "implemented_unvalidated", "scope": "Offline recording -> pitch-tracked harmonic frames, coherent phases, adaptive frame placement, K-weighted loudness, aliasing table, wavetable WAV + .uvip with a WaveTableOscillator (falcon_wavetable); one owned-host load/render validated 2026-11-01 (absolute WavetablePath, marker clm chunk)"},
                 "structural_inserts": {"status": "implemented_unvalidated", "scope": "Owned-host preview/apply/rollback of whitelisted insert modules (filter, chorus, amp, tremolo, saturation) with velocity/keyfollow/modwheel modulation, revision guard, readback and mandatory before/after probe render (falcon_native_structure)"},
                 "layer_stems": {"status": "implemented_unvalidated", "scope": "Owned-host per-layer solo/without/dry renders with guarded restore and contribution analysis (falcon_native_stems, falcon_native_stems_result, falcon_stem_analyze); long runs continue as background jobs"},
+                "layer_audition": {"status": "implemented_unvalidated", "scope": "Owned-host fixed workflow: role-labelled layers (source/synth/attack), per-layer and effects contribution, controller min/max states, present-but-inaudible findings and loudness-matched auditions (falcon_layer_audition); background job"},
                 "collection_similarity": {"status": "implemented_unvalidated", "scope": "Owned-host key x velocity grid across 2..8 instruments; pairwise shared-recording, partial-fingerprint and timbre comparison (falcon_native_collection, falcon_native_collection_result); background job, session saved and reloaded"},
                 "text_listening": {"status": "implemented", "scope": "Deterministic DSP reports for agents without audio input; heuristics, not perceptual verdicts"},
                 "reference_segments": {"status": "implemented", "scope": "Explicit local audio range, no source separation; level-normalized measurement hypotheses"},
@@ -677,6 +679,7 @@ def create_server(config: Config | None = None) -> FastMCP:
     from .structure_tools import register_structure
     from .sweep_tools import register_sweeps
     from .ui_tools import register_ui_checks
+    from .wavetable_tools import register_wavetable
     from .workflow_tools import register_workflows
 
     register_advanced(mcp, cfg, bridge, audit, capture_lock, capture_monitor)
@@ -690,9 +693,13 @@ def create_server(config: Config | None = None) -> FastMCP:
     register_perform(mcp, cfg, audit, native_host)
     register_perf(mcp, cfg, audit, native_host)
     register_sample_audit(mcp, cfg)
+    register_wavetable(mcp, cfg)
     register_ui_checks(mcp, cfg, audit, bridge, native_host)
     register_stems(mcp, cfg, audit, native_host)
     register_gain_calibration(mcp, cfg, audit, native_host)
+    from .layer_audition_tools import register_layer_audition
+
+    register_layer_audition(mcp, cfg, audit, native_host)
     register_structure(mcp, cfg, audit, native_host)
     register_collection(mcp, cfg, audit, native_host)
     from .rack_tools import register_rack
@@ -701,6 +708,9 @@ def create_server(config: Config | None = None) -> FastMCP:
     register_workflows(mcp, cfg, audit)
     register_mix(mcp, cfg, audit)
     register_parity(mcp, cfg)
+    from .audition_tools import register_audition
+
+    register_audition(mcp, cfg, audit)
     register_capture(mcp, cfg, audit, bridge)
     # Last: every registered tool gets a result_scope block (see docs/result-scope.md).
     from .result_scope import install_result_scope

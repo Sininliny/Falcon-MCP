@@ -165,7 +165,9 @@ The server exposes **56 tools**, structured schemas, the `falcon://capabilities`
 | `falcon_diagnose_audio`, `falcon_spectrum`, `falcon_get_logs` | Signal diagnostics and audit access. |
 | `falcon_sample_audit` | Sample-source audit of `.uvip`/`.uvim` files without Falcon: sampling interval, velocity layers, per-layer normalization, truncated samples, channel layout, noise floor, recordings shared across instruments ([sample audit](docs/sample-audit.md)). |
 | `falcon_native_gain_calibration` | Level map by register, velocity and voice count with limiter/pinned-peak checks; optional verified Keygroup/Program gain fixes ([readback and gain](docs/readback-and-gain.md)). |
+| `falcon_wavetable` | Offline sample-to-wavetable pipeline: pitch-tracked harmonic frames, coherent phases, adaptive frame placement, K-weighted loudness, aliasing table, wavetable WAV plus a `.uvip` with a Wavetable oscillator; also checks existing tables ([wavetable](docs/wavetable.md)). |
 | `falcon_render_parity` | Check offline renders (`.uvip` or Play scene) against a standalone/VST recording of the same MIDI: aligned LUFS, centroid and octave-band verdict ([render parity](docs/render-parity.md)). |
+| `falcon_audition_create`, `falcon_audition_choose`, `falcon_audition_migration`, `falcon_audition_history` | Reproducible A/B/C listening: same MIDI, controllers, file versions and matched loudness; the user's pick saved as the next round's target; offline mixes kept apart from integrated presets until a migration is verified ([auditions](docs/auditions.md)). |
 
 ## Operating rules
 
