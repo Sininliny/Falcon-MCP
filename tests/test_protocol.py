@@ -49,7 +49,8 @@ async def test_real_stdio_initialize_tools_resource_and_validation(config):
         assert {"falcon_rack_scan", "falcon_rack_state", "falcon_rack_render", "falcon_rack_compare",
                 "falcon_rack_job"} <= names
         assert {"falcon_voice_trace_kit", "falcon_voice_trace_analyze"} <= names
-        assert len(names) == 111
+        assert "falcon_delivery" in names
+        assert len(names) == 112
         assert {"falcon_runtime_trace", "falcon_native_ui_accept", "falcon_render_parity"} <= names
         assert {"falcon_audition_create", "falcon_audition_choose", "falcon_audition_migration",
                 "falcon_audition_history"} <= names
