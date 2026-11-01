@@ -72,7 +72,9 @@ class Note(BaseModel):
     model_config = ConfigDict(extra="forbid")
     note: int = Field(ge=0, le=127)
     velocity: int = Field(default=80, ge=1, le=127)
-    duration_ms: int = Field(default=600, ge=10, le=10000)
+    duration_ms: int = Field(default=600, ge=10, le=10000,
+                             description="Passed to playNote as duration>0: the voice gets its note-off after this "
+                                         "many ms (then its release stage), independent of any key")
     delay_ms: int = Field(default=0, ge=0, le=10000, description="Delay after previous note-on")
 
 
@@ -401,6 +403,10 @@ def create_server(config: Config | None = None) -> FastMCP:
         """Schedule finite notes downstream of the bridge. Use a Part/Program bridge to isolate an audition.
 
         delay_ms is relative to the preceding note-on; duration_ms releases each generated voice.
+        These voices use playNote(duration>0), so they are released by time, never by a held key, and they
+        start downstream of the bridge: an instrument script upstream never sees them, so its legato or
+        pending-window logic is NOT exercised. To test that logic play real MIDI (falcon_native_perform) and
+        trace it with falcon_voice_trace_kit / falcon_voice_trace_analyze.
         """
         return await play(notes, channel, layer)
 
@@ -712,6 +718,8 @@ def create_server(config: Config | None = None) -> FastMCP:
 
     register_audition(mcp, cfg, audit)
     register_capture(mcp, cfg, audit, bridge)
+    from .voice_trace_tools import register_voice_trace
+    register_voice_trace(mcp, cfg)
     # Last: every registered tool gets a result_scope block (see docs/result-scope.md).
     from .result_scope import install_result_scope
 
