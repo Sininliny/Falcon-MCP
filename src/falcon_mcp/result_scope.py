@@ -180,6 +180,10 @@ declare("falcon_native_stems", "owned_vst3_host", ["offline_render", "dsp_measur
 declare("falcon_native_stems_result", "owned_vst3_host", ["offline_render", "dsp_measured", "native_readback"],
         ["realtime_cpu", "open_instance", "perceptual_quality"], "render",
         note="Collects a background falcon_native_stems run; its edits are restored before it finishes.")
+declare("falcon_layer_audition", "owned_vst3_host", ["offline_render", "dsp_measured", "native_readback"],
+        ["realtime_cpu", "open_instance", "perceptual_quality"], "render",
+        note="Mutes, bypasses and controller parameters are temporary edits in the owned session, restored after "
+             "each render; auditions are offline loudness-matched copies, not the integrated preset.")
 declare("falcon_native_collection", "owned_vst3_host", ["offline_render", "dsp_measured", "native_readback"],
         ["realtime_cpu", "open_instance", "perceptual_quality"], "render",
         note="Loads each instrument into the owned session in turn; the prior session is saved and reloaded.")

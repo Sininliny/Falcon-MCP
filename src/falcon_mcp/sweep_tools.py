@@ -440,8 +440,8 @@ def register_sweeps(mcp, config, audit, host):
         job_id: JobId,
         wait_seconds: WaitSeconds = DEFAULT_WAIT_SECONDS,
     ) -> dict[str, Any]:
-        """Collect a background falcon_native_sweep, falcon_native_param_sweep, falcon_native_stems or
-        falcon_native_collection run.
+        """Collect a background falcon_native_sweep, falcon_native_param_sweep, falcon_native_stems,
+        falcon_native_collection or falcon_layer_audition run.
 
         Waits up to wait_seconds (kept below the client's request timeout); returns the tool's report with
         status "done", raises the run's error if it failed (with resume instructions when finished units
