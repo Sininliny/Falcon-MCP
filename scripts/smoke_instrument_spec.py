@@ -29,14 +29,14 @@ SPEC = {
          "keygroup_defaults": {"amp_envelope": {"attack": 0.005, "decay": 0.6, "sustain": 0.6, "release": 0.4}},
          "keygroups": [
              {"id": "low", "name": "Low", "keys": [0, 59],
-              "oscillators": [{"id": "saw", "module": "MinBlepGenerator", "params": {"Waveform": 4, "Gain": 0.35},
+              "oscillators": [{"id": "saw", "module": "MinBlepGenerator", "params": {"Waveform": 4, "Gain": 0.18},
                                "modulations": [{"source": "drift", "param": "Pitch", "ratio": 0.05}]}],
               "inserts": [{"id": "lp", "module": "MoogFilter", "params": {"Freq": 400.0},
                            "modulations": [{"source": "bright", "param": "Freq", "ratio": 0.8},
                                            {"source": "velocity", "param": "Freq", "ratio": 0.3}]}]},
              {"id": "high", "name": "High", "keys": [60, 127],
               "modulators": [{"id": "op_env", "module": "AHD", "params": {"DecayTime": 1.5}}],
-              "oscillators": [{"id": "fm", "module": "FmOscillator", "params": {"Gain": 0.3},
+              "oscillators": [{"id": "fm", "module": "FmOscillator", "params": {"Gain": 0.15},
                                "modulations": [{"source": "op_env", "param": "LevelB", "ratio": 0.5}]}],
               "inserts": [{"id": "lp", "module": "MoogFilter", "params": {"Freq": 400.0},
                            "modulations": [{"source": "bright", "param": "Freq", "ratio": 0.8}]}]},
@@ -44,7 +44,7 @@ SPEC = {
         {"id": "air", "name": "Air", "gain": 0.4,
          "keygroups": [{"id": "air_all", "name": "Air",
                         "oscillators": [{"id": "sine", "module": "MinBlepGenerator",
-                                         "params": {"Waveform": 1, "Gain": 0.2, "CoarseTune": 12}}]}]},
+                                         "params": {"Waveform": 1, "Gain": 0.1, "CoarseTune": 12}}]}]},
     ],
 }
 

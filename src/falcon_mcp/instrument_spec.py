@@ -962,9 +962,46 @@ def readback(requested: InstrumentSpec, xml: bytes) -> dict:
     found = extract(xml, compact=False)
     got = align_ids(want, found["spec"])
     result = diff(want, got)
-    return {"matches": result["identical"], "differences": result["changes"][:50], "counts": result["counts"],
+    explicit = _explicit_params(want)
+    differences, normalized = [], []
+    for change in result["changes"]:
+        module, _, param = change["path"].partition(".params.")
+        if change["op"] == "change" and param and param not in explicit.get(module, set()):
+            normalized.append(change)  # the spec left this to the index default; Falcon saved its own value
+        else:
+            differences.append(change)
+    counts: dict[str, int] = {}
+    for change in differences:
+        counts[change["op"]] = counts.get(change["op"], 0) + 1
+    return {"matches": not differences and not result["truncated"], "differences": differences[:50],
+            "counts": counts, "defaults_normalized": normalized[:50],
             "unsupported_in_file": found["unsupported"], "unresolved_routes": found["unresolved_routes"],
-            "scope": "Structure, parameter values (rel 1e-5) and routes; not sound, CPU or UI"}
+            "scope": ("Structure, routes and every parameter the spec sets (rel 1e-5). Parameters left to the "
+                      "index default that Falcon saved differently are listed in defaults_normalized, not "
+                      "failures; not sound, CPU or UI")}
+
+
+def _explicit_params(spec: dict) -> dict[str, set[str]]:
+    """Diff path of each module -> parameter names the spec set itself (same path format as diff)."""
+    out: dict[str, set[str]] = {}
+
+    def add(prefix: str, modules: list[dict]) -> None:
+        for m in modules:
+            out[f"{prefix}[{m['id']}]"] = set(m.get("params", {}))
+
+    add("modulators", spec["modulators"])
+    add("inserts", spec["inserts"])
+    for layer in spec["layers"]:
+        lp = f"layers[{layer['id']}]"
+        add(f"{lp}.modulators", layer["modulators"])
+        add(f"{lp}.inserts", layer["inserts"])
+        for kg in layer["keygroups"]:
+            kp = f"{lp}.keygroups[{kg['id']}]"
+            for part in ("oscillators", "modulators", "inserts"):
+                add(f"{kp}.{part}", kg[part])
+            if kg.get("amp_envelope"):
+                out[f"{kp}.amp_envelope"] = set(kg["amp_envelope"].get("params", {}))
+    return out
 
 
 # ----------------------------------------------------------------------------------------- checks

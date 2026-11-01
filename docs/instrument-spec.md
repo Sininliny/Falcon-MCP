@@ -74,6 +74,10 @@ No tier is a sound-quality claim. The build readback decides whether Falcon kept
 | `build` | yes | compile, revision snapshot, isolated acceptance (load/save/reopen/audio, as `falcon_build_instrument`), then the Falcon-saved file is extracted and compared with the spec; exported to `<home>/presets` only when acceptance passes **and** the readback matches |
 | `extract` | no | an existing `.uvip`/`.uvim` in spec form, with `unsupported` (scripts, unknown children, no local amp envelope) and `unresolved_routes` |
 
+The readback fails on any structural, route or explicitly set parameter difference. Parameters the
+spec left to the index default but Falcon saved with another value are listed in `defaults_normalized`
+and do not block the export (live, Falcon 27.0.2: SparkVerb `MixMode` index default 1 was saved as 0).
+
 Readback and file diffs match layers, keygroups and macros by position (Falcon keeps their order, not our
 ids) and modules by native `Name`. Float values compare with relative tolerance 1e-5 because Falcon
 re-serializes some floats with last-digit drift.

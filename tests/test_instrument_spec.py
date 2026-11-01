@@ -257,3 +257,19 @@ async def test_tool_validate_diff_compile_and_extract(config, tmp_path):
 
     with pytest.raises(ToolError, match="exactly one"):
         await call(action="diff", spec=spec())
+
+
+def test_readback_separates_falcon_normalized_defaults_from_requested_values():
+    raw = spec(inserts=[{"id": "room", "module": "SparkVerb", "params": {"Mix": 0.12}}])
+    xml, model = s.compile_spec(raw)
+    root = parse_xml(xml)
+    verb = root.find("Program/Inserts/SparkVerb")
+    assert verb.get("MixMode") == "1"  # index default
+    verb.set("MixMode", "0")  # what Falcon 27.0.2 saved on Yingg (live smoke, 2026-11-01)
+    verb.set("SparkVerbVersion", "1")
+    result = s.readback(model, ET.tostring(root))
+    assert result["matches"] and result["differences"] == []
+    assert [d["path"] for d in result["defaults_normalized"]] == ["inserts[room].params.MixMode"]
+    verb.set("Mix", "0.5")  # a value the spec set must still fail
+    result = s.readback(model, ET.tostring(root))
+    assert not result["matches"] and result["differences"][0]["path"] == "inserts[room].params.Mix"
