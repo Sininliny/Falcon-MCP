@@ -174,6 +174,9 @@ declare("falcon_native_ui_accept", "owned_vst3_host", [],
         note="Inspect the payload: native capture and queued mouse messages may be unsupported. Physical mouse and visual correctness are not certified.")
 declare("falcon_native_ui_roundtrip", "owned_vst3_host", ["native_readback", "save_reload"],
         ["mouse_interaction", "ui_display", "open_instance"])
+declare("falcon_native_gain_calibration", "owned_vst3_host", ["offline_render", "dsp_measured", "native_readback"],
+        ["realtime_cpu", "open_instance", "perceptual_quality", "saved_to_file"], "render",
+        note="Level balance measurements; apply=true edits are verified by re-render and restored when they do not help.")
 declare("falcon_native_stems", "owned_vst3_host", ["offline_render", "dsp_measured", "native_readback"],
         ["realtime_cpu", "open_instance", "perceptual_quality"], "render",
         note="Layer mutes/bypasses are temporary edits in the owned session and are restored before returning.")
