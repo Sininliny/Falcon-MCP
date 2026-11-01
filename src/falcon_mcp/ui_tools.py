@@ -116,6 +116,8 @@ def register_ui_checks(mcp, config, audit, bridge=None, native_host=None):
             Without notes, play externally while observing. Exact samples/legato/envelopes require an
             instrument-side falcon_trace_event hook in the same script environment. Closed official libraries
             may expose only aggregate VoiceCount; this is NOT proof of individual sample selection.
+            For per-note legato/envelope/voice-ownership answers in a script you develop (separate script
+            environment), use falcon_voice_trace_kit + falcon_voice_trace_analyze instead.
             A parameter snapshot may not expose per-voice modulated values. Unsupported targets are explicit.
             """
             targets = [{"selector": w.selector, "name": name} for w in watch or [] for name in w.names]

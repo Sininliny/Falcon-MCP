@@ -44,12 +44,17 @@ async def test_real_stdio_initialize_tools_resource_and_validation(config):
         assert {"falcon_perform_phrases", "falcon_native_perform", "falcon_native_perform_suite", "falcon_perform_analyze"} <= names
         assert {"falcon_mix_context", "falcon_midi_capture", "falcon_performance_profile"} <= names
         assert "falcon_capabilities" in names
-        assert "falcon_sample_audit" in names
+        assert {"falcon_sample_audit", "falcon_wavetable"} <= names
         assert {"falcon_midi_compare", "falcon_midi_compare_result"} <= names
         assert {"falcon_rack_scan", "falcon_rack_state", "falcon_rack_render", "falcon_rack_compare",
                 "falcon_rack_job"} <= names
-        assert len(names) == 103
+        assert {"falcon_voice_trace_kit", "falcon_voice_trace_analyze"} <= names
+        assert "falcon_delivery" in names
+        assert len(names) == 112
         assert {"falcon_runtime_trace", "falcon_native_ui_accept", "falcon_render_parity"} <= names
+        assert {"falcon_audition_create", "falcon_audition_choose", "falcon_audition_migration",
+                "falcon_audition_history"} <= names
+        assert "falcon_layer_audition" in names
         assert (config.runtime / "falcon_bridge.lua").is_file()
         assert all(t.outputSchema is not None for t in tools.tools)
         preset = config.runtime.parent / "export-test.uvip"

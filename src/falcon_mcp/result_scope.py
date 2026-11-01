@@ -178,12 +178,19 @@ declare("falcon_native_ui_accept", "owned_vst3_host", [],
         note="Inspect the payload: native capture and queued mouse messages may be unsupported. Physical mouse and visual correctness are not certified.")
 declare("falcon_native_ui_roundtrip", "owned_vst3_host", ["native_readback", "save_reload"],
         ["mouse_interaction", "ui_display", "open_instance"])
+declare("falcon_native_gain_calibration", "owned_vst3_host", ["offline_render", "dsp_measured", "native_readback"],
+        ["realtime_cpu", "open_instance", "perceptual_quality", "saved_to_file"], "render",
+        note="Level balance measurements; apply=true edits are verified by re-render and restored when they do not help.")
 declare("falcon_native_stems", "owned_vst3_host", ["offline_render", "dsp_measured", "native_readback"],
         ["realtime_cpu", "open_instance", "perceptual_quality"], "render",
         note="Layer mutes/bypasses are temporary edits in the owned session and are restored before returning.")
 declare("falcon_native_stems_result", "owned_vst3_host", ["offline_render", "dsp_measured", "native_readback"],
         ["realtime_cpu", "open_instance", "perceptual_quality"], "render",
         note="Collects a background falcon_native_stems run; its edits are restored before it finishes.")
+declare("falcon_layer_audition", "owned_vst3_host", ["offline_render", "dsp_measured", "native_readback"],
+        ["realtime_cpu", "open_instance", "perceptual_quality"], "render",
+        note="Mutes, bypasses and controller parameters are temporary edits in the owned session, restored after "
+             "each render; auditions are offline loudness-matched copies, not the integrated preset.")
 declare("falcon_native_collection", "owned_vst3_host", ["offline_render", "dsp_measured", "native_readback"],
         ["realtime_cpu", "open_instance", "perceptual_quality"], "render",
         note="Loads each instrument into the owned session in turn; the prior session is saved and reloaded.")

@@ -27,7 +27,7 @@ The native context does not require a Master launcher or any mouse/editor intera
 |---|---|
 | `falcon_native_host` | Start/status/stop a supervised, separate Falcon VST3 instance; returns `instance_id`. |
 | `falcon_native_file` | Native load/save for a Program (`.uvip`) or Multi (`.uvim`); Program replacement preserves that Part's routing. |
-| `falcon_native_edit` | Browse native child paths/attributes; edit existing indexed numeric/bool parameters with exact old-value guards and native readback. |
+| `falcon_native_edit` | Browse native child paths/attributes; edit existing indexed numeric/bool parameters with exact old-value guards and staged native readback (`verify`, see [readback and gain](readback-and-gain.md)). |
 | `falcon_native_structure` | Add whitelisted insert modules (filter, chorus, amp, tremolo, saturation) with preview, revision guard, readback, mandatory before/after render and rollback. See [structure edits](structure-edits.md). |
 | `falcon_native_render` | Finite MIDI to direct stereo WAV and diagnostics; no audio-device or loopback dependency. |
 | `falcon_analyze_reference` | Read 0.1..30 s from an explicit local attachment, preserve target/changes, return measurements and optional CLAP retrieval. |
@@ -77,7 +77,7 @@ Many instruments run a Lua script that writes envelope, pan and similar paramete
 
 ## Background jobs, checkpoints and timeouts
 
-`falcon_native_sweep`, `falcon_native_param_sweep` and `falcon_native_stems` run as background jobs (`jobs.py`). The call waits up to `wait_seconds` (default 40, below the usual 60 s client timeout) and otherwise returns `status: "running"` with `done`/`total` and a `job_id`; `falcon_native_job_result(job_id)` collects any of them (`falcon_native_stems_result` still works for stems). A client timeout does not cancel the job, so temporary edits are always restored. Only one job runs per native session.
+`falcon_native_sweep`, `falcon_native_param_sweep`, `falcon_native_stems` and `falcon_native_gain_calibration` run as background jobs (`jobs.py`). The call waits up to `wait_seconds` (default 40, below the usual 60 s client timeout) and otherwise returns `status: "running"` with `done`/`total` and a `job_id`; `falcon_native_job_result(job_id)` collects any of them (`falcon_native_stems_result` still works for stems). A client timeout does not cancel the job, so temporary edits are always restored. Only one job runs per native session.
 
 Every finished unit (sweep cell, parameter value, stem render) is saved to `<home>/reports/<job_id>.checkpoint.json`; stem WAVs stay in the run folder until the run finishes. After a failure, or after the server or owned host restarted (a new `instance_id` is fine), call the same tool with the same arguments plus `resume_job_id`. The worker refuses the resume if the session state is no longer the checkpointed revision. Stems restores read each attribute before writing it back: if the instrument script rewrote a silenced value during the render (seen on Glacier and Polar Current EP for the Aux return Gain), the restore still succeeds and that render lists `silencing_overridden`, with a `silencing_overridden` finding, because its comparison understates the target. `render_timeout_seconds` (10..1800) sets the per-request limit for these tools; the default for every native request is 120 s, or `FALCON_NATIVE_REQUEST_TIMEOUT`. Past the limit the worker is stopped, as before.
 

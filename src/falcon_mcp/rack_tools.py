@@ -466,7 +466,8 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
                 "is_instrument": row.get("is_instrument"), "state_info": rack.state_info(state)}
 
     async def rack_render(target: dict, files: dict, length: float, folder: Path, sample_rate: int,
-                          buffer_size: int, warmup: float, settle: float, compiled: list, progress: dict) -> dict:
+                          buffer_size: int, warmup: float, settle: float, compiled: list, progress: dict,
+                          rate_fallback: bool = True) -> dict:
         from .performance_trace import trace_midi
 
         progress.update(stage=f"rendering {target['label']}")
@@ -476,6 +477,7 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
                    "parameters": target["parameters"], "sample_rate": sample_rate, "buffer_size": buffer_size,
                    "program": target["program"], "bank": target["bank"],
                    "program_channel": target["program_channel"], "warmup_seconds": warmup, "settle_seconds": settle, "probe": list(rack.first_note(compiled)),
+                   "rate_fallback": rate_fallback,
                    "renders": [{"path": str(wav), "seconds": length, "midi_path": files["midi_path"],
                                 "midi_sha256": files["midi_sha256"]}]}
         # Load + settle + roughly real-time worst case for slow sample libraries.
@@ -487,6 +489,12 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         if out["midi_sha256"] != files["midi_sha256"]:
             raise RuntimeError("Rack worker rendered a different timeline")
         warnings = list(out.get("integrity", {}).get("warnings", []))
+        guard = result.get("rate_guard") or {}
+        if guard.get("triggered"):
+            warnings.append(f"Rate guard: {guard.get('diagnosis')} "
+                            + (f"Rendered at {guard['render_rate']} Hz and resampled to {sample_rate} Hz "
+                               "(render_rate_fallback)." if guard.get("resolved") else
+                               "Not corrected; this render is marked unusable for comparison."))
         if any(not stage["verified"] for stage in result.get("parameter_readback", [])):
             warnings.append("Requested plugin parameters differ from effective readback; inspect parameter_readback for clamping or later rewrites.")
         if out["silent"]:
@@ -507,6 +515,8 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         return {"label": target["label"], "plugin": result["plugin"], "state": target["state_info"],
                 "parameter_readback": result.get("parameter_readback", []),
                 "processing_prepared_before_state": result.get("processing_prepared_before_state", False),
+                "rate_guard": result.get("rate_guard"),
+                "comparison_usable": (out.get("integrity") or {}).get("comparison_usable"),
                 "input_trace": trace_midi(compiled),
                 "instrument": result.get("instrument"), "program": result.get("program"), "parameters_applied": result["parameters_applied"], "load_seconds": result["load_seconds"],
                 "settle": result["settle"], **out, "warnings": warnings}
@@ -702,6 +712,10 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         buffer_size: Annotated[int, Field(ge=32, le=4096)] = 512,
         warmup_seconds: Annotated[float, Field(ge=0, le=120)] = 2.0,
         settle_seconds: Annotated[float, Field(ge=0, le=600)] = 60.0,
+        rate_fallback: Annotated[bool, Field(description=(
+            "When the probe shows the plugin running at another sample rate (Kontakt stays at 44100 Hz) and it is "
+            "in tune there, render at that rate and resample to sample_rate. false: render anyway and mark the "
+            "file unusable for comparison"))] = True,
         wait_seconds: Wait = DEFAULT_WAIT_SECONDS,
     ) -> dict[str, Any]:
         """Render any installed VST3 instrument offline from a MIDI file, perform events or single notes.
@@ -715,7 +729,12 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         {"notes":[60], "velocities":[40,80,120]}). Up to 30 minutes, rendered in 30 s chunks to a 32-bit WAV
         under <audio root>/rack/<run>/, next to timeline.mid and timeline.events.json (the same timeline,
         reusable for falcon_native_perform or falcon_midi_compare). Before rendering, a probe note is repeated
-        until its level stops changing so background sample loading is finished. Runs as a job.
+        until its level stops changing so background sample loading is finished; its pitch is checked too. If the
+        probe plays at a sample-rate ratio (e.g. Kontakt: A4 = 479 Hz at 48 kHz) and the plugin is in tune at
+        the suspected rate, the render runs at that rate and is resampled (render.rate_guard,
+        render_rate_fallback; rate_fallback=false turns that off). render.integrity checks file rate, length and
+        isolated-note pitch; comparison_usable=false (also saved as <wav>.integrity.json) makes
+        falcon_midi_compare / falcon_render_parity / falcon_rack_compare refuse the file. Runs as a job.
         """
         target = resolve(PluginSpec(plugin=plugin, plugin_name=plugin_name, state=state, parameters=parameters,
                                     instrument=instrument, instrument_wait_seconds=instrument_wait_seconds,
@@ -726,7 +745,7 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
 
         async def work():
             out = await rack_render(target, files, length, folder, sample_rate, buffer_size, warmup_seconds,
-                                    settle_seconds, compiled, progress)
+                                    settle_seconds, compiled, progress, rate_fallback)
             return {"scope": SCOPE, "render": out, "timeline": {**rack.timeline_summary(compiled), "source": source,
                                                                  "seconds": length, **files},
                     "limitations": LIMITATIONS,
@@ -753,6 +772,7 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
         channels: Annotated[list[Annotated[int, Field(ge=1, le=16)]], Field(max_length=16)] | None = None,
         note_range: Annotated[list[Byte], Field(min_length=2, max_length=2)] | None = None,
         max_offset_seconds: Annotated[float, Field(gt=0, le=10)] = 1.0,
+        rate_fallback: bool = True,
         wait_seconds: Wait = DEFAULT_WAIT_SECONDS,
     ) -> dict[str, Any]:
         """Render the SAME MIDI (or single notes) on a reference plugin and on Falcon, then compare per note.
@@ -785,25 +805,29 @@ def register_rack(mcp, config, audit, native_host=None, midi_compare_run=None):
 
         async def work():
             ref_out = await rack_render(ref, files, length, folder, sample_rate, buffer_size, warmup_seconds,
-                                        settle_seconds, compiled, progress)
+                                        settle_seconds, compiled, progress, rate_fallback)
             integrity = ref_out.get("integrity", {})
-            if integrity.get("status") == "failed" or integrity.get("pitch", {}).get("sample_rate_ratio_suspected"):
+            if integrity.get("comparison_usable") is False:
                 return {"scope": SCOPE, "renders": {"reference": ref_out}, "compared": False,
-                        "error": "Reference integrity is unverified (file mismatch or sample-rate-like pitch shift). "
-                                 "Repeat the same state/MIDI at 44100 and 48000 Hz and verify tuning before comparing timbre.",
+                        "error": "Reference render is unusable for comparison: "
+                                 f"{', '.join(integrity.get('unusable_reasons', [])) or 'integrity failed'}. "
+                                 "See renders.reference.rate_guard and integrity.warnings; verify tuning before "
+                                 "comparing timbre (the same state at 44100 Hz is a useful cross-check).",
                         "reason_code": "reference_integrity_unverified", **files}
             if cand:
                 cand_out = await rack_render(cand, files, length, folder, sample_rate, buffer_size, warmup_seconds,
-                                             settle_seconds, compiled, progress)
+                                             settle_seconds, compiled, progress, rate_fallback)
             else:
                 cand_out = await falcon_render(falcon_session_id, files, length, folder, sample_rate, buffer_size,
                                                falcon_expected_revision, progress)
             silent = [o["label"] for o in (ref_out, cand_out) if o.get("silent") or
                       any("silent" in w for w in o.get("warnings", []))]
             renders = {"reference": ref_out, "candidate": cand_out}
-            if (cand_out.get("integrity") or {}).get("status") == "failed":
+            if (cand_out.get("integrity") or {}).get("comparison_usable") is False:
                 return {"scope": SCOPE, "renders": renders, "compared": False,
-                        "error": "Candidate file rate/frame count/duration mismatch; see integrity", **files}
+                        "error": "Candidate render is unusable for comparison: "
+                                 f"{', '.join(cand_out['integrity'].get('unusable_reasons', []))}; see integrity",
+                        "reason_code": "candidate_integrity_unverified", **files}
             if silent:
                 return {"scope": SCOPE, "renders": renders, "compared": False,
                         "error": f"Not compared: silent render(s) {silent}; see warnings", **files}

@@ -119,6 +119,7 @@ def register_native(mcp, config, audit):
         session_id: Session, selector: Annotated[str, Field(min_length=1, max_length=1024)],
         changes: Annotated[list[NativeChange], Field(max_length=64)] | None = None,
         expected_revision: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")] | None = None,
+        verify: Literal["write", "settle", "reload"] = "settle",
     ) -> dict[str, Any]:
         """Browse/edit the owned session's serialized native parameters with expected-attribute guards.
 
@@ -126,11 +127,17 @@ def register_native(mcp, config, audit):
         changes omitted reads attributes/children and official indexed definitions. Only indexed numeric/bool
         attributes can change; no structural/metadata writes. Changes require expected_revision from
         the inspected read. SignalConnection writes require native_connections instead.
+        After a write, readback_report says what the plugin kept per change at each verify stage: "write"
+        (state read right after setState), "settle" (default: after the instrument scripts ran on silence),
+        "reload" (the same state set again, as reopening the preset would). Classes: exact/rounded (kept),
+        not_kept, clamped_min/max, limited, truncated, unit_mismatch_suspected, rewritten_by_script,
+        changed_after_reload; unit_hints flag e.g. dB sent to a linear gain (1 = 0 dB) or 35 for a 0..1 mix.
+        verified=false with warnings when any value did not survive; a write-stage mismatch is an error.
         Uses versioned offline definitions, not live Lua definitions; confirm native render after each edit.
         """
         return await host.request(session_id, "edit", {
             "selector": selector, "changes": [c.model_dump() for c in changes or []],
-            "expected_revision": expected_revision,
+            "expected_revision": expected_revision, "verify": verify,
         })
 
     @mcp.tool(annotations=WRITE)

@@ -6,6 +6,8 @@ Bright* has stronger upper partials, Deaf* ignores notes in the first 0.5 s afte
 while unloading, Patient* keeps its window open until the close event. State files are JSON
 ({"gain": ..., "instrument": ...}); show_editor sets gain 0.25; program change n sets gain 1/(n+1);
 drop_file (FALCON_RACK_TEST_DROP) embeds the file's text in the state and sets gain 0.5.
+RateBug* keeps the 44100 Hz it was created at, like Kontakt 8 under pedalboard (live 2026-11-01): at any
+other host rate it plays rate/44100 off.
 """
 
 import json
@@ -100,8 +102,8 @@ class _Plugin:
             if not live.any():
                 continue
             f0 = 440.0 * 2 ** ((note - 69) / 12)
-            if self.base.startswith("RateBug") and sample_rate == 48000:
-                f0 *= 48000 / 44100
+            if self.base.startswith("RateBug"):
+                f0 *= sample_rate / 44100
             amp = (velocity / 127) ** 1.5 * self.gain * np.exp(-1.5 * np.clip(t, 0, None))
             if end is not None:
                 amp = amp * np.where(index >= end, np.exp(-np.clip(index - end, 0, None) / sample_rate / 0.08), 1.0)

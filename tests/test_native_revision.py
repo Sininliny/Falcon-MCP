@@ -60,6 +60,12 @@ FAKE_PEDALBOARD = textwrap.dedent('''
         def raw_state(self, value):
             self._state = value
             self.pending_init = True  # Falcon re-runs the instrument script after a state load.
+            if self.mode == "clamp":  # a plugin whose real range is narrower than the offline index
+                tree = ET.fromstring(state_xml(self._state))
+                for program in tree.iter("Program"):
+                    if float(program.get("Gain", "1")) > 1.5:
+                        program.set("Gain", "1.5")
+                self._state = replace_state_xml(self._state, ET.tostring(tree, encoding="utf-8"))
 
         def _script_write(self, **attributes):
             tree = ET.fromstring(state_xml(self._state))
@@ -73,6 +79,8 @@ FAKE_PEDALBOARD = textwrap.dedent('''
             if self.pending_init:
                 self.pending_init = False
                 self._script_write(ScriptAttack="0.012", ScriptPan="-0.2")
+                if self.mode == "rewrite":  # an instrument script that resets its output level on init
+                    self._script_write(Gain="0.25")
             if self.mode == "every":
                 self._script_write(ScriptCounter=str(self.processed))
             return np.zeros((num_channels, int(duration * sample_rate)), dtype="float32")
