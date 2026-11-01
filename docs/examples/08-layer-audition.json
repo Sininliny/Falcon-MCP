@@ -1,0 +1,56 @@
+{
+  "id": "08-layer-audition",
+  "title": "Find out what each layer contributes",
+  "goal": "Render each layer solo and muted from one fixed test so a text-only agent can see which layer is audible and which is present but inaudible.",
+  "context": "owned_host",
+  "requires": "Windows, licensed Falcon 27.0.2 VST3, the [host] extra. Uses its own FALCON_MCP_HOME.",
+  "steps": [
+    {
+      "id": "build",
+      "tool": "falcon_build_instrument",
+      "why": "Two layers: a normal Body and a Color an octave up at a very low gain, so one layer should be nearly inaudible.",
+      "args": {"action": "build", "project": "examples", "name": "Example Layers", "role": "Keys",
+               "layers": [{"name": "Body", "keygroups": [{"name": "Center", "oscillators": [{"gain": 0.2}]}]},
+                          {"name": "Color", "gain": 0.003,
+                           "keygroups": [{"name": "Center", "oscillators": [{"gain": 0.2, "coarse_tune": 12}]}]}]},
+      "expect": [
+        {"path": "exported", "op": "is_true"}
+      ]
+    },
+    {
+      "id": "host",
+      "tool": "falcon_native_host",
+      "why": "Owned VST3 instance for the solo/mute renders.",
+      "args": {"action": "start"},
+      "expect": [
+        {"path": "session_id", "op": "matches", "value": "^[a-f0-9]{32}$"}
+      ]
+    },
+    {
+      "id": "load",
+      "tool": "falcon_native_file",
+      "why": "Load the Program to audition.",
+      "args": {"session_id": "${host.session_id}", "action": "load", "kind": "program", "path": "${build.path}"},
+      "expect": [
+        {"path": "programs.0.name", "op": "eq", "value": "Example Layers"}
+      ]
+    },
+    {
+      "id": "audition",
+      "tool": "falcon_layer_audition",
+      "why": "Solo and muted renders of every layer from the same notes; the state is restored afterwards.",
+      "args": {"session_id": "${host.session_id}", "seconds": 2.5, "wait_seconds": 50,
+               "notes": [{"note": 57, "velocity": 100, "start_seconds": 0, "duration_seconds": 1.0}]},
+      "expect": [
+        {"path": "status", "op": "eq", "value": "done"},
+        {"path": "scope.restored", "op": "is_true"},
+        {"path": "findings", "op": "any_contains", "value": "Color"},
+        {"path": "table", "op": "contains", "value": "Body"}
+      ]
+    }
+  ],
+  "cleanup": [
+    {"tool": "falcon_native_host", "args": {"action": "stop", "session_id": "${host.session_id}"}}
+  ],
+  "conclusion": "Body carries the sound; Color is reported as quiet or present but inaudible, so raise its gain or remove it. The table and findings are measurements, not a judgment of whether the layer is musically useful."
+}

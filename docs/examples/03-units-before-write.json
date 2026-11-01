@@ -1,0 +1,37 @@
+{
+  "id": "03-units-before-write",
+  "title": "Look up units before writing a parameter",
+  "goal": "Convert a musical value (300 ms release, -6 dB) into the engine value Falcon stores, before any write.",
+  "context": "offline",
+  "steps": [
+    {
+      "id": "lookup",
+      "tool": "falcon_param_lookup",
+      "why": "The panel shows ms; the engine stores seconds. Writing 300 would mean 300 seconds (clamped to 10).",
+      "args": {"module": "AnalogADSR", "parameter": "ReleaseTime"},
+      "expect": [
+        {"path": "unit.unit", "op": "eq", "value": "second"},
+        {"path": "range.max", "op": "eq", "value": 10.0}
+      ]
+    },
+    {
+      "id": "convert",
+      "tool": "falcon_param_value",
+      "why": "Let the server do the conversion and keep its steps as evidence.",
+      "args": {"module": "AnalogADSR", "parameter": "ReleaseTime", "value": "300 ms"},
+      "expect": [
+        {"path": "engine_value", "op": "eq", "value": 0.3}
+      ]
+    },
+    {
+      "id": "gain",
+      "tool": "falcon_param_value",
+      "why": "Gains are linear factors in the engine, not dB.",
+      "args": {"module": "Layer", "parameter": "Gain", "value": "-6 dB"},
+      "expect": [
+        {"path": "engine_value", "op": "between", "value": [0.49, 0.51]}
+      ]
+    }
+  ],
+  "conclusion": "Write ReleaseTime=0.3 and Gain=0.501. After writing, read the value back and render: a correct number is not yet an audible result."
+}

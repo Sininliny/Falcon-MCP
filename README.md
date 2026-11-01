@@ -225,6 +225,8 @@ License: [Apache-2.0](LICENSE).
 
 Architecture, adding tools, versioning, tests/CI and live validation are described in the [developer guide](docs/development.md). The current target is Falcon 27.0.2.
 
+Minimal behavior examples for agents (listen, one-change diff, units, A/B choice, wavetable, delivery, build-render-edit, layer audition), with expected outputs recorded from real calls, are in [docs/examples](docs/examples/README.md).
+
 ## Agent skill and repository language
 
 [Falcon instrument workflow](skills/falcon-instrument-workflow/SKILL.md) covers session guards, routing, instrument identity, macros, capture/model interpretation, Program/Multi saving and portable releases. Copy its whole folder into your agent's skills directory when installing it; supporting production guidance stays with the skill.

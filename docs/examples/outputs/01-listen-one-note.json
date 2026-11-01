@@ -1,0 +1,35 @@
+{
+  "id": "01-listen-one-note",
+  "context": "offline",
+  "steps": [
+    {
+      "id": "listen",
+      "tool": "falcon_listen",
+      "excerpt": {
+        "pitch.cents_error": 11.978,
+        "envelope.shape": "sustained",
+        "envelope.attack_ms": 10.0,
+        "description": [
+          "fast attack (10 ms)",
+          "sustains at -0.1 dB below peak",
+          "release falls 40 dB in 373 ms",
+          "dark (centroid 549 Hz = 2.5x f0)",
+          "harmonically rich/buzzy (tilt -6.0 dB/oct)",
+          "sharp by 12 cents",
+          "..."
+        ],
+        "ascii.spectrogram": "  9.7k|                                                            |\n  5.9k|*****************************************++==-::..          |\n  3.6k|##########################################*++==-::..        |\n  2.2k|##########################...",
+        "full_report": "${home}/reports/08800e39da354462b37fb0738b7bcb17.listen.json"
+      },
+      "result_scope": {
+        "env": "audio_file_analysis",
+        "checked": [
+          "dsp_measured"
+        ],
+        "not_checked": [
+          "perceptual_quality"
+        ]
+      }
+    }
+  ]
+}

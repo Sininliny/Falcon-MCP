@@ -1,0 +1,93 @@
+{
+  "id": "02-one-change-diff",
+  "context": "offline",
+  "steps": [
+    {
+      "id": "diff",
+      "tool": "falcon_audio_diff",
+      "excerpt": {
+        "diff.significant_changes": [
+          {
+            "feature": "h4_db_re_h1",
+            "before": -80.0,
+            "after": -12.0,
+            "delta": 68.0,
+            "noticeable_steps": 22.67
+          },
+          {
+            "feature": "h5_db_re_h1",
+            "before": -80.0,
+            "after": -14.0,
+            "delta": 66.0,
+            "noticeable_steps": 22.0
+          },
+          {
+            "feature": "band_upper_mid_db",
+            "before": -80.0,
+            "after": -15.0,
+            "delta": 65.0,
+            "noticeable_steps": 21.67
+          },
+          {
+            "feature": "h6_db_re_h1",
+            "before": -80.0,
+            "after": -15.6,
+            "delta": 64.4,
+            "noticeable_steps": 21.47
+          },
+          {
+            "feature": "h7_db_re_h1",
+            "before": -80.0,
+            "after": -16.9,
+            "delta": 63.1,
+            "noticeable_steps": 21.03
+          },
+          {
+            "feature": "h8_db_re_h1",
+            "before": -80.0,
+            "after": -18.1,
+            "delta": 61.9,
+            "noticeable_steps": 20.63
+          },
+          "..."
+        ],
+        "diff.summary": [
+          "more harmonics: harmonics_within_40db 3 -> 40",
+          "brighter: centroid_hz 296.3137 -> 580.932",
+          "quieter: rms_dbfs -16.7598 -> -17.9883",
+          "higher h4_db_re_h1: h4_db_re_h1 -80.0 -> -12.0",
+          "higher h5_db_re_h1: h5_db_re_h1 -80.0 -> -14.0",
+          "higher band_upper_mid_db: band_upper_mid_db -80.0 -> -15.0",
+          "..."
+        ]
+      },
+      "result_scope": {
+        "env": "audio_file_analysis",
+        "checked": [
+          "dsp_measured"
+        ],
+        "not_checked": [
+          "perceptual_quality"
+        ]
+      }
+    },
+    {
+      "id": "target",
+      "tool": "falcon_match_target",
+      "excerpt": {
+        "evaluation.passed": false,
+        "evaluation.features.[feature=centroid_hz].direction": "decrease",
+        "evaluation.features.[feature=attack_ms].status": "ok"
+      },
+      "result_scope": {
+        "env": "audio_file_analysis",
+        "checked": [
+          "dsp_measured"
+        ],
+        "not_checked": [
+          "perceptual_quality"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,99 @@
+{
+  "id": "05-wavetable-from-sample",
+  "title": "Make a wavetable from a recording",
+  "goal": "Turn a pitched recording into a Falcon wavetable plus an unloaded .uvip, and check the table before using it.",
+  "context": "offline",
+  "fixtures": [
+    {
+      "kind": "tone",
+      "path": "${audio}/source-a3.wav",
+      "harmonics": 40,
+      "seconds": 2.0,
+      "release_at": 1.6
+    }
+  ],
+  "live_equivalent": "Load the written .uvip with falcon_native_file and render it (example 07 steps) before calling the table done.",
+  "steps": [
+    {
+      "id": "build",
+      "tool": "falcon_wavetable",
+      "why": "Give the played note; the report says if the pitch, octave or phase would make the table wrong.",
+      "args": {
+        "action": "build",
+        "source": "source-a3.wav",
+        "name": "ExampleTable",
+        "midi_note": 57,
+        "frames": 32,
+        "end_s": 1.5,
+        "write_preview": false
+      },
+      "expect": [
+        {
+          "path": "tuning.detected_note",
+          "op": "eq",
+          "value": 57.0
+        },
+        {
+          "path": "tuning.octave_folds",
+          "op": "eq",
+          "value": 0
+        },
+        {
+          "path": "tuning.offset_cents",
+          "op": "between",
+          "value": [
+            -3,
+            3
+          ]
+        },
+        {
+          "path": "warnings",
+          "op": "any_contains",
+          "value": "Nyquist"
+        },
+        {
+          "path": "files.wavetable",
+          "op": "matches",
+          "value": "ExampleTable\\.wav$"
+        },
+        {
+          "path": "files.preset",
+          "op": "matches",
+          "value": "ExampleTable\\.uvip$"
+        }
+      ]
+    },
+    {
+      "id": "check",
+      "tool": "falcon_wavetable",
+      "why": "check reads the table back the way Falcon will (frame size from the clm marker).",
+      "args": {
+        "action": "check",
+        "source": "${build.files.wavetable}"
+      },
+      "expect": [
+        {
+          "path": "frames",
+          "op": "eq",
+          "value": 32
+        },
+        {
+          "path": "frame_size",
+          "op": "eq",
+          "value": 2048
+        },
+        {
+          "path": "frame_size_from",
+          "op": "eq",
+          "value": "clm chunk"
+        },
+        {
+          "path": "worst_seam_ratio",
+          "op": "lt",
+          "value": 1.5
+        }
+      ]
+    }
+  ],
+  "conclusion": "The table is in tune and reads back as 32 frames of 2048 samples with no seam click. The Nyquist warning means the brightest frames alias on the top keys (see aliasing.rates): pass key_range or max_harmonics if the instrument plays there. Nothing has been loaded or heard yet: result_scope.not_checked lists audible_effect, so load and render the preset before reporting it works."
+}

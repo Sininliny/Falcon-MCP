@@ -1,0 +1,35 @@
+{
+  "id": "02-one-change-diff",
+  "title": "Keep or revert one change",
+  "goal": "Compare the same test before and after one edit, then check the result against a numeric goal.",
+  "context": "offline",
+  "fixtures": [
+    {"kind": "tone", "path": "${audio}/before.wav", "harmonics": 3},
+    {"kind": "tone", "path": "${audio}/after.wav", "harmonics": 40}
+  ],
+  "live_equivalent": "before/after are two falcon_native_render results with identical notes, separated by one falcon_native_edit (example 07).",
+  "steps": [
+    {
+      "id": "diff",
+      "tool": "falcon_audio_diff",
+      "why": "Ranked feature differences say what the edit changed; compare only renders of the identical test.",
+      "args": {"before_path": "before.wav", "after_path": "after.wav", "expected_note": 57},
+      "expect": [
+        {"path": "diff.significant_changes", "op": "any_contains", "value": "centroid_hz"},
+        {"path": "diff.summary", "op": "any_contains", "value": "brighter"}
+      ]
+    },
+    {
+      "id": "target",
+      "tool": "falcon_match_target",
+      "why": "State the goal as numbers; the evaluation says whether it is met and which way to move.",
+      "args": {"path": "after.wav", "target": {"centroid_hz": {"min": 350, "max": 450}, "attack_ms": {"min": 2, "max": 20}}},
+      "expect": [
+        {"path": "evaluation.passed", "op": "is_false"},
+        {"path": "evaluation.features.[feature=centroid_hz].direction", "op": "eq", "value": "decrease"},
+        {"path": "evaluation.features.[feature=attack_ms].status", "op": "eq", "value": "ok"}
+      ]
+    }
+  ],
+  "conclusion": "The edit made the note brighter, from a centroid near 300 Hz to near 580 Hz, overshooting the 350-450 Hz goal: keep the direction, back the change off, render the same test and diff again. Attack is unaffected."
+}

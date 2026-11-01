@@ -1,0 +1,53 @@
+{
+  "id": "05-wavetable-from-sample",
+  "context": "offline",
+  "steps": [
+    {
+      "id": "build",
+      "tool": "falcon_wavetable",
+      "excerpt": {
+        "tuning.detected_note": 57.0,
+        "tuning.octave_folds": 0,
+        "tuning.offset_cents": 0.1,
+        "warnings": [
+          "Upper keys exceed Nyquist for the highest significant harmonic; see aliasing.rates.",
+          "The source sample rate capped extraction at 24000 Hz; at key 33 the table has no content above 6000 Hz."
+        ],
+        "files.wavetable": "${audio}/wavetables/ExampleTable/ExampleTable.wav",
+        "files.preset": "${audio}/wavetables/ExampleTable/ExampleTable.uvip"
+      },
+      "result_scope": {
+        "env": "audio_file_analysis",
+        "checked": [
+          "dsp_measured"
+        ],
+        "not_checked": [
+          "owned_instance",
+          "audible_effect",
+          "perceptual_quality"
+        ]
+      }
+    },
+    {
+      "id": "check",
+      "tool": "falcon_wavetable",
+      "excerpt": {
+        "frames": 32,
+        "frame_size": 2048,
+        "frame_size_from": "clm chunk",
+        "worst_seam_ratio": 1.0
+      },
+      "result_scope": {
+        "env": "audio_file_analysis",
+        "checked": [
+          "dsp_measured"
+        ],
+        "not_checked": [
+          "owned_instance",
+          "audible_effect",
+          "perceptual_quality"
+        ]
+      }
+    }
+  ]
+}
