@@ -101,6 +101,39 @@ Each run writes `<audio root>/rack/<run>/timeline.events.json`, `timeline.mid` a
   VST2). Silent renders are flagged and stop a comparison.
 - Results are DSP measurements, not a perceptual verdict.
 
+## Sample rate and pitch guard
+
+Symptom (2026-10-31): a Kontakt instrument rendered in the rack at 48 kHz played A4 at about 478-480 Hz, and
+correctly at 44.1 kHz. 440 x 48000/44100 = 478.9 Hz: the plugin runs at 44.1 kHz internally while the host
+writes 48 kHz frames.
+
+Live finding (Yingg, 2026-11-01, Kontakt 8.14.1, NOIRE Felt): pedalboard creates every plugin at 44100 Hz
+(`load_plugin` has no rate argument) and Kontakt keeps that rate. At 48 kHz the probe and every isolated note
+were +147-149 cents, at 44.1 kHz within 1 cent. It made no difference whether the host reset the plugin by
+re-creating it (pedalboard `reset()`) or only sent all-notes-off, nor whether the state was restored after
+48 kHz was prepared. Only a plugin instance created at 48 kHz would avoid it, which pedalboard cannot do.
+
+What the rack does now:
+
+- The last settle probe is pitch-checked (`settle.probe_pitch`), so pedalled or chordal MIDI that gives the
+  per-note check nothing to measure is still covered.
+- If the probe matches a sample-rate ratio, `rate_guard` probes again at the suspected rate. When the plugin
+  is in tune there and `rate_fallback=true` (default), the render runs at that rate and is resampled to the
+  requested rate with a polyphase filter (`render_rate_fallback` says so; nothing above the rendered rate's
+  Nyquist exists). The resampled file goes through the same integrity checks. `rate_fallback=false` renders
+  at the requested rate anyway and marks the file unusable.
+- `integrity.comparison_usable` is false for a file rate/length mismatch, a sample-rate-like shift in the
+  MIDI notes or the probe, a uniform offset over 35 cents across measured notes, or a probe more than
+  50 cents off. The record is written next to the audio as `<file>.integrity.json` (rack and owned-session
+  renders). `falcon_rack_compare`, `falcon_midi_compare` and `falcon_render_parity` refuse a file marked
+  unusable unless `allow_unverified_audio=true` (for an intended transposition). A file changed after its
+  check, or one with no record (an external recording), is reported as unchecked, not refused.
+- `falcon_midi_compare` also reports `pitch_consistency`: a candidate-vs-reference tuning gap over 35 cents
+  becomes the first finding.
+
+Limits: an exact octave error (96 kHz vs 48 kHz) is not flagged because it looks like a tracker octave error;
+unpitched or strongly inharmonic probes are reported as uncertain and do not block.
+
 ## Live validation (Yingg, 2026-10-23, main 0.6.0)
 
 - Scan: 107 bundles, 26 instruments (Kontakt 8 8.13.1 found) in 494 s, after the unload-hang fix. Failed:
