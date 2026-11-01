@@ -662,6 +662,7 @@ def create_server(config: Config | None = None) -> FastMCP:
     from .capture_tools import register_capture
     from .collection_tools import register_collection
     from .design_tools import register_design
+    from .gain_tools import register_gain_calibration
     from .knowledge_tools import register_knowledge
     from .listen_tools import register_listening
     from .midi_compare_tools import register_midi_compare
@@ -691,6 +692,7 @@ def create_server(config: Config | None = None) -> FastMCP:
     register_sample_audit(mcp, cfg)
     register_ui_checks(mcp, cfg, audit, bridge, native_host)
     register_stems(mcp, cfg, audit, native_host)
+    register_gain_calibration(mcp, cfg, audit, native_host)
     register_structure(mcp, cfg, audit, native_host)
     register_collection(mcp, cfg, audit, native_host)
     from .rack_tools import register_rack
