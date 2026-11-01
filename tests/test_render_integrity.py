@@ -166,3 +166,17 @@ def test_sidecar_gate_refuses_unusable_and_ignores_changed_files(tmp_path):
     sf.write(path, tone(48000, 440, 2.5), 48000, subtype="FLOAT")  # re-rendered: the old record is void
     assert reference_gate(path)["checked"] is False
     assert reference_gate(tmp_path / "external.wav")["usable"] is None
+
+
+def test_resample_file_keeps_pitch_length_and_chunk_seams(tmp_path):
+    from falcon_mcp.render_integrity import resample_file
+
+    src, dst = tmp_path / "in.wav", tmp_path / "out.wav"
+    sf.write(src, tone(44100, 440, 3.3), 44100, subtype="FLOAT")
+    frames = resample_file(src, dst, 44100, 48000, round(48000 * 3.3), chunk_frames=44100)
+    audio, rate = sf.read(dst)
+    assert rate == 48000 and frames == len(audio) == round(48000 * 3.3)
+    t = np.arange(len(audio)) / 48000
+    ideal = 0.2 * np.sin(2 * np.pi * 440 * t)
+    inner = slice(2000, len(audio) - 2000)  # file edges see the zero padding of the filter
+    assert np.max(np.abs(audio[inner, 0] - ideal[inner])) < 1e-3

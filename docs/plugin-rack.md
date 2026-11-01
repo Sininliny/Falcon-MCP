@@ -87,8 +87,7 @@ Each run writes `<audio root>/rack/<run>/timeline.events.json`, `timeline.mid` a
   Some plugins hang while unloading: the worker ends itself without unloading once its result is written, and
   the scan kills a worker that has reported everything but does not exit within 15 s.
 - Some instruments (UADx Ravel in the live test) ignore notes that arrive right after a reset, so every
-  reset (soft or reinstantiate, see below) is followed by at least 1 s of silence before the probe note or the
-  timeline.
+  reset is followed by 1 s of silence before the probe note or the timeline.
 - Library players load samples in the background after their state is set. Before rendering, the worker waits
   `warmup_seconds`, then repeats a probe note (the first note of the timeline) until two consecutive levels
   agree within 0.5 dB, for at most `settle_seconds`. `settle.stable=false` is reported, never hidden. An
@@ -105,28 +104,24 @@ Each run writes `<audio root>/rack/<run>/timeline.events.json`, `timeline.mid` a
 ## Sample rate and pitch guard
 
 Symptom (2026-10-31): a Kontakt instrument rendered in the rack at 48 kHz played A4 at about 478-480 Hz, and
-correctly at 44.1 kHz. 440 x 48000/44100 = 478.9 Hz, so the plugin was running at 44.1 kHz internally while
-the host wrote 48 kHz frames.
+correctly at 44.1 kHz. 440 x 48000/44100 = 478.9 Hz: the plugin runs at 44.1 kHz internally while the host
+writes 48 kHz frames.
 
-Most likely cause (from pedalboard 0.9.x source, not yet confirmed on Kontakt): pedalboard creates every
-plugin at 44100 Hz and warms instruments up at 44100 Hz. For an instrument it cannot tell whether `reset()`
-clears audio, so `reset()` destroys the plugin, creates a new one at 44100 Hz, restores the saved state into
-it and warms it up at 44100 Hz again; only the next call prepares 48000 Hz. The rack called `reset()` before
-every settle probe and before each render, so preparing 48 kHz before the state (added in 0.6.x) was undone
-right away. A plugin that fixes its playback rate while it restores a state or loads a library then stays at
-44.1 kHz.
+Live finding (Yingg, 2026-11-01, Kontakt 8.14.1, NOIRE Felt): pedalboard creates every plugin at 44100 Hz
+(`load_plugin` has no rate argument) and Kontakt keeps that rate. At 48 kHz the probe and every isolated note
+were +147-149 cents, at 44.1 kHz within 1 cent. It made no difference whether the host reset the plugin by
+re-creating it (pedalboard `reset()`) or only sent all-notes-off, nor whether the state was restored after
+48 kHz was prepared. Only a plugin instance created at 48 kHz would avoid it, which pedalboard cannot do.
 
 What the rack does now:
 
-- `host_reset="soft"` (default): no `reset()`. Sustain off, all notes off and all sound off on every channel,
-  then silence until the tail dies (1-6 s). The instance keeps its prepared rate. `host_reset="reinstantiate"`
-  keeps the old behaviour to reproduce the problem.
-- Without a state file, the plugin's default state is handed back to it once the requested rate is prepared
-  (a state file is always applied after that).
 - The last settle probe is pitch-checked (`settle.probe_pitch`), so pedalled or chordal MIDI that gives the
-  per-note check nothing to measure is still covered. If the probe matches a sample-rate ratio,
-  `rate_guard` probes again at the suspected rate (in tune there = the plugin kept that rate), restores the
-  state at the requested rate, settles and probes once more. `rate_guard.resolved` says whether that helped.
+  per-note check nothing to measure is still covered.
+- If the probe matches a sample-rate ratio, `rate_guard` probes again at the suspected rate. When the plugin
+  is in tune there and `rate_fallback=true` (default), the render runs at that rate and is resampled to the
+  requested rate with a polyphase filter (`render_rate_fallback` says so; nothing above the rendered rate's
+  Nyquist exists). The resampled file goes through the same integrity checks. `rate_fallback=false` renders
+  at the requested rate anyway and marks the file unusable.
 - `integrity.comparison_usable` is false for a file rate/length mismatch, a sample-rate-like shift in the
   MIDI notes or the probe, a uniform offset over 35 cents across measured notes, or a probe more than
   50 cents off. The record is written next to the audio as `<file>.integrity.json` (rack and owned-session
@@ -137,8 +132,7 @@ What the rack does now:
   becomes the first finding.
 
 Limits: an exact octave error (96 kHz vs 48 kHz) is not flagged because it looks like a tracker octave error;
-unpitched or strongly inharmonic probes are reported as uncertain and do not block. Still to confirm live: a
-48 kHz Kontakt render with `host_reset="soft"` plays A4 at 440 Hz, and with `"reinstantiate"` reproduces 479 Hz.
+unpitched or strongly inharmonic probes are reported as uncertain and do not block.
 
 ## Live validation (Yingg, 2026-10-23, main 0.6.0)
 

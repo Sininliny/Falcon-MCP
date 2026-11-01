@@ -246,3 +246,31 @@ def gate_files(paths: dict[str, Path], allow_unverified: bool) -> dict:
                          "for comparison (wrong pitch, rate or length). Re-render (falcon_rack_render reports "
                          "integrity.rate_guard), or pass allow_unverified_audio=true only when the offset is intended.")
     return gates
+
+
+def resample_file(source: Path, target: Path, rate_in: int, rate_out: int, frames_out: int,
+                  chunk_frames: int = 1 << 20) -> int:
+    """Polyphase-resample a float WAV in chunks (bounded memory, up to 30 min), padded/trimmed to frames_out."""
+    from scipy.signal import resample_poly
+
+    g = math.gcd(rate_in, rate_out)
+    up, down = rate_out // g, rate_in // g
+    margin = down * max(1, 8192 // down)  # input frames of context on each side; a multiple of down
+    step = down * max(1, chunk_frames // down)
+    written = 0
+    with sf.SoundFile(str(source)) as src, sf.SoundFile(str(target), "w", samplerate=rate_out,
+                                                       channels=src.channels, subtype="FLOAT") as out:
+        total = src.frames
+        for start in range(0, total, step):
+            lo = max(0, start - margin)
+            src.seek(lo)
+            x = src.read(min(total, start + step + margin) - lo, dtype="float64", always_2d=True)
+            y = resample_poly(x, up, down, axis=0)
+            first = (start - lo) * up // down
+            count = step * up // down if start + step < total else max(0, frames_out - written)
+            block = y[first:first + count]
+            if len(block) < count:
+                block = np.vstack([block, np.zeros((count - len(block), x.shape[1]))])
+            out.write(block.astype(np.float32))
+            written += len(block)
+    return written
