@@ -17,7 +17,7 @@ Copy the call sequence, not the numbers: fixtures are synthetic tones, and the c
 | [07-build-render-listen.json](07-build-render-listen.json) | owned host | Build a patch, load, render, change the release, prove the change | `falcon_build_instrument`, `falcon_native_host`, `falcon_native_file`, `falcon_native_render`, `falcon_listen`, `falcon_native_edit`, `falcon_param_value`, `falcon_audio_diff` |
 | [08-layer-audition.json](08-layer-audition.json) | owned host | See which layer is audible and which is present but inaudible | `falcon_build_instrument`, `falcon_native_host`, `falcon_native_file`, `falcon_layer_audition` |
 
-Offline examples need no Falcon and run in the test suite. Owned-host examples need Windows with a licensed Falcon 27.0.2 VST3 and the `[host]` extra; they use a separate MCP-owned instance and never touch the open standalone.
+Offline examples need no Falcon and run in the test suite. Owned-host examples (live-run on Yingg with Falcon 27.0.2 on 2026-11-01) need Windows with a licensed Falcon 27.0.2 VST3 and the `[host]` extra; they use a separate MCP-owned instance and never touch the open standalone.
 
 ## The pattern every example follows
 
@@ -40,9 +40,9 @@ Offline examples need no Falcon and run in the test suite. Owned-host examples n
 
 **06 Delivery.** A library with a missing sample gets `verdict: blocked` with a finding whose `responsibility` is `content` (fix the files, not the computer). A clean library gets `verdict: ready` and a `preflight_id`; `deliver` with that id copies and verifies three files. A second `deliver` with the same id is refused: preflights are single-use.
 
-**07 Build, render, change one thing.** The builder exports only after native acceptance passes. The owned host loads the Program, renders the fixed A3, and `falcon_listen` checks tuning and the short 50 ms release. The edit reads the envelope first, converts 600 ms to `0.6`, writes it guarded by the inspected value and state `revision`, and `readback_report.status: kept` says the plugin kept it. The second render with identical notes and `falcon_audio_diff` must show a longer release. The edit stays in the owned session until `falcon_native_file(action="save")`.
+**07 Build, render, change one thing.** The builder exports only after native acceptance passes. The owned host loads the Program, renders the fixed A3, and `falcon_listen` measures it in tune with a release of about 571 ms to -40 dB, although `ReleaseTime` is 0.05 s: measure, do not assume a parameter value is the time to silence. The edit reads the envelope first, converts 600 ms to `0.6`, writes it guarded by the inspected value and state `revision`, and `readback_report.status: kept` says the plugin kept it (0.600000024, rounded). The identical 2.5 s render then decays far longer (`"longer decay: estimated_t60_seconds 0.85 -> 11.17"`), but the tail no longer falls 40 dB inside the file, so `falcon_audio_diff` lists `release_ms` under `measured_on_one_side` instead of comparing it, and the rise in `noise_floor_dbfs`/`rms_dbfs` is the unfinished tail, not a second change. Render longer when the exact release time matters. The edit stays in the owned session until `falcon_native_file(action="save")`.
 
-**08 Layer audition.** Two layers, one at a very low gain. `falcon_layer_audition` renders solo/mute variants from one fixed test, restores the state, and reports the quiet layer in `findings` and the per-layer `table`. It measures contribution; it does not judge whether a layer is musically useful.
+**08 Layer audition.** Two layers, Color at Gain 0.003 (-50 dB). `falcon_layer_audition` renders solo/mute variants from one fixed test (10 renders), restores the state, and reports `present_but_inaudible` for Color and `low_gain_in_structure`; its table shows Body removal dropping 50.2 dB and Color 0.0 dB. Closed default sends (Gain 0) are not reported as effects. It measures contribution; it does not judge whether a layer is musically useful.
 
 ## Run them
 
@@ -67,4 +67,4 @@ The runner starts a real `python -m falcon_mcp serve` over stdio with its own `F
 }
 ```
 
-Places: `${home}` (FALCON_MCP_HOME), `${audio}` (its audio root, where relative audio paths resolve) and `${work}` (`<home>/examples/<id>`). A whole-string reference keeps the value's type. Ops: `eq`, `ne`, `between`, `gt`, `lt`, `contains`, `any_contains`, `exists`, `len_ge`, `is_true`, `is_false`, `matches` (regex). A step with `raises` expects the tool to refuse with a matching error. `tests/test_behavior_examples.py` checks every file against the live tool schemas and runs the offline ones; add new examples there by adding a file.
+Places: `${home}` (FALCON_MCP_HOME), `${audio}` (its audio root, where relative audio paths resolve) and `${work}` (`<home>/examples/<id>`). A whole-string reference keeps the value's type. Ops: `eq`, `ne`, `between`, `gt`, `lt`, `contains`, `any_contains`, `exists`, `none_contains`, `len_ge`, `is_true`, `is_false`, `matches` (regex). A step with `raises` expects the tool to refuse with a matching error. `tests/test_behavior_examples.py` checks every file against the live tool schemas and runs the offline ones; add new examples there by adding a file.

@@ -153,3 +153,13 @@ def test_controller_effect_level_and_timbre():
     assert la.controller_effect(tone * 0.1, tone * 0.4, RATE)["verdict"] == "changes_level_only"
     bright = tone + 0.8 * np.sin(2 * np.pi * 3520 * t)
     assert la.controller_effect(tone * 0.3, bright * 0.3, RATE)["verdict"].startswith("changes_timbre")
+
+
+
+def test_closed_default_sends_are_not_effects():
+    # Falcon recreates one Part send per Master Aux at Gain 0; only an open, unbypassed send adds effects.
+    from falcon_mcp.layer_audition_tools import _open_send
+
+    assert not _open_send({"Gain": "0", "Bypass": "0"})
+    assert not _open_send({"Gain": "0.5", "Bypass": "1"})
+    assert _open_send({"Gain": "0.5", "Bypass": "0"})
