@@ -70,7 +70,7 @@ def measure(audio: np.ndarray, rate: int) -> dict:
             break
         power = float(spectrum[(freqs >= low) & (freqs < high)].sum())
         bands.append({"low_hz": low, "high_hz": high,
-                      "share_db": 10 * np.log10(max(power, 1e-30) / max(total, 1e-30))})
+                      "share_db": float(10 * np.log10(max(power, 1e-30) / max(total, 1e-30)))})
     loudness = None
     try:
         import pyloudnorm as pyln
@@ -80,10 +80,10 @@ def measure(audio: np.ndarray, rate: int) -> dict:
             loudness = value if np.isfinite(value) else None
     except ImportError:
         pass
-    return {"integrated_lufs": loudness, "rms_dbfs": 20 * np.log10(max(rms, 1e-12)),
-            "peak_dbfs": 20 * np.log10(max(peak, 1e-12)),
+    return {"integrated_lufs": loudness, "rms_dbfs": float(20 * np.log10(max(rms, 1e-12))),
+            "peak_dbfs": float(20 * np.log10(max(peak, 1e-12))),
             "centroid_hz": float((freqs * spectrum).sum() / total) if total > 0 else None,
-            "silent": 20 * np.log10(max(rms, 1e-12)) < SILENCE_DBFS, "bands": bands}
+            "silent": bool(20 * np.log10(max(rms, 1e-12)) < SILENCE_DBFS), "bands": bands}
 
 
 def compare(reference: tuple[np.ndarray, int], candidates: dict[str, tuple[np.ndarray, int]],

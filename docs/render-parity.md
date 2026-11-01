@@ -12,8 +12,14 @@ with the old `kind=program` path put the Program into the Default Multi's existi
 channel pinned to 0, ProgramPath rewritten) and set the whole state. After that load every script knob
 mapped to a controller (CC86/87/89/90/14/15/30/31) read back as 0: trumpet Output Trim 0.297 -> 0.105
 (-9 dB) and reverb Mix -> 0, oboe output 0.294 -> 0.147 (-6 dB). The Play scene kept the file values.
-The MCP sends no MIDI during load or settling; the zero controller values come from the host/engine on
-that load path, and the scripts' `onController` applies any incoming CC to its knob.
+The MCP sends no MIDI during load or settling.
+
+Live check on Windows (2026-11-01, Falcon 27.0.2) found the trigger: the session state keeps an
+`<Engine><Automation>` list of host-automation slots (`AutomationConnection targetPath="/uvi/Part 0/
+Program/Fern Oboe Performance" parameterName="Fern_Touch"`). When a different instrument's Program goes
+into that Part, the slots still name the previous script's knobs, and Falcon zeroes the new script's
+knobs while resolving them. The same multi with the Automation list removed loaded with every knob
+intact. Play scenes saved by Falcon carry no Automation list, which is why they loaded correctly.
 
 ## What the server does now
 
@@ -21,6 +27,8 @@ that load path, and the scripts' `onController` applies any incoming CC to its k
   selected Part is replaced by a fresh Part exactly as Falcon 27.0.2 saves a one-instrument scene
   (MIDI input/channel -1, unity gain, aux sends at -inf for every Master aux, ProgramPath as filed).
   `program_context="part"` keeps the previous behaviour (existing Part and routing).
+- A Program load (either context) first removes the Automation slots that target the replaced Part;
+  slots for other Parts stay. The reply reports `stale_automation_removed`.
 - Every load compares saved script control values (numeric ScriptProcessor attributes such as
   `Trumpet_Level`) with the session after settling. If a script rewrote any of them, the load is
   rejected, the previous session state is restored and the error names the controls. Pass
@@ -43,10 +51,18 @@ Defaults: level within 0.5 dB, centroid within 5 %, octave bands within 2 dB. Re
 renders are not sample-identical (buffer size, free-running LFO and reverb phase), so bit equality is
 not a goal. A sample rate mismatch is reported as untestable; nothing is resampled or normalized.
 
-## Not verified yet
+## Live results
 
-The scene-style Part was chosen because it is the only Part layout under which the Play scenes kept
-their knobs; that it removes the zero-CC replay for every instrument still needs a live check on Windows
-(load both oboe and trumpet `.uvip`, expect `script_controls.status="matched"`). Whether the Falcon
-standalone browser shows the same zeroing when it opens a `.uvip` is also unverified; the parity tool
-answers it once a standalone recording exists.
+Owned VST3 host on Windows, note A4 velocity 84, 4 s render:
+
+| Load | script_controls | Integrated LUFS |
+|---|---|---|
+| Trumpet `.uvip` on a fresh host | matched 8/8 | -25.649 |
+| Trumpet Play scene | matched | -25.649 |
+| Oboe Play scene | matched 9/9 | -26.957 |
+| Oboe `.uvip` after the oboe scene | matched 9/9 | -26.961 |
+| Oboe `.uvip` after the trumpet scene (before the Automation fix) | rejected, state restored | - |
+
+The Automation fix itself still needs a live retest: oboe `.uvip` after the trumpet scene and trumpet
+`.uvip` after the oboe Program should both report `matched`. Whether the Falcon standalone browser
+zeroes knobs the same way is unverified; the parity tool answers it once a standalone recording exists.

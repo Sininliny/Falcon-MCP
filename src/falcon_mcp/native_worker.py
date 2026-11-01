@@ -29,6 +29,7 @@ from .native_state import (
     script_controls,
     state_xml,
     strip_bridges,
+    strip_part_automation,
 )
 from .revisions import content_fingerprint, sha256
 
@@ -265,6 +266,8 @@ def engine(root: Path):
                     if program is None or incoming.find("Engine") is not None:
                         raise ValueError("Load a .uvip Program with kind=program; use kind=multi for .uvim")
                     tree = current()
+                    # Slots bound to the previous instrument's script knobs would zero the new ones.
+                    automation_removed = strip_part_automation(tree, args["part"])
                     if args.get("program_context", "scene") == "scene":
                         # Same Part a one-instrument Play scene saved by Falcon has; ProgramPath stays as filed.
                         scene_part(tree, program, args["part"])
@@ -272,6 +275,7 @@ def engine(root: Path):
                         program.set("ProgramPath", source.as_posix())
                         replace_program(tree, program, args["part"])
                 else:
+                    automation_removed = 0
                     program_nodes(incoming)
                     engine_node = incoming.find("Engine")
                     properties = engine_node.find("Properties")
@@ -313,6 +317,7 @@ def engine(root: Path):
                 result["parameter_readback"] = load_parameter_readback(tree, current())
                 result["script_controls"] = controls
                 result["program_context"] = args.get("program_context", "scene") if args["kind"] == "program" else None
+                result["stale_automation_removed"] = automation_removed
                 result["warnings"] = ["Native load changed indexed parameter values; inspect parameter_readback before computing levels."] \
                     if result["parameter_readback"]["changed"] else []
                 if controls["changed"]:

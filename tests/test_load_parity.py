@@ -13,7 +13,13 @@ import pytest
 import soundfile as sf
 
 from falcon_mcp import parity
-from falcon_mcp.native_state import parse_xml, scene_part, script_control_readback, script_controls
+from falcon_mcp.native_state import (
+    parse_xml,
+    scene_part,
+    script_control_readback,
+    script_controls,
+    strip_part_automation,
+)
 
 SESSION = "c" * 32
 
@@ -69,8 +75,13 @@ FAKE_PEDALBOARD = textwrap.dedent('''
             if self.pending:
                 self.pending = False
                 tree = ET.fromstring(state_xml(self._state))
+                bound = {}
+                for connection in tree.iter("AutomationConnection"):
+                    bound.setdefault(connection.get("targetPath", "").split("/")[2], set()).add(
+                        connection.get("parameterName"))
                 for part in tree.iter("Part"):
-                    if part.get("MidiInput") == "0":
+                    knobs = {n for p in part.iter("ScriptProcessor") for n in p.attrib}
+                    if part.get("MidiInput") == "0" or bound.get(part.get("Name"), set()) - knobs:
                         for processor in part.iter("ScriptProcessor"):
                             for name in list(processor.attrib):
                                 if name.startswith("Knob_"):
@@ -147,6 +158,36 @@ def test_program_load_uses_a_scene_part_and_keeps_saved_script_knobs(engine):
     assert part.find("Program").get("ProgramPath") == ""  # as filed, like a Play scene
     processor = part.find("Program/EventProcessors/ScriptProcessor")
     assert processor.get("Knob_Level") == "0.5" and processor.get("Knob_Space") == "0.2"
+
+
+OBOE_SESSION = ('<UVI4><Engine DisplayName="Falcon MCP Master"><Synth><Auxs/><Children>'
+                '<Part Name="Part 0" Gain="1" MidiInput="-1" MidiChannel="-1" DisplayName="Fern Oboe">'
+                '<Program DisplayName="Fern Oboe" ProgramPath=""><EventProcessors><ScriptProcessor '
+                'Name="Fern Oboe Performance" Fern_Level="0.3"/></EventProcessors></Program></Part></Children>'
+                '</Synth><Automation><AutomationConnection sourceIndex="0" targetPath="/uvi/Part 0/Program/'
+                'Fern Oboe Performance" parameterName="Fern_Level"/></Automation></Engine></UVI4>')
+
+
+def test_program_load_drops_automation_slots_of_the_previous_instrument(engine):
+    scene = engine.tmp / "Play Oboe.uvim"
+    scene.write_text(OBOE_SESSION)
+    engine("load", kind="multi", path=str(scene), settle_seconds=0.1)
+    assert engine.session().find("Engine/Automation/AutomationConnection") is not None
+    loaded = engine.load_program()
+    assert loaded["stale_automation_removed"] == 1
+    assert loaded["script_controls"]["status"] == "matched"
+    assert engine.session().find("Engine/Automation") is None
+
+
+def test_strip_part_automation_keeps_other_parts():
+    multi = parse_xml(b'<UVI4><Engine><Synth><Children><Part Name="Part 0"/><Part Name="Part 1"/></Children>'
+                      b'</Synth><Automation><AutomationConnection targetPath="/uvi/Part 0/Program/S" parameterName="a"/>'
+                      b'<AutomationConnection targetPath="/uvi/Part 1/Program/S" parameterName="b"/>'
+                      b'<AutomationConnection targetPath="/uvi/Part 10/Program/S" parameterName="c"/>'
+                      b'</Automation></Engine></UVI4>')
+    assert strip_part_automation(multi, 2) == 1
+    assert [c.get("parameterName") for c in multi.iter("AutomationConnection")] == ["a", "c"]
+    assert strip_part_automation(multi, 2) == 0
 
 
 def test_rewritten_script_knobs_reject_the_load_and_restore_the_previous_state(engine):
@@ -234,5 +275,6 @@ async def test_render_parity_tool_reads_files_under_the_audio_root(config):
     fn = create_server(config)._tool_manager.get_tool("falcon_render_parity").fn
     result = await fn(reference_path="standalone.wav", candidate_paths=["offline.wav"])
     assert result["verdict"] == "consistent" and result["candidates"][0]["name"] == "offline.wav"
+    json.dumps(result)  # the MCP response must serialise (no numpy scalars)
     with pytest.raises(ValueError, match="FALCON_AUDIO_ROOT"):
         await fn(reference_path="../outside.wav", candidate_paths=["offline.wav"])
