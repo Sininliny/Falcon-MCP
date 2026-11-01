@@ -703,6 +703,9 @@ def create_server(config: Config | None = None) -> FastMCP:
     register_workflows(mcp, cfg, audit)
     register_mix(mcp, cfg, audit)
     register_parity(mcp, cfg)
+    from .audition_tools import register_audition
+
+    register_audition(mcp, cfg, audit)
     register_capture(mcp, cfg, audit, bridge)
     # Last: every registered tool gets a result_scope block (see docs/result-scope.md).
     from .result_scope import install_result_scope
