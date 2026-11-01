@@ -302,6 +302,11 @@ def register_advanced(
 
         Native VoiceId userdata stays inside Falcon. Pass the handle to voice_control. Handles expire on
         release/script reload; finite voices are forgotten after duration + 60 seconds of release tail.
+        duration_ms is always >0 here, so the voice is released after duration_ms (release stage follows)
+        or earlier by voice_control releaseVoice; it is never tied to a held key. Inside an instrument
+        script the same playNote behaves differently: duration -1 (default) in onNote releases the voice
+        when the key that triggered that onNote is lifted (not the note played), -1 in onRelease/
+        onController/spawn/run is never auto-released, and 0 requires releaseVoice.
         sample_offset_ms is applied in the SAME audio callback, before the voice starts rendering.
         """
         return await bridge.request(
