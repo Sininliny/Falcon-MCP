@@ -87,7 +87,7 @@ Validate instrument files, routing templates, demos and library presentation sep
 
 Record versions, preset list, macro/CC map, resource paths/hashes and validation scope in a release manifest. Keep work, immutable versioned releases and local MCP configuration separate. Preserve used samples/images/IRs and verify dependencies after copying the release to a new location. A portable template must not depend on this machine's bridge path.
 
-Before rebasing media or diagnosing a relative-path preset, read [portable preset resources](references/portable-resources.md). Base media paths on the containing .uvip/.uvim, including embedded Program copies. A silent raw-state render alone does not prove browser loading fails; honor the configured user runtime directory for test deployment.
+Before rebasing media or diagnosing a relative-path preset, read [portable preset resources](references/portable-resources.md). Before copying a library to its destination, run `falcon_delivery(action="preflight")` and then `deliver` with its `preflight_id`: it finds missing resources, low disk space, permissions and locked files first, and labels each as environment, content or server (see [portable preset resources](references/portable-resources.md)). Base media paths on the containing .uvip/.uvim, including embedded Program copies. A silent raw-state render alone does not prove browser loading fails; honor the configured user runtime directory for test deployment.
 
 Report what passed, what failed and what remains untested. User-reported production results are useful evidence, but do not generalize a specific patch, driver or Falcon version into a universal rule.
 

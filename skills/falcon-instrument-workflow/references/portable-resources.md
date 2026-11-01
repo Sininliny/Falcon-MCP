@@ -61,6 +61,12 @@ canonicalize media paths again; recheck saved exports before distributing them.
 
 ## Deploy and record the right evidence
 
+- `falcon_delivery(action="preflight", source, destination, mode)` checks free space, folder and resource
+  size, references, backups, permissions and locked files before copying; `action="deliver"` with its
+  `preflight_id` copies the full folder (staged swap) or only changed files (incremental, with backup and
+  rollback) and verifies every hash. Disk-full and permission problems are environment issues, not
+  library or server faults.
+
 - Use the user's configured preset/runtime directory for user-facing auditions
   and cross-device tests. Do not substitute the development checkout or require
   that checkout to exist on the other computer. Read machine paths from private
