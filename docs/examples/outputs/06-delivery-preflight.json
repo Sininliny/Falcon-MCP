@@ -1,0 +1,91 @@
+{
+  "id": "06-delivery-preflight",
+  "context": "offline",
+  "steps": [
+    {
+      "id": "broken",
+      "tool": "falcon_delivery",
+      "excerpt": {
+        "verdict": "blocked",
+        "findings": [
+          {
+            "code": "missing_resource",
+            "severity": "blocker",
+            "responsibility": "content",
+            "message": "Relative references to files missing from the library folder (1)",
+            "detail": {
+              "count": 1,
+              "examples": [
+                "Presets/Keys/Keys.uvip: ../../Samples/C4.wav"
+              ]
+            }
+          }
+        ]
+      },
+      "result_scope": {
+        "env": "managed_files",
+        "checked": [
+          "free_space",
+          "write_permission",
+          "resource_references",
+          "file_hash"
+        ],
+        "not_checked": [
+          "perceptual_quality",
+          "relocated_reload",
+          "destination_licenses"
+        ]
+      }
+    },
+    {
+      "id": "preflight",
+      "tool": "falcon_delivery",
+      "excerpt": {
+        "status": "done",
+        "verdict": "ready",
+        "preflight_id": "d14e422f9f7243c59bf9d4a4c2afeb25"
+      },
+      "result_scope": {
+        "env": "managed_files",
+        "checked": [
+          "free_space",
+          "write_permission",
+          "resource_references",
+          "file_hash"
+        ],
+        "not_checked": [
+          "perceptual_quality",
+          "relocated_reload",
+          "destination_licenses"
+        ]
+      }
+    },
+    {
+      "id": "deliver",
+      "tool": "falcon_delivery",
+      "excerpt": {
+        "status": "done",
+        "files_copied": 3
+      },
+      "result_scope": {
+        "env": "managed_files",
+        "checked": [
+          "free_space",
+          "write_permission",
+          "resource_references",
+          "file_hash"
+        ],
+        "not_checked": [
+          "perceptual_quality",
+          "relocated_reload",
+          "destination_licenses"
+        ]
+      }
+    },
+    {
+      "id": "reuse",
+      "tool": "falcon_delivery",
+      "error": "Error executing tool falcon_delivery: deliver needs a preflight_id from a ready preflight in this server process (valid 6 h); run action=preflight first"
+    }
+  ]
+}

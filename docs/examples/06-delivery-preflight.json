@@ -1,0 +1,53 @@
+{
+  "id": "06-delivery-preflight",
+  "title": "Check a library before copying it",
+  "goal": "Find missing resources and environment problems before a delivery copy, then copy only after a clean preflight.",
+  "context": "offline",
+  "fixtures": [
+    {"kind": "library", "path": "${work}/Good"},
+    {"kind": "library", "path": "${work}/Broken", "missing": true}
+  ],
+  "steps": [
+    {
+      "id": "broken",
+      "tool": "falcon_delivery",
+      "why": "A missing sample is a content problem: fix the library, not the computer or the server.",
+      "args": {"action": "preflight", "source": "${work}/Broken", "destination": "${work}/Out/Broken", "reserve_mb": 0},
+      "expect": [
+        {"path": "verdict", "op": "ne", "value": "ready"},
+        {"path": "findings", "op": "any_contains", "value": "content"}
+      ]
+    },
+    {
+      "id": "preflight",
+      "tool": "falcon_delivery",
+      "why": "A ready verdict returns the preflight_id that deliver requires.",
+      "args": {"action": "preflight", "source": "${work}/Good", "destination": "${work}/Out/Good", "reserve_mb": 0},
+      "expect": [
+        {"path": "status", "op": "eq", "value": "done"},
+        {"path": "verdict", "op": "eq", "value": "ready"},
+        {"path": "preflight_id", "op": "matches", "value": "^[a-f0-9]{32}$"}
+      ]
+    },
+    {
+      "id": "deliver",
+      "tool": "falcon_delivery",
+      "why": "deliver re-checks that nothing changed since the preflight, then copies and verifies.",
+      "args": {"action": "deliver", "preflight_id": "${preflight.preflight_id}", "source": "${work}/Good",
+               "destination": "${work}/Out/Good", "reserve_mb": 0},
+      "expect": [
+        {"path": "status", "op": "eq", "value": "done"},
+        {"path": "files_copied", "op": "eq", "value": 3}
+      ]
+    },
+    {
+      "id": "reuse",
+      "tool": "falcon_delivery",
+      "why": "A preflight is used once; a later copy needs a new preflight.",
+      "args": {"action": "deliver", "preflight_id": "${preflight.preflight_id}", "source": "${work}/Good",
+               "destination": "${work}/Out/Good", "reserve_mb": 0},
+      "raises": "preflight"
+    }
+  ],
+  "conclusion": "Broken is blocked by its own content (missing sample); Good passed and was copied with verification. Passing a preflight says nothing about how the library sounds."
+}

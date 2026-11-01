@@ -1,5 +1,6 @@
 @echo off
-rem One-click install or update of Falcon MCP, Codex CLI, Claude Code, the agent skill and MCP configs.
+rem One-click install or update of Falcon MCP, its agent skill and MCP configs for the agent apps already installed.
+rem It never installs Claude Desktop, Claude Code or Codex themselves.
 rem Arguments are passed through, for example: install-windows.cmd -DryRun
 setlocal
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\install-windows.ps1" %*

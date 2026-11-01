@@ -1,0 +1,28 @@
+{
+  "id": "01-listen-one-note",
+  "title": "Hear one rendered note as numbers",
+  "goal": "Turn a single rendered note into pitch, envelope and brightness evidence a text-only agent can act on.",
+  "context": "offline",
+  "fixtures": [
+    {"kind": "tone", "path": "${audio}/a3-sharp.wav", "frequency": 221.53, "harmonics": 30, "attack": 0.01,
+     "seconds": 2.0, "release_at": 1.4}
+  ],
+  "live_equivalent": "Replace the fixture with the path returned by falcon_native_render (example 07).",
+  "steps": [
+    {
+      "id": "listen",
+      "tool": "falcon_listen",
+      "why": "Tell the tool which note was played and when it was released, otherwise tuning and release cannot be judged.",
+      "args": {"path": "a3-sharp.wav", "expected_note": 57, "note_on_seconds": 0, "note_off_seconds": 1.4},
+      "expect": [
+        {"path": "pitch.cents_error", "op": "between", "value": [8, 16]},
+        {"path": "envelope.shape", "op": "eq", "value": "sustained"},
+        {"path": "envelope.attack_ms", "op": "between", "value": [3, 15]},
+        {"path": "description", "op": "any_contains", "value": "sharp by"},
+        {"path": "ascii.spectrogram", "op": "contains", "value": "|"},
+        {"path": "full_report", "op": "matches", "value": "\\.listen\\.json$"}
+      ]
+    }
+  ],
+  "conclusion": "The note is about 12 cents sharp with a fast attack and a held sustain. Fix tuning (e.g. a fine-tune of -12 cents) before judging timbre. Report the number, never 'it sounds in tune'."
+}

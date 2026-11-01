@@ -1,4 +1,4 @@
-# Falcon MCP 0.4.0
+# Falcon MCP
 
 Local MCP control for UVI Falcon 2027: inspect the engine, edit parameters, audition and capture audio, diagnose signals, export project graphs, and compare timbres with an optional local model.
 
@@ -225,6 +225,8 @@ License: [Apache-2.0](LICENSE).
 ## Development
 
 Architecture, adding tools, versioning, tests/CI and live validation are described in the [developer guide](docs/development.md). The current target is Falcon 27.0.2.
+
+Minimal behavior examples for agents (listen, one-change diff, units, A/B choice, wavetable, delivery, build-render-edit, layer audition), with expected outputs recorded from real calls, are in [docs/examples](docs/examples/README.md).
 
 ## Agent skill and repository language
 

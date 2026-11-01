@@ -1,0 +1,87 @@
+{
+  "id": "04-ab-choice",
+  "context": "offline",
+  "steps": [
+    {
+      "id": "create",
+      "tool": "falcon_audition_create",
+      "excerpt": {
+        "status": "ready",
+        "candidates": [
+          {
+            "label": "A",
+            "audition_path": "${audio}/auditions/aud-20261101-225759-aa8e25/A.wav",
+            "gain_db": -12.26,
+            "level": {
+              "integrated_lufs": -11.86,
+              "rms_dbfs": -14.88,
+              "peak_dbfs": -7.96,
+              "silent": false,
+              "seconds": 2.0,
+              "sample_rate": 48000,
+              "channels": 2
+            }
+          },
+          {
+            "label": "B",
+            "audition_path": "${audio}/auditions/aud-20261101-225759-aa8e25/B.wav",
+            "gain_db": 0.0,
+            "level": {
+              "integrated_lufs": -24.12,
+              "rms_dbfs": -27.53,
+              "peak_dbfs": -20.0,
+              "silent": false,
+              "seconds": 2.0,
+              "sample_rate": 48000,
+              "channels": 2
+            }
+          }
+        ],
+        "candidates.0.name": null,
+        "audition_id": "aud-20261101-225759-aa8e25"
+      },
+      "result_scope": {
+        "env": "audio_file_analysis",
+        "checked": [
+          "dsp_measured",
+          "file_hash"
+        ],
+        "not_checked": [
+          "perceptual_quality",
+          "open_instance",
+          "owned_instance"
+        ]
+      }
+    },
+    {
+      "id": "choose",
+      "tool": "falcon_audition_choose",
+      "excerpt": {
+        "integration.status": "integrated",
+        "target_path": "${audio}/auditions/aud-20261101-225759-aa8e25/target.json",
+        "next": "Edit toward keep/avoid, render the same timeline and start the next round with falcon_audition_create(previous_audition_id='aud-20261101-225759-aa8e25')"
+      },
+      "result_scope": {
+        "env": "managed_files",
+        "checked": [
+          "file_hash"
+        ],
+        "not_checked": [
+          "perceptual_quality"
+        ]
+      }
+    },
+    {
+      "id": "history",
+      "tool": "falcon_audition_history",
+      "excerpt": {
+        "session.choice.reason": "user: A, less harsh"
+      },
+      "result_scope": {
+        "env": "managed_files",
+        "checked": null,
+        "not_checked": null
+      }
+    }
+  ]
+}

@@ -32,6 +32,7 @@ When a new Falcon build ships, treat it as unvalidated until the live checks in 
 | `scripts/install-windows.ps1`, `install-windows.cmd`, `scripts/configure_clients.py` | Windows installer and the config merger it calls. |
 | `skills/falcon-instrument-workflow/` | Agent skill shipped to Claude and Codex. Must stay in sync with tool behavior. |
 | `tests/` | Offline pytest suite; synthetic audio only. |
+| `docs/examples/`, `scripts/run_examples.py` | Minimal behavior examples (call sequences with expectations and recorded outputs) and their stdio runner. Offline examples run in pytest; owned-host ones with `--live`. |
 
 ## Architecture
 
@@ -74,7 +75,7 @@ Release steps:
 2. Run `python scripts/check_versions.py --strict`.
 3. Add `docs/changes-X.Y.Z.md` (new tools, behavior changes, limits). Historical change files keep their original wording.
 4. Run the full test suite and the live checks for the touched areas; record results in [validation records](validation.md) with their scope level (indexed, callable, minimally verified, production verified).
-5. Build artifacts: `python -m pip wheel . --no-deps -w dist` and the skill ZIP (the installer writes it to `.runtime/falcon-instrument-workflow.zip`).
+5. Build artifacts: `python -m pip wheel . --no-deps -w dist` and the skill ZIP (the installer writes it to `.runtime/falcon-instrument-workflow.zip`). The ZIP is not tracked in git (`skills/*.zip` is ignored) because a binary file conflicted on every merge that touched the skill; never commit one.
 6. Merge to `main` through a pull request with green CI.
 
 Semantic versioning: new tools or bridge protocol changes bump the minor version; fixes bump the patch.
@@ -109,6 +110,7 @@ Live checks need the Windows machine with a licensed Falcon 27.0.2. Run them fro
 | `scripts/smoke_workflows.py` | Both | Guarded connections, controlled building, revision publishing. |
 | `scripts/smoke_native.py` | Owned host | Native load/save/edit/render. |
 | `scripts/smoke_listen.py --multi <file.uvim>` | Owned host | Listening, diff determinism, target matching, sweeps. |
+| `scripts/run_examples.py --live --home <dir>` | Owned host | The owned-host behavior examples in `docs/examples` (build, render, edit, diff, layer audition). |
 
 Then, in a client:
 

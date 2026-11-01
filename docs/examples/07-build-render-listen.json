@@ -1,0 +1,118 @@
+{
+  "id": "07-build-render-listen",
+  "title": "Build a patch, hear it, change one thing",
+  "goal": "Build a one-layer analog patch, load it into an owned Falcon, render a fixed note, lengthen the release and prove the change in numbers.",
+  "context": "owned_host",
+  "requires": "Windows, licensed Falcon 27.0.2 VST3, the [host] extra. Uses its own FALCON_MCP_HOME; the open standalone is not touched.",
+  "steps": [
+    {
+      "id": "build",
+      "tool": "falcon_build_instrument",
+      "why": "The controlled builder only writes allowlisted structures and exports only after native load/save/reopen/audio acceptance passes.",
+      "args": {"action": "build", "project": "examples", "name": "Example Keys", "role": "Keys",
+               "layers": [{"name": "Body", "keygroups": [{"name": "Center", "release": 0.05,
+                                                         "oscillators": [{"gain": 0.2}]}]}]},
+      "expect": [
+        {"path": "acceptance.passed", "op": "is_true"},
+        {"path": "exported", "op": "is_true"},
+        {"path": "path", "op": "matches", "value": "\\.uvip$"}
+      ]
+    },
+    {
+      "id": "host",
+      "tool": "falcon_native_host",
+      "why": "A separate, MCP-owned VST3 instance; every later call carries its session_id.",
+      "args": {"action": "start"},
+      "expect": [
+        {"path": "session_id", "op": "matches", "value": "^[a-f0-9]{32}$"}
+      ]
+    },
+    {
+      "id": "load",
+      "tool": "falcon_native_file",
+      "why": "Load the exported Program the way a one-instrument Play scene would.",
+      "args": {"session_id": "${host.session_id}", "action": "load", "kind": "program", "path": "${build.path}"},
+      "expect": [
+        {"path": "programs.0.name", "op": "eq", "value": "Example Keys"}
+      ]
+    },
+    {
+      "id": "before",
+      "tool": "falcon_native_render",
+      "why": "The fixed test: one A3, velocity 100, held 1 s, 1.5 s of tail. Every later render uses exactly these notes.",
+      "args": {"session_id": "${host.session_id}", "seconds": 2.5,
+               "notes": [{"note": 57, "velocity": 100, "start_seconds": 0, "duration_seconds": 1.0}]},
+      "expect": [
+        {"path": "path", "op": "matches", "value": "\\.wav$"},
+        {"path": "peak", "op": "gt", "value": 0.001},
+        {"path": "listening.description", "op": "len_ge", "value": 1}
+      ]
+    },
+    {
+      "id": "listen",
+      "tool": "falcon_listen",
+      "why": "Check tuning and the release before editing; a short 50 ms release should measure short.",
+      "args": {"path": "${before.path}", "expected_note": 57, "note_on_seconds": 0, "note_off_seconds": 1.0},
+      "expect": [
+        {"path": "pitch.cents_error", "op": "between", "value": [-5, 5]},
+        {"path": "envelope.release_ms", "op": "lt", "value": 400}
+      ]
+    },
+    {
+      "id": "read",
+      "tool": "falcon_native_edit",
+      "why": "Read the envelope first: the write needs the current value and state revision as guards.",
+      "args": {"session_id": "${host.session_id}",
+               "selector": "Engine/Synth/Children/Part/Program/Layers/Layer/Keygroups/Keygroup/ControlSignalSources/AnalogADSR"},
+      "expect": [
+        {"path": "attributes.ReleaseTime", "op": "exists"},
+        {"path": "revision", "op": "matches", "value": "^[a-f0-9]{64}$"}
+      ]
+    },
+    {
+      "id": "units",
+      "tool": "falcon_param_value",
+      "why": "600 ms is 0.6 in the engine (example 03).",
+      "args": {"module": "AnalogADSR", "parameter": "ReleaseTime", "value": "600 ms"},
+      "expect": [
+        {"path": "engine_value", "op": "eq", "value": 0.6}
+      ]
+    },
+    {
+      "id": "edit",
+      "tool": "falcon_native_edit",
+      "why": "One change, guarded by the inspected value and revision; readback_report says what the plugin kept.",
+      "args": {"session_id": "${host.session_id}", "selector": "${read.selector}",
+               "expected_revision": "${read.revision}",
+               "changes": [{"name": "ReleaseTime", "value": "${units.engine_value}", "expected": "${read.attributes.ReleaseTime}"}]},
+      "expect": [
+        {"path": "verified", "op": "is_true"},
+        {"path": "readback_report.status", "op": "eq", "value": "kept"}
+      ]
+    },
+    {
+      "id": "after",
+      "tool": "falcon_native_render",
+      "why": "Identical test as before; only the release changed.",
+      "args": {"session_id": "${host.session_id}", "seconds": 2.5,
+               "notes": [{"note": 57, "velocity": 100, "start_seconds": 0, "duration_seconds": 1.0}]},
+      "expect": [
+        {"path": "path", "op": "matches", "value": "\\.wav$"}
+      ]
+    },
+    {
+      "id": "diff",
+      "tool": "falcon_audio_diff",
+      "why": "The ranked difference must show a longer release and nothing else of note.",
+      "args": {"before_path": "${before.path}", "after_path": "${after.path}", "expected_note": 57,
+               "note_on_seconds": 0, "note_off_seconds": 1.0},
+      "expect": [
+        {"path": "diff.significant_changes", "op": "any_contains", "value": "release"}
+      ]
+    }
+  ],
+  "cleanup": [
+    {"tool": "falcon_native_host", "args": {"action": "stop", "session_id": "${host.session_id}"}}
+  ],
+  "conclusion": "Built, accepted, loaded, rendered and measured; the release edit was kept by the plugin and the diff shows a longer release on the identical test. The edit lives only in the owned session until falcon_native_file save; no perceptual claim is made."
+}

@@ -227,3 +227,6 @@ __marimo__/
 dist/
 build/
 *.egg-info/
+
+# Built by the installer into .runtime/; not tracked to avoid binary merge conflicts
+skills/*.zip

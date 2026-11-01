@@ -1,0 +1,43 @@
+{
+  "id": "03-units-before-write",
+  "context": "offline",
+  "steps": [
+    {
+      "id": "lookup",
+      "tool": "falcon_param_lookup",
+      "excerpt": {
+        "unit.unit": "second",
+        "range.max": 10.0
+      },
+      "result_scope": {
+        "env": "offline_reference",
+        "checked": null,
+        "not_checked": null
+      }
+    },
+    {
+      "id": "convert",
+      "tool": "falcon_param_value",
+      "excerpt": {
+        "engine_value": 0.3
+      },
+      "result_scope": {
+        "env": "offline_reference",
+        "checked": null,
+        "not_checked": null
+      }
+    },
+    {
+      "id": "gain",
+      "tool": "falcon_param_value",
+      "excerpt": {
+        "engine_value": 0.501
+      },
+      "result_scope": {
+        "env": "offline_reference",
+        "checked": null,
+        "not_checked": null
+      }
+    }
+  ]
+}

@@ -59,7 +59,7 @@ If only one instrument or several instruments sound unexpectedly, resolve routin
 
 ## Hear without audio input
 
-Text-only agents must treat measured audio as their ears. Read [listening workflow](references/listening.md) before iterating on sound.
+Text-only agents must treat measured audio as their ears. Read [listening workflow](references/listening.md) before iterating on sound. For a verified call sequence of a core task (listen, one-change diff, units, A/B, wavetable, delivery, build-render-edit, layer audition) with the fields to read, see [behavior examples](references/behavior-examples.md).
 
 1. Render a fixed test (same note, velocity, length, controls) with `falcon_native_render`, or capture with `falcon_record_test`. Their `listening` field is a first impression only.
 2. Call `falcon_listen` with `expected_note`, `note_on_seconds` and `note_off_seconds`. Read `description` and `findings` first, then the ASCII spectrogram/envelope and `features`. Every word is backed by a printed number; the wording is a steering heuristic, not a perceptual verdict.
