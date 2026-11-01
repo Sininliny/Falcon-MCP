@@ -2,7 +2,7 @@
 
 Verified call sequences for the core tasks. Full files with arguments, expectations and recorded real
 outputs: [docs/examples](https://github.com/Sininliny/Falcon-MCP/tree/main/docs/examples). Offline ones run
-in the test suite; owned-host ones need a licensed Falcon 27.0.2 VST3. Copy the sequence, not the numbers.
+in the test suite; owned-host ones passed live on Falcon 27.0.2 (2026-11-01). Copy the sequence, not the numbers.
 
 1. Listen to one note: `falcon_listen(path, expected_note, note_on_seconds, note_off_seconds)`. Read
    `pitch.cents_error`, `envelope.shape/attack_ms/release_ms`, then `description` (each line has a number).

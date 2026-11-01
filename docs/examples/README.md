@@ -2,7 +2,7 @@
 
 Guide version: Falcon MCP server 0.6.0 (bridge 0.6.0).
 
-Small, runnable call sequences for the core tasks, written for text-only agents. Each JSON file lists the fixtures it needs, the tool calls in order with their arguments, the reason for each call, the fields to read in the result and what to conclude. `outputs/<id>.json` holds what the server actually returned for those fields, so you can see the shape of a real answer before calling a tool.
+Small, runnable call sequences for the core tasks, written for text-only agents. Each JSON file lists the fixtures it needs, the tool calls in order with their arguments, the reason for each call, the fields to read in the result and what to conclude. `outputs/<id>.json` holds what the server actually returned for those fields (owned-host outputs from the live run; ids and file names change on every run), so you can see the shape of a real answer before calling a tool.
 
 Copy the call sequence, not the numbers: fixtures are synthetic tones, and the conclusions are about these fixtures.
 
