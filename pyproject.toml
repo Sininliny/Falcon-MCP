@@ -10,13 +10,17 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-dependencies = ["mcp>=1.26,<2", "numpy>=1.26,<3", "scipy>=1.12,<2", "soundfile>=0.12,<1", "pyloudnorm>=0.1.1,<1", "matplotlib>=3.9,<4", "lupa>=2.2,<3"]
+dependencies = ["mcp>=1.26,<2", "pydantic>=2.11,<3", "numpy>=1.26,<3", "scipy>=1.12,<2", "soundfile>=0.12,<1", "pyloudnorm>=0.1.1,<1", "matplotlib>=3.9,<4", "lupa>=2.2,<3"]
 
 [project.optional-dependencies]
-feedback = ["torch>=2.6,<3", "transformers>=4.49,<5"]
+feedback = ["torch>=2.6,<3", "transformers>=4.49,<5", "huggingface_hub>=0.26,<1"]
 capture = ["PyAudioWPatch>=0.2.12.7; sys_platform == 'win32'"]
 host = ["pedalboard>=0.9.26,<0.10", "pywin32>=306; sys_platform == 'win32'"]
 dev = ["pytest>=8", "pytest-asyncio>=0.25", "beautifulsoup4>=4.12", "requests>=2.32", "ruff>=0.12"]
+
+[project.urls]
+Homepage = "https://github.com/Sininliny/Falcon-MCP"
+Documentation = "https://github.com/Sininliny/Falcon-MCP/blob/main/docs/development.md"
 
 [project.scripts]
 falcon-mcp = "falcon_mcp.__main__:main"

@@ -1,4 +1,4 @@
-# Falcon MCP 0.4.0
+# Falcon MCP
 
 Local MCP control for UVI Falcon 2027: inspect the engine, edit parameters, audition and capture audio, diagnose signals, export project graphs, and compare timbres with an optional local model.
 
