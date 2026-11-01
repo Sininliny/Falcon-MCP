@@ -43,6 +43,11 @@ FRAME_SIZES = (256, 512, 1024, 2048, 4096)
 MAX_ANALYSIS_FRAMES = 400
 MAX_SECONDS = 60.0
 EPS = 1e-12
+# Falcon 27.0.2 (live, 2026-11-01) reads the frame size only from a `clm ` chunk carrying this widely used
+# wavetable marker text. Other author strings, or no chunk, make it treat all frames as one long cycle: the
+# spectrum lands frames-times too high and the level collapses up the keyboard, without any error.
+CLM_TEXT = "<!>{size} 00000000 wavetable (www.xferrecords.com)"
+CLM_AUTHOR = b"(www.xferrecords.com)"
 
 
 def midi_hz(note: float) -> float:
@@ -326,12 +331,31 @@ def write_wavetable(path: Path, frames: np.ndarray, size: int, rate: int, encodi
         ints = np.clip(np.round(data * 8388607), -8388608, 8388607).astype("<i4")
         body = ints.view(np.uint8).reshape(-1, 4)[:, :3].tobytes()
         fmt = struct.pack("<HHIIHH", 1, 1, rate, rate * 3, 3, 24)
-    clm = f"<!>{size} 10000000 wavetable (falcon-mcp)".encode("ascii")
+    clm = CLM_TEXT.format(size=size).encode("ascii")
     chunks = [b"fmt " + struct.pack("<I", len(fmt)) + fmt]
     chunks.append(b"clm " + struct.pack("<I", len(clm)) + clm + (b"\0" if len(clm) % 2 else b""))
     chunks.append(b"data" + struct.pack("<I", len(body)) + body + (b"\0" if len(body) % 2 else b""))
     payload = b"WAVE" + b"".join(chunks)
     path.write_bytes(b"RIFF" + struct.pack("<I", len(payload)) + payload)
+
+
+def clm_text(raw: bytes) -> str | None:
+    at = raw.find(b"clm ")
+    if at <= 0:
+        return None
+    length = struct.unpack("<I", raw[at + 4:at + 8])[0]
+    return raw[at + 8:at + 8 + min(length, 256)].split(b"\0")[0].decode("ascii", "replace")
+
+
+def falcon_frame_detection(text: str | None, size: int, frames: int) -> dict:
+    """Whether Falcon 27.0.2 will split the file into frames (see CLM_TEXT)."""
+    if frames <= 1:
+        return {"status": "single_cycle", "clm": text}
+    ok = bool(text) and text.startswith(f"<!>{size} ") and CLM_AUTHOR.decode() in text
+    return {"status": "ok" if ok else "misread_risk", "clm": text,
+            "note": None if ok else ("Falcon 27.0.2 read tables without the marker clm chunk as one long cycle "
+                                     "(spectrum about frames-times too high). Rebuild, or rewrite the chunk as "
+                                     + CLM_TEXT.format(size=size) + ".")}
 
 
 def read_wavetable(path: Path, frame_size: int | None) -> tuple[np.ndarray, int, int, str]:
@@ -474,8 +498,12 @@ def build_preset(name: str, resource: str, key_range: tuple[int, int], envelope:
     return ET.tostring(tree, encoding="utf-8", xml_declaration=True), {"structure": provenance, "checks": checks}
 
 
-def resource_reference(resource: Path, preset: Path) -> str:
-    """File-relative reference as tested for SamplePath (see references/portable-resources.md)."""
+def resource_reference(resource: Path, preset: Path, style: str = "absolute") -> str:
+    """WavetablePath value. Absolute forward-slash is the default: in the owned VST3 host (live, 2026-11-01) a
+    file-relative WavetablePath survived the round trip but played a sine fallback with no error, while
+    Falcon-saved elements for local tables store absolute forward-slash paths."""
+    if style == "absolute":
+        return resource.resolve().as_posix()
     try:
         return Path(os.path.relpath(resource, preset.parent)).as_posix()
     except ValueError:  # different Windows drives
@@ -490,7 +518,7 @@ def build(audio: np.ndarray, rate: int, *, name: str, out_dir: Path, midi_note: 
           analysis_cycles: float = 4.0, key_range: tuple[int, int] | None = None,
           sample_rates: tuple[int, ...] = (44100, 48000), alias_floor_db: float = -60.0,
           encoding: str = "pcm24", preset_path: Path | None = None, write_preset: bool = True,
-          template_from: Path | None = None, write_preview: bool = True) -> dict:
+          template_from: Path | None = None, write_preview: bool = True, path_style: str = "absolute") -> dict:
     if frame_size not in FRAME_SIZES:
         raise ValueError(f"frame_size must be one of {FRAME_SIZES}")
     mono = audio.mean(axis=1).astype(np.float64) if audio.ndim == 2 else audio.astype(np.float64)
@@ -634,7 +662,7 @@ def build(audio: np.ndarray, rate: int, *, name: str, out_dir: Path, midi_note: 
 
     if write_preset:
         preset = preset_path or out_dir / f"{name}.uvip"
-        reference = resource_reference(table_path, preset)
+        reference = resource_reference(table_path, preset, path_style)
         values = {"WaveIndex": "0", "FadeWaveIndex": "1", "FadeMipMap": "1"}
         saved = oscillator_from_file(template_from) if template_from else None
         xml, info = build_preset(name, reference, key_range,
@@ -642,10 +670,16 @@ def build(audio: np.ndarray, rate: int, *, name: str, out_dir: Path, midi_note: 
         preset.parent.mkdir(parents=True, exist_ok=True)
         preset.write_bytes(xml)
         files_out["preset"] = str(preset)
-        info.update({"resource_reference": reference, "relative_to": str(preset.parent),
+        info.update({"resource_reference": reference, "path_style": path_style,
+                     "relative_to": str(preset.parent) if path_style == "relative" else None,
                      "parameters_set": values, "key_range": list(key_range),
-                     "not_wired": "WaveIndex modulation; drive it from an envelope using frames.index_map."})
+                     "not_wired": ("WaveIndex modulation. Falcon serializes it inside the oscillator's Connections, "
+                                   "e.g. Source=\"$Keygroup/LFO 1\" Destination=\"WaveIndex\"; follow "
+                                   "frames.index_map with an envelope.")})
         report["falcon"] = info
+        if path_style == "relative":
+            warnings.append("Relative WavetablePath: the owned VST3 host played a sine fallback for this form "
+                            "(no error). Use the default absolute path unless loading through Falcon's browser.")
     (out_dir / f"{name}.report.json").write_text(json.dumps(report, indent=1), "utf-8")
     files_out["report"] = str(out_dir / f"{name}.report.json")
     return report
@@ -668,5 +702,6 @@ def check(path: Path, *, frame_size: int | None = None, key_range: tuple[int, in
               "loudness_spread_db": r(float(np.ptp(loud)), 1),
               "aliasing": aliasing(amps, key_range, list(sample_rates), alias_floor_db, None, None, False)}
     nyquist_energy = (amps[:, int(size * 0.45):] ** 2).sum() / max((amps ** 2).sum(), EPS)
+    report["falcon_frame_detection"] = falcon_frame_detection(clm_text(path.read_bytes()), size, len(frames))
     report["energy_near_frame_nyquist_db"] = r(10 * math.log10(nyquist_energy)) if nyquist_energy > 0 else None
     return report

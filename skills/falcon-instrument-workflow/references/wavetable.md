@@ -13,7 +13,9 @@ Use `falcon_wavetable` (offline) to turn a pitched recording into a wavetable an
 4. Load the `.uvip` in the owned host and render the key range before calling it done. Drive WaveIndex
    from an envelope following `frames.index_map`; restore dynamics from `loudness.removed_contour`.
 
-The built-in oscillator element is unverified. If the user has a Program saved by Falcon with a
-Wavetable oscillator, pass it as `template_from` so every persisted field is copied.
-`action="check"` inspects an existing wavetable WAV (seams, cancellation, jumps, aliasing).
+Keep the default absolute `WavetablePath`: a relative one played a sine fallback in the owned host with
+no error. A render that is a pure sine at the right pitch means the table was not found. A render far too
+bright that fades up the keyboard means Falcon read all frames as one cycle (missing or foreign `clm `
+chunk). `action="check"` on a third-party table reports this as `falcon_frame_detection: misread_risk`,
+along with seams, cancellation, jumps and aliasing.
 Do not conclude that the table sounds good from these numbers.

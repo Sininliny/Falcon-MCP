@@ -15,7 +15,7 @@ result has not been loaded or rendered by Falcon until you do so in the owned ho
 | Frame placement | `adaptive` (default) spends three quarters of the frames by spectral change and one quarter evenly in time, so attacks get more frames; `uniform` is even in time. Amplitudes and phases are interpolated between analysis frames. | `frames.index_map` (time -> WaveIndex), `frames.spectral_jump` (largest adjacent-frame change, dB) |
 | Loudness | K-weighted (BS.1770 filter evaluated at the harmonic frequencies of the source note) frame loudness. `flat` equalizes frames with at most `max_boost_db` boost and returns the removed contour; `preserve` keeps it. One global gain sets the table peak to `peak_dbfs`. | `loudness`: spread before/after, clamped frames, `removed_contour` |
 | Aliasing | Highest harmonic above `alias_floor_db` (relative to each frame's strongest), checked against Nyquist at each playback rate over `key_range` (default source note +-24). Also the low-key ceiling: below the source note, content stops at source Nyquist x f(key)/f(source). | `aliasing.rates[]`: `highest_clean_note`, harmonics kept and unfiltered fold energy at the high key; `low_key_warning` |
-| Output | `<name>.wav`: concatenated single-cycle frames with a `clm ` cycle-length chunk (24-bit PCM or float). `<name>.preview.wav`: offline resynthesis that follows the index map and contour (not a Falcon render). `<name>.report.json`. `<name>.uvip` (see below). | `files`, `resynthesis` (level/centroid difference from the source) |
+| Output | `<name>.wav`: concatenated single-cycle frames with a `clm ` cycle-length chunk (24-bit PCM or float; both played identically in Falcon). `<name>.preview.wav`: offline resynthesis that follows the index map and contour (not a Falcon render). `<name>.report.json`. `<name>.uvip` (see below). | `files`, `resynthesis` (level/centroid difference from the source) |
 
 `warnings` collects the findings that need action: octave error, low harmonicity, large frame jumps,
 neighbour cancellation, clamped boost, keys above the clean limit, dark low keys.
@@ -25,18 +25,36 @@ neighbour cancellation, clamped boost, keys above the clean limit, dark low keys
 The `.uvip` is the native-validated `analog-v1` builder Program (Layer, Keygroup, Amp. Env ADSR with its
 Gain connection) with the oscillator replaced by a `WaveTableOscillator`:
 
-- The media reference is file-relative to the preset (`relpath(wavetable, preset.parent)`, forward
-  slashes), as for `SamplePath` in [portable resources](../skills/falcon-instrument-workflow/references/portable-resources.md).
-  Pass `preset_path` to write the preset into a collection; the reference is computed for that location.
+- `WavetablePath` is an absolute forward-slash path by default, the form Falcon saves for local tables.
+  `path_style="relative"` writes `relpath(wavetable, preset.parent)`, but in the owned VST3 host that form
+  survived the round trip and then played a sine fallback with no error (the build warns). It may resolve
+  when the preset is opened through Falcon's browser; that is untested.
 - Indexed parameters take their documented defaults; `WaveIndex=0`, `FadeWaveIndex=1` (smooth index) and
   `FadeMipMap=1` (smooth octaves) are set. Pitch bend is connected with Ratio 2 like the analog template.
-- The built-in element (`data/wavetable-v1.json`) is **unverified**: the attribute name `WavetablePath`
-  and the complete set of fields Falcon persists for this oscillator have not been read back from a
-  Falcon-saved file. Save one Program with a Wavetable oscillator from Falcon and pass it as
-  `template_from`; its element is copied with every persisted attribute and child, and only its `*Path`
-  attribute and the listed parameters are rewritten (`falcon.structure.persisted_attributes`).
-- WaveIndex modulation is not wired. Use `frames.index_map` for an envelope and `loudness.removed_contour`
-  for the amplitude envelope.
+- The built-in element (`data/wavetable-v1.json`) matches the attribute set of Falcon-saved
+  `WaveTableOscillator` elements. Its first live check is below. `template_from` copies another saved element
+  with every attribute and child; only `WavetablePath` and the listed parameters are rewritten.
+- WaveIndex modulation is not wired. Falcon serializes it inside the oscillator's `Connections`, for example
+  `Source="$Keygroup/LFO 1" Destination="WaveIndex"`. Use `frames.index_map` for an envelope and
+  `loudness.removed_contour` for the amplitude envelope.
+
+## Frame detection in Falcon
+
+Falcon 27.0.2 splits a wavetable WAV into frames only when its `clm ` chunk carries the common marker
+text `<!>2048 00000000 wavetable (www.xferrecords.com)`. With another author string, or no chunk, it
+treated all 64 frames as one long cycle and gave no error: the spectrum landed about 64x too high and the
+level fell from -12 to -57 dBFS up the keyboard. The pipeline writes the marker. `action="check"` reports
+`falcon_frame_detection.status = misread_risk` for third-party tables without it.
+
+## Live validation (Windows, Falcon 27.0.2, owned VST3 host, 2026-11-01)
+
+| Case | Result |
+| --- | --- |
+| Generated element, load + readback | No load warning. 158 parameters read back, 0 changed. Same attributes, only number formatting changed. |
+| Relative path | Kept verbatim, but played a sine (-7.3 dBFS on every key, 1 harmonic). |
+| Absolute path, old `(falcon-mcp)` clm text or no clm | Wrong: spectrum about 64x too high, level collapsing with key. |
+| Absolute path + marker clm (current default) | Correct: notes 45/57/69/81 at -8.3..-8.7 dBFS peak, pitch within 0.2 cents, 40 harmonics within 40 dB at note 57. |
+| `template_from` a Falcon-saved session element | Same result as the built-in element (33 persisted attributes). |
 
 ## Checking a table
 

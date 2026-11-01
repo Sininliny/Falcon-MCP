@@ -110,9 +110,19 @@ def test_noisy_source_lowers_harmonicity(tmp_path):
     assert noisy["harmonics"]["harmonicity_db_median"] < clean["harmonics"]["harmonicity_db_median"] - 10
 
 
-def test_preset_uses_file_relative_reference_and_validated_program(tmp_path):
+def test_preset_uses_absolute_reference_by_default(tmp_path):
+    report = build(tmp_path, tone(), midi_note=57)
+    oscillator = parse_xml(Path(report["files"]["preset"]).read_bytes()).find(".//WaveTableOscillator")
+    path = oscillator.get("WavetablePath")
+    assert "\\" not in path and Path(path).is_absolute()
+    assert Path(path) == Path(report["files"]["wavetable"]).resolve()
+    assert not any("Relative WavetablePath" in w for w in report["warnings"])
+
+
+def test_preset_relative_reference_is_opt_in_and_warned(tmp_path):
     preset = tmp_path / "Presets" / "Synth" / "T.uvip"
-    report = build(tmp_path / "Wavetables", tone(), midi_note=57, preset_path=preset)
+    report = build(tmp_path / "Wavetables", tone(), midi_note=57, preset_path=preset, path_style="relative")
+    assert any("Relative WavetablePath" in w for w in report["warnings"])
     tree = parse_xml(preset.read_bytes())
     oscillator = tree.find(".//Keygroup/Oscillators/WaveTableOscillator")
     assert oscillator is not None and tree.find(".//MinBlepGenerator") is None
@@ -120,7 +130,7 @@ def test_preset_uses_file_relative_reference_and_validated_program(tmp_path):
     assert (preset.parent / oscillator.get("WavetablePath")).resolve() == Path(report["files"]["wavetable"]).resolve()
     assert oscillator.get("FadeWaveIndex") == "1" and oscillator.get("NumOscs") == "1"
     assert tree.find(".//Keygroup/Connections/SignalConnection[@Destination='Gain']") is not None
-    assert report["falcon"]["structure"]["verified"] is False
+    assert report["falcon"]["structure"]["verified"] is True
     assert report["falcon"]["checks"]["errors"] == []
     saved = json.loads((tmp_path / "Wavetables" / "T.report.json").read_text("utf-8"))
     assert saved["falcon"]["resource_reference"] == "../../Wavetables/T.wav"
@@ -136,7 +146,7 @@ def test_template_from_saved_file_keeps_persisted_fields(tmp_path):
     report = build(tmp_path / "out", tone(), midi_note=57, template_from=saved)
     tree = parse_xml(Path(report["files"]["preset"]).read_bytes())
     oscillator = tree.find(".//WaveTableOscillator")
-    assert oscillator.get("WaveTablePath") == "T.wav" and oscillator.get("InternalFlag") == "7"
+    assert Path(oscillator.get("WaveTablePath")).name == "T.wav" and oscillator.get("InternalFlag") == "7"
     assert oscillator.get("WaveIndex") == "0" and "WavetablePath" not in oscillator.attrib
     assert report["falcon"]["structure"]["source"] == "copied_from_saved_file"
     empty = tmp_path / "Empty.uvip"
@@ -159,6 +169,11 @@ def test_check_reads_foreign_tables_and_flags_seams(tmp_path):
     sf.write(str(plain), ramp.reshape(-1), 44100)
     flagged = wt.check(plain)
     assert flagged["frame_size_from"] == "default 2048" and flagged["worst_seam_ratio"] > 100
+    assert flagged["falcon_frame_detection"]["status"] == "misread_risk"
+    assert report["falcon_frame_detection"]["status"] == "ok"
+    foreign = tmp_path / "foreign.wav"
+    foreign.write_bytes(path.read_bytes().replace(b"(www.xferrecords.com)", b"(www.example-tool.io)"))
+    assert wt.check(foreign)["falcon_frame_detection"]["status"] == "misread_risk"
     odd = tmp_path / "odd.wav"
     sf.write(str(odd), np.zeros(3000), 44100)
     with pytest.raises(ValueError, match="whole number"):
@@ -171,7 +186,7 @@ def test_wav_writer_layout(tmp_path):
     wt.write_wavetable(path, frames, 256, 48000, "pcm24")
     raw = path.read_bytes()
     assert raw[:4] == b"RIFF" and struct.unpack("<I", raw[4:8])[0] == len(raw) - 8
-    assert b"clm " in raw and b"<!>256 " in raw
+    assert b"<!>256 00000000 wavetable (www.xferrecords.com)" in raw
     info = sf.info(str(path))
     assert info.frames == 768 and info.subtype == "PCM_24"
 

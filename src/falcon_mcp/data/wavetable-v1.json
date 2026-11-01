@@ -2,11 +2,11 @@
   "schema": 1,
   "template_id": "wavetable-v1",
   "falcon_version": "27.0.2",
-  "verified": false,
-  "source": "Program/Layer/Keygroup/AnalogADSR come from the native-validated analog-v1 builder template. The WaveTableOscillator element is assembled from the indexed parameter list (data/parameters.json) plus the persistent fields below; it has not been read back from a Falcon-saved file yet.",
+  "verified": true,
+  "source": "Program/Layer/Keygroup/AnalogADSR come from the native-validated analog-v1 builder template. The WaveTableOscillator element is assembled from the indexed parameter list (data/parameters.json); on Windows Falcon 27.0.2 (owned VST3 host, 2026-11-01) its attribute set matched Falcon-saved elements, survived a load/readback with number formatting changes only, and rendered in tune on notes 45/57/69/81 with an absolute WavetablePath and the marker clm chunk.",
   "oscillator_tag": "WaveTableOscillator",
   "path_attribute": "WavetablePath",
-  "unverified_fields": ["WavetablePath"],
+  "unverified_fields": [],
   "fixed_attributes": {
     "NoteTracking": "1",
     "BaseNote": "60",
@@ -14,8 +14,30 @@
     "FadeWaveIndex": "1"
   },
   "connections": [
-    {"Name": "PitchBendMod", "Ratio": "2", "Source": "@PitchBend", "Destination": "Pitch", "Mapper": "",
-     "ConnectionMode": "0", "Bypass": "0", "Inverted": "0"}
+    {
+      "Name": "PitchBendMod",
+      "Ratio": "2",
+      "Source": "@PitchBend",
+      "Destination": "Pitch",
+      "Mapper": "",
+      "ConnectionMode": "0",
+      "Bypass": "0",
+      "Inverted": "0"
+    }
   ],
-  "upgrade": "Save one Program with a Wavetable oscillator from Falcon and pass it as template_from: its element (every attribute Falcon persisted, including the real media path field) replaces this template and only the path and listed parameters are rewritten."
+  "upgrade": "Pass template_from=<Falcon-saved .uvip/.uvim> to copy another saved element (all persisted attributes and children); only WavetablePath and the listed parameters are rewritten.",
+  "path_forms_seen": [
+    "$FalconResources.ufs/Samples/Wavetables/<bank>/<table>.wav (factory soundbank)",
+    "F:/<absolute>/<table>.wav (local file, forward slashes)"
+  ],
+  "modulation_form": {
+    "Name": "SignalConnection 0",
+    "Ratio": "1",
+    "Source": "$Keygroup/LFO 1",
+    "Destination": "WaveIndex",
+    "Mapper": "",
+    "ConnectionMode": "0",
+    "Bypass": "0",
+    "Inverted": "0"
+  }
 }

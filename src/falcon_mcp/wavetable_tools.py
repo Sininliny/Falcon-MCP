@@ -43,11 +43,13 @@ def register_wavetable(mcp, config) -> None:
             "build: folder for <name>.wav/.uvip/.report.json/.preview.wav; default "
             "FALCON_AUDIO_ROOT/wavetables/<name>"))] | None = None,
         preset_path: Annotated[str, Field(max_length=1024, description=(
-            "build: .uvip to write (default <output_dir>/<name>.uvip). The wavetable reference is stored "
-            "relative to this file"))] | None = None,
+            "build: .uvip to write (default <output_dir>/<name>.uvip)"))] | None = None,
+        path_style: Annotated[Literal["absolute", "relative"], Field(description=(
+            "build: WavetablePath form. absolute (default) is what Falcon saves for local tables and what "
+            "plays in the owned host; relative played a sine fallback there"))] = "absolute",
         template_from: Annotated[str, Field(max_length=1024, description=(
             "build: a Falcon-saved .uvip/.uvim containing a Wavetable oscillator; its element (all persisted "
-            "fields) is reused instead of the built-in unverified template"))] | None = None,
+            "fields) is reused instead of the built-in template"))] | None = None,
         midi_note: Annotated[float, Field(ge=0, le=127, description="Note the recording was played at")] | None = None,
         start_s: Annotated[float, Field(ge=0)] | None = None,
         end_s: Annotated[float, Field(gt=0)] | None = None,
@@ -81,10 +83,12 @@ def register_wavetable(mcp, config) -> None:
         low-key brightness ceiling set by the source sample rate. Writes <name>.wav (single-cycle frames,
         `clm ` cycle-length chunk), <name>.preview.wav (offline resynthesis, NOT a Falcon render: compare it
         with the source via falcon_audio_diff), <name>.report.json and a .uvip built on the native-validated
-        analog-v1 Program with a WaveTableOscillator (file-relative WavetablePath). The built-in oscillator
-        element is unverified: pass `template_from` (a Program saved by Falcon with a Wavetable oscillator)
-        to reuse every field Falcon persists. Load/render the .uvip in the owned host before trusting it.
-        check: frame layout (clm chunk), DC, loop seams, neighbour-frame cancellation, spectral jumps,
+        analog-v1 Program with a WaveTableOscillator (absolute forward-slash WavetablePath). The element's
+        attribute set matches a Falcon 27.0.2-saved oscillator, and an owned-host render of this layout played
+        in tune; `template_from` (a Program saved by Falcon) copies another saved element instead. The WAV's
+        `clm ` chunk uses the marker text Falcon needs to split frames. Render the key range before trusting it.
+        check: frame layout (clm chunk; `falcon_frame_detection` flags tables Falcon would read as one
+        long cycle), DC, loop seams, neighbour-frame cancellation, spectral jumps,
         loudness spread and the same aliasing table.
         """
         if action == "check":
@@ -121,7 +125,7 @@ def register_wavetable(mcp, config) -> None:
                 analysis_cycles=analysis_cycles, key_range=tuple(key_range) if key_range else None,
                 sample_rates=tuple(sample_rates or (44100, 48000)), alias_floor_db=alias_floor_db,
                 encoding=encoding, preset_path=preset, write_preset=write_preset, template_from=template,
-                write_preview=write_preview)
+                write_preview=write_preview, path_style=path_style)
 
         report = await asyncio.to_thread(run)
         report["source"]["path"] = str(src)
