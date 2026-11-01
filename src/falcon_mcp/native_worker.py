@@ -17,6 +17,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from .bridge import preparation_lock
+from .native_readback import report as readback_report
+from .native_readback import summary_line as readback_summary
 from .native_revision import SETTLE_SECONDS, RevisionAliases, settle
 from .native_state import (
     MAX_STATE,
@@ -230,6 +232,17 @@ def engine(root: Path):
             write_bytes(root / "session.uvim", state_xml(plugin.raw_state))
         return outcome
 
+    def reload_state():
+        # Set the serialized state again, as reopening the saved preset would, and let scripts run.
+        nonlocal revision_number
+        plugin.raw_state = bytes(plugin.raw_state)
+        revision_number += 1
+        connection_plans.clear()
+        aliases.clear()
+        outcome = settle_scripts(SETTLE_SECONDS)
+        write_bytes(root / "session.uvim", state_xml(plugin.raw_state))
+        return outcome
+
     # The startup supervisor removed MCP loops from the default. Keep this owned
     # instance bridge-free: offline hosts cannot reliably run persistent Lua pollers.
     tree = current()
@@ -355,7 +368,7 @@ def engine(root: Path):
                 import soundfile as sf
 
                 from .perform import read_timeline
-                from .render_integrity import inspect_render, validate_audio_block
+                from .render_integrity import inspect_render, validate_audio_block, write_sidecar
 
                 events = []
                 render_revision = content_fingerprint(current())
@@ -377,6 +390,7 @@ def engine(root: Path):
                 validate_audio_block(audio, args["sample_rate"], args["seconds"])
                 sf.write(args["path"], audio.T, args["sample_rate"], subtype="FLOAT")
                 integrity = inspect_render(Path(args["path"]), args["sample_rate"], args["seconds"], events)
+                write_sidecar(Path(args["path"]), integrity)
                 after = content_fingerprint(current())
                 changed = aliases.rendered(render_revision, after)
                 result = {"path": args["path"], "frames": audio.shape[1], "peak": float(np.abs(audio).max()),
@@ -393,13 +407,30 @@ def engine(root: Path):
                 tree = current()
                 if args.get("changes") and not args.get("expected_revision"):
                     raise ValueError("Native writes require expected_revision from an inspected read")
+                before_attrs = edit_node(tree, args["selector"], [])["attributes"] if args.get("changes") else {}
                 result = edit_node(tree, args["selector"], args.get("changes", []))
                 if args.get("changes"):
                     apply(tree)
                     result["readback"] = edit_node(current(), args["selector"], [])
                     result["verified"] = verify_changes(result["readback"], args["changes"])
+                    stages = {"write": result["readback"]["attributes"]}
+                    definitions = {d["name"]: d for d in result["indexed_definitions"]}
                     if not result["verified"]:
-                        raise RuntimeError("Native edit readback mismatch; inspect the current state before retrying")
+                        mismatch = readback_report(args["changes"], before_attrs, stages, definitions)
+                        raise RuntimeError("Native edit readback mismatch: " + readback_summary(mismatch)
+                                           + "; inspect the current state before retrying")
+                    verify = args.get("verify") or "write"
+                    if verify in ("settle", "reload"):
+                        result["settle"] = settle_scripts(float(args.get("settle_seconds", SETTLE_SECONDS)))
+                        stages["settle"] = edit_node(current(), args["selector"], [])["attributes"]
+                    if verify == "reload":
+                        result["reload"] = reload_state()
+                        stages["reload"] = edit_node(current(), args["selector"], [])["attributes"]
+                    result["readback_report"] = readback_report(args["changes"], before_attrs, stages, definitions)
+                    result["readback"] = {"selector": args["selector"],
+                                          "attributes": stages[result["readback_report"]["stages"][-1]]}
+                    result["verified"] = result["readback_report"]["status"] == "kept"
+                    result["warnings"] = result["readback_report"]["warnings"]
                 result.update(revision=content_fingerprint(current()), revision_number=revision_number)
             elif op == "edit_batch":
                 # One state read and at most one state write for many nodes: every single edit re-serialises
@@ -412,10 +443,20 @@ def engine(root: Path):
                     raise ValueError("Native writes require expected_revision from an inspected read")
                 result = edit_batch(tree, args["edits"])
                 if writes:
+                    before_attrs = {(e["selector"], c["name"]): c["expected"] for e in writes for c in e["changes"]}
                     apply(tree)
                     readback = edit_batch(current(), [{"selector": e["selector"]} for e in writes])["nodes"]
                     if not all(verify_changes(node, e["changes"]) for node, e in zip(readback, writes)):
-                        raise RuntimeError("Native edit readback mismatch; inspect the current state before retrying")
+                        flat = [{"selector": e["selector"], **c} for e in writes for c in e["changes"]]
+                        types = {n["selector"]: n["type"] for n in readback}
+                        definitions = {(e["selector"], c["name"]): next(
+                            (d for d in result["definitions"].get(types[e["selector"]], []) if d["name"] == c["name"]),
+                            None) for e in writes for c in e["changes"]}
+                        written = {(n["selector"], c["name"]): n["attributes"].get(c["name"])
+                                   for n, e in zip(readback, writes) for c in e["changes"]}
+                        mismatch = readback_report(flat, before_attrs, {"write": written}, definitions)
+                        raise RuntimeError("Native edit readback mismatch: " + readback_summary(mismatch)
+                                           + "; inspect the current state before retrying")
                     result["readback"] = [{"selector": n["selector"], "attributes": n["attributes"]} for n in readback]
                 result.update(revision=content_fingerprint(current()), revision_number=revision_number)
             elif op == "connection":
@@ -444,7 +485,12 @@ def engine(root: Path):
                         result["readback"] = edit_node(current(), args["selector"], [])
                         result["verified"] = verify_changes(result["readback"], args["changes"])
                         if not result["verified"]:
-                            raise RuntimeError("Native connection readback mismatch; inspect before retrying")
+                            mismatch = readback_report(
+                                args["changes"], {c["name"]: c["expected"] for c in args["changes"]},
+                                {"write": result["readback"]["attributes"]},
+                                {d["name"]: d for d in result["readback"]["indexed_definitions"]})
+                            raise RuntimeError("Native connection readback mismatch: " + readback_summary(mismatch)
+                                               + "; inspect before retrying")
                         result["applied"] = True
                         result["revision"] = content_fingerprint(current())
                     else:

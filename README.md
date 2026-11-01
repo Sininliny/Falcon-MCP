@@ -143,10 +143,11 @@ The server exposes **56 tools**, structured schemas, the `falcon://capabilities`
 |---|---|
 | `falcon_status`, `falcon_setup`, `falcon_reconcile` | Connection, persistent deployment, uncertain-write recovery. |
 | `falcon_bind_instance`, `falcon_capture_status` | Pin inspected runtime/Program targets; observe recording readiness and completion. |
-| `falcon_native_host`, `falcon_native_file`, `falcon_native_edit`, `falcon_native_render`, `falcon_native_connections` | Own a separate VST3 session; native preset I/O, guarded parameter/connection edits and direct offline audio (notes plus pedal/CC/bend controllers). |
+| `falcon_native_host`, `falcon_native_file`, `falcon_native_edit`, `falcon_native_render`, `falcon_native_connections` | Own a separate VST3 session; native preset I/O, guarded parameter/connection edits with staged readback (write/settle/reload, clamp and unit checks) and direct offline audio (notes plus pedal/CC/bend controllers). |
 | `falcon_runtime_trace`, `falcon_native_ui_accept` | Live Falcon layer voice-count/parameter traces and optional instrument reports; actual native editor screenshots and window-message interactions on an isolated desktop. See [diagnostic scope](docs/little-branch-diagnostics.md). |
 | `falcon_mix_context` | Render-over-backing check: per-band masking, presence, stereo position and levels. See [mix and capture](docs/mix-and-capture.md). |
 | `falcon_midi_capture`, `falcon_performance_profile` | Record the player's live MIDI in the open Falcon for offline replay (`falcon_native_perform(performance_path=...)`); velocity/pedal profile and touch curve. |
+| `falcon_voice_trace_kit`, `falcon_voice_trace_analyze` | Per-note, per-voice trace of an instrument script you develop: why legato did or did not trigger, envelope restarts, when old voices released, who owns auxiliary voices, pending hand-off windows and fast reversals. See [voice trace](docs/voice-trace.md). |
 | `falcon_build_instrument`, `falcon_accept_instrument`, `falcon_revision` | Controlled analog structures, role-specific acceptance, revision-bound publishing. |
 | `falcon_analyze_reference`, `falcon_compare_reference`, `falcon_audio_meter` | Import a reference time range, preserve the design goal, compare candidate evidence, inspect levels. |
 | `falcon_midi_compare`, `falcon_midi_compare_result` | Per-note comparison of a reference and a candidate playing the same MIDI: partials, attack, decay, release, velocity curves, voice balance. |
@@ -164,6 +165,8 @@ The server exposes **56 tools**, structured schemas, the `falcon://capabilities`
 | `falcon_scan_project`, `falcon_query_project`, `falcon_export_uml` | Project snapshots and diagrams. |
 | `falcon_diagnose_audio`, `falcon_spectrum`, `falcon_get_logs` | Signal diagnostics and audit access. |
 | `falcon_sample_audit` | Sample-source audit of `.uvip`/`.uvim` files without Falcon: sampling interval, velocity layers, per-layer normalization, truncated samples, channel layout, noise floor, recordings shared across instruments ([sample audit](docs/sample-audit.md)). |
+| `falcon_native_gain_calibration` | Level map by register, velocity and voice count with limiter/pinned-peak checks; optional verified Keygroup/Program gain fixes ([readback and gain](docs/readback-and-gain.md)). |
+| `falcon_wavetable` | Offline sample-to-wavetable pipeline: pitch-tracked harmonic frames, coherent phases, adaptive frame placement, K-weighted loudness, aliasing table, wavetable WAV plus a `.uvip` with a Wavetable oscillator; also checks existing tables ([wavetable](docs/wavetable.md)). |
 | `falcon_render_parity` | Check offline renders (`.uvip` or Play scene) against a standalone/VST recording of the same MIDI: aligned LUFS, centroid and octave-band verdict ([render parity](docs/render-parity.md)). |
 | `falcon_audition_create`, `falcon_audition_choose`, `falcon_audition_migration`, `falcon_audition_history` | Reproducible A/B/C listening: same MIDI, controllers, file versions and matched loudness; the user's pick saved as the next round's target; offline mixes kept apart from integrated presets until a migration is verified ([auditions](docs/auditions.md)). |
 

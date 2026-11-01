@@ -117,7 +117,12 @@ def edit_node(root, selector: str, changes: list[dict], *, connection_guarded: b
                 raise ValueError("Expected an integer")
             low, high = float(definition["min"]), float(definition["max"])
             if low <= high and not low <= value <= high:
-                raise ValueError("Native parameter is outside the indexed range")
+                from .native_readback import unit_hints
+
+                hints = unit_hints(value, definition, node.get(name))
+                unit = f" {definition['unit']}" if definition.get("unit") else ""
+                raise ValueError(f"Native parameter {name}={value} is outside the indexed range "
+                                 f"{definition['min']}..{definition['max']}{unit}" + (f"; {' '.join(hints)}" if hints else ""))
             encoded = str(int(value)) if kind in {"int", "integer"} else str(value)
         elif kind in {"bool", "boolean"}:
             if not isinstance(value, bool):
