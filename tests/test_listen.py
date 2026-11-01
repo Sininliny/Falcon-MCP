@@ -422,3 +422,13 @@ def test_ascii_views_are_bounded():
     spectrogram, envelope = report["ascii"]["spectrogram"].splitlines(), report["ascii"]["envelope"].splitlines()
     assert len(spectrogram) == 14 and all(len(line) <= 70 for line in spectrogram)
     assert len(envelope) == 10 and all(len(line) <= 70 for line in envelope)
+
+
+def test_diff_reports_a_release_measured_on_one_side_only():
+    short = hear(note(saw(220, 1.5), release_tau=0.05), expected=57)
+    long = hear(note(saw(220, 1.5), release_tau=2.0), expected=57)
+    assert short["envelope"]["release_ms"] is not None and long["envelope"]["release_ms"] is None
+    diff = L.diff_reports(short, long)
+    rows = {r["feature"]: r for r in diff["measured_on_one_side"]}
+    assert rows["release_ms"]["after"] is None and rows["release_ms"]["unmeasured_in"] == "after"
+    assert any(p.startswith("release_ms measured only before") for p in diff["summary"])

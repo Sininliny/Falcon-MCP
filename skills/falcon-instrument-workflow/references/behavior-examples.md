@@ -22,8 +22,10 @@ in the test suite; owned-host ones need a licensed Falcon 27.0.2 VST3. Copy the 
    `acceptance.passed`, `exported`) -> `falcon_native_host(start)` -> `falcon_native_file(load, program,
    path)` -> `falcon_native_render` fixed note -> `falcon_listen` -> `falcon_native_edit(selector)` read ->
    `falcon_param_value` -> `falcon_native_edit(changes=[{name, value, expected}], expected_revision)`
-   (`readback_report.status: kept`) -> identical render -> `falcon_audio_diff` -> stop the host.
+   (`readback_report.status: kept`) -> identical render -> `falcon_audio_diff` -> stop the host. A parameter
+   time is not the measured time (ReleaseTime 0.05 s measured ~571 ms to -40 dB). When a longer tail no longer
+   finishes inside the file, the diff lists the feature under `measured_on_one_side`: render longer to compare it.
 8. Layer contribution (owned host): load -> `falcon_layer_audition(notes, seconds)` -> read `findings` and
-   `table`; `scope.restored` must be true.
+   `table` (`present_but_inaudible`, removal drop in dB); `scope.restored` must be true.
 
 Each step's `result_scope.not_checked` still applies: none of these prove a perceptual result.

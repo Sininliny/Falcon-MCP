@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "docs" / "examples"
 CONTEXTS = {"offline", "owned_host"}
 OPS = {"eq", "ne", "between", "gt", "lt", "contains", "any_contains", "exists", "len_ge", "is_true", "is_false",
-       "matches"}
+       "matches", "none_contains"}
 _REF = re.compile(r"\$\{([^}]+)\}")
 
 
@@ -138,6 +138,8 @@ def check(result: Any, expect: dict) -> tuple[bool, Any, str]:
         ok = wanted in got
     elif op == "any_contains":
         ok = any(wanted in (json.dumps(item) if not isinstance(item, str) else item) for item in got)
+    elif op == "none_contains":
+        ok = not any(wanted in (json.dumps(item) if not isinstance(item, str) else item) for item in got)
     elif op == "len_ge":
         ok = len(got) >= wanted
     elif op == "is_true":
