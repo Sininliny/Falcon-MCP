@@ -712,6 +712,9 @@ def create_server(config: Config | None = None) -> FastMCP:
 
     register_rack(mcp, cfg, audit, native_host, midi_compare_run)
     register_workflows(mcp, cfg, audit)
+    from .instrument_spec_tools import register_instrument_spec
+
+    register_instrument_spec(mcp, cfg, audit)
     from .delivery_tools import register_delivery
 
     register_delivery(mcp, cfg, audit)

@@ -8,6 +8,9 @@ from lupa.lua51 import LuaRuntime
 from falcon_mcp import voice_trace
 
 ENGINE = r"""
+-- Like Falcon 27: no coroutine global for scripts, spawn defers the task, and playNote/releaseVoice
+-- are Lua that call the global postEvent.
+local co = coroutine
 clock = 0
 tasks = {}
 saved = {}
@@ -15,21 +18,19 @@ calls = {}
 function getTime() return clock end
 function getSamplingRate() return 48000 end
 local function newId() return newproxy(false) end
-function playNote(note, vel, dur, layer) calls[#calls+1] = "play"; return newId() end
 function postEvent(e, delta) calls[#calls+1] = "post" .. tostring(e.type); if e.type == 144 then return e.id or newId() end end
-function releaseVoice(id) calls[#calls+1] = "release"; return true end
+function playNote(note, vel, dur, layer) calls[#calls+1] = "play"; return postEvent({type=144, note=note, velocity=vel}) end
+function releaseVoice(id) calls[#calls+1] = "release"; postEvent({type=128, id=id}); return true end
 function changeTune(id, shift, relative) calls[#calls+1] = "tune" end
 function fade(id, a, b, c) end
 function fadeout(id, duration, kill, reset) calls[#calls+1] = "fadeout" end
-function wait(ms) coroutine.yield(clock + ms) end
-function spawn(fn, ...)
+function wait(ms) co.yield(clock + ms) end
+local function engineSpawn(fn, ...)
     local args = {...}
-    local co = coroutine.create(function() fn(unpack(args)) end)
-    local ok, wake = coroutine.resume(co)
-    assert(ok, wake)
-    if coroutine.status(co) ~= "dead" then tasks[#tasks+1] = {co=co, wake=wake} end
+    tasks[#tasks+1] = {co=co.create(function() fn(unpack(args)) end), wake=clock}
 end
-function saveData(data, path, cb) saved[path] = data; if cb then cb({success=true}) end end
+spawn = engineSpawn
+function saveData(data, path, cb) saved[path] = data; if cb then cb(newproxy(false)) end end
 function advance(ms)
     local target = clock + ms
     while true do
@@ -38,19 +39,20 @@ function advance(ms)
         if not best then break end
         local task = table.remove(tasks, best)
         clock = math.max(clock, task.wake)
-        local ok, wake = coroutine.resume(task.co)
+        local ok, wake = co.resume(task.co)
         assert(ok, wake)
-        if coroutine.status(task.co) ~= "dead" then tasks[#tasks+1] = {co=task.co, wake=wake} end
+        if co.status(task.co) ~= "dead" then tasks[#tasks+1] = {co=task.co, wake=wake} end
     end
     clock = target
 end
-function deliver(name, e) spawn(function() (rawget(_G, "onEvent") or _G[name])(e) end) end
+function deliver(name, e) engineSpawn(function() (rawget(_G, "onEvent") or _G[name])(e) end) end
 local ids = {}
 function key(on, note, ch)
     ch = ch or 1
     if on then ids[note] = newId(); deliver("onNote", {type=144, note=note, velocity=90, channel=ch, id=ids[note]})
     else deliver("onRelease", {type=128, note=note, velocity=0, channel=ch, id=ids[note]}) end
 end
+coroutine = nil
 """
 
 # A mono legato instrument with two classic bugs: the auxiliary wavetable voice is started with
@@ -138,6 +140,8 @@ def test_kit_passes_calls_through_and_flushes_json():
     calls = to_python(lua.eval("calls"))
     assert calls.count("play") == 2 and "release" in calls  # the instrument's own calls still happen
     starts = [e for e in data["events"] if e["k"] == "voice_start"]
+    assert len(starts) == 2  # playNote's own internal postEvent is not logged as a second voice
+    assert data.get("save_error") is None  # saveData's task is userdata in Falcon
     assert starts[1]["role"] == "aux_wavetable" and starts[1]["dur"] == -1 and starts[1]["cb"] == "onNote"
     # The expiry inside spawn() keeps the key context of the release that opened it.
     release = next(e for e in data["events"] if e["k"] == "voice_release")
@@ -219,6 +223,7 @@ def test_on_event_scripts_are_traced_too():
     """
     lua = runtime(voice_trace.kit_source(None, "ev"), instrument)
     play(lua, [(0, True, 50), (100, False, 50)])
+    lua.execute("advance(1)")
     rows = to_python(lua.eval("FVT._snapshot()"))["events"]
     report = voice_trace.analyze({"events": rows})
     assert report["notes"][0]["off_ms"] == pytest.approx(100)
@@ -269,3 +274,25 @@ def test_midi_alignment_and_segments():
 def test_parse_rejects_text_without_events():
     with pytest.raises(ValueError):
         voice_trace.parse_trace("hello")
+
+
+def test_documented_auto_release_wins_over_engine_release_at_same_time():
+    # Falcon releases a playNote(-1) voice with its own releaseVoice in an engine task that the kit
+    # logs with a stale key context; the owner-key rule must still name the cause.
+    events = [{"k": "key_on", "t": 0, "s": 1, "kid": 1, "note": 60, "ch": 1},
+              {"k": "voice_start", "t": 0, "s": 2, "kid": 1, "cb": "onNote", "v": 1, "dur": -1, "via": "playNote"},
+              {"k": "voice_release", "t": 50, "s": 3, "kid": 7, "cb": "spawn", "v": 1, "via": "releaseVoice"},
+              {"k": "key_off", "t": 50, "s": 4, "kid": 1, "note": 60}]
+    voice = voice_trace.analyze({"events": events})["voices"][0]
+    assert voice["release_cause"] == "owner key 60 lifted (playNote -1)"
+
+
+def test_last_render_segment_starts_where_the_engine_clock_restarts():
+    events = [{"k": "init", "t": 0, "s": 1},
+              {"k": "key_on", "t": 46.4, "s": 2, "kid": 1, "note": 60, "ch": 1},  # host load-path note
+              {"k": "key_off", "t": 92.9, "s": 3, "kid": 1, "note": 60},
+              {"k": "cc", "t": 0, "s": 4, "cc": 64, "value": 0},
+              {"k": "key_on", "t": 200, "s": 5, "kid": 2, "note": 62, "ch": 1}]
+    report = voice_trace.analyze({"events": events}, segment="last_render")
+    assert [n["note"] for n in report["notes"]] == [62]
+    assert len(voice_trace.analyze({"events": events}, segment="last_init")["notes"]) == 2

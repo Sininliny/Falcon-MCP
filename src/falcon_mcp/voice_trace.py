@@ -150,6 +150,10 @@ def _ms(value) -> float | None:
 
 
 def _segment(events: list[dict], segment: str) -> list[dict]:
+    if segment == "last_render":
+        # Each owned-host render restarts the engine clock; the last backwards step starts the last render.
+        starts = [i for i in range(1, len(events)) if events[i]["t"] < events[i - 1]["t"]]
+        return events[starts[-1]:] if starts else events
     if segment == "last_transport":
         starts = [i for i, e in enumerate(events) if e.get("k") == "transport" and e.get("playing") is True]
         if starts:
@@ -267,7 +271,9 @@ def analyze(trace: dict, midi_events: list[dict] | None = None, reversal_ms: flo
                 cause = f"owner key {owner['note']} lifted (playNote -1)"
         elif voice["mode"] == "immediate":
             derived, cause = voice["start"], "released immediately (playNote -1 outside a key callback)"
-        if derived is not None and (voice["release"] is None or derived < voice["release"]):
+        # At equal times the documented rule wins: Falcon performs the -1 auto-release with its own
+        # releaseVoice in an engine task, which the kit logs with a stale key context.
+        if derived is not None and (voice["release"] is None or derived <= voice["release"]):
             voice["release"], voice["release_cause"] = derived, cause
             voice["released_by_kid"] = voice["owner_kid"] if voice["mode"] == "owner_key" else None
 
