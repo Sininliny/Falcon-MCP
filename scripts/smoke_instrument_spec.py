@@ -60,8 +60,8 @@ def band_db(path: str, start: float, stop: float, low: float = 500.0, high: floa
     freqs = np.fft.rfftfreq(len(mono), 1 / rate)
     band = float(power[(freqs >= low) & (freqs < high)].sum())
     rms = float(np.sqrt(np.mean(mono ** 2)))
-    return {"band_500_2k_db": round(10 * np.log10(max(band, 1e-20)), 2),
-            "rms_dbfs": round(20 * np.log10(max(rms, 1e-10)), 2)}
+    return {"band_500_2k_db": round(float(10 * np.log10(max(band, 1e-20))), 2),
+            "rms_dbfs": round(float(20 * np.log10(max(rms, 1e-10))), 2)}
 
 
 async def run(args):
@@ -124,7 +124,7 @@ async def run(args):
     report["macro_band_gain_db"] = gains
     report["passed"] = (all(b["exported"] and (b["readback"] or {}).get("matches")
                             for b in report["builds"].values())
-                        and len(gains) == len(NOTES) and min(gains.values()) >= MIN_MACRO_GAIN_DB)
+                        and len(gains) == len(NOTES) and bool(min(gains.values()) >= MIN_MACRO_GAIN_DB))
     print(json.dumps(report, indent=1))
     return 0 if report["passed"] else 1
 
