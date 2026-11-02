@@ -1,3 +1,7 @@
+---
+read_when: When checking the instrument against a backing track, or recording and replaying the user's own playing and calibrating touch.
+---
+
 # Mix context and the player's own playing
 
 Controllers on any render: `falcon_native_render(controllers=[...])` takes `sustain`, `cc` (CC1, CC11, CC64 ...),

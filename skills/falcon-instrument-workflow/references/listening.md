@@ -1,3 +1,7 @@
+---
+read_when: When iterating on sound without audio input: render, listen, diff, match targets.
+---
+
 # Listening loop (text-only hearing)
 
 The listening tools turn a WAV into measurements, short descriptive phrases and compact ASCII views.

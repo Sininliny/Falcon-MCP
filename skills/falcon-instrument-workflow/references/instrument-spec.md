@@ -1,3 +1,7 @@
+---
+read_when: When describing a whole instrument (macros, layers, keygroups, oscillators, effects) in one spec and building it with `falcon_instrument_spec`.
+---
+
 # Declarative instrument specs
 
 Use `falcon_instrument_spec` to describe a whole Program (macros, layers, keygroups, oscillators,

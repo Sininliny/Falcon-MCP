@@ -1,3 +1,7 @@
+---
+read_when: When a layered design does not sound layered, or before adding more layers.
+---
+
 # Does every layer earn its place?
 
 Use after the sound basically works and before adding more layers.

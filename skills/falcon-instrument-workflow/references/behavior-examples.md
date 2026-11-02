@@ -1,3 +1,7 @@
+---
+read_when: When you want a verified call sequence for a core task (listen, one-change diff, units, A/B, wavetable, delivery, build-render-edit, layer audition) and the fields to read.
+---
+
 # Minimal behavior examples
 
 Verified call sequences for the core tasks. Full files with arguments, expectations and recorded real

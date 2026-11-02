@@ -1,3 +1,7 @@
+---
+read_when: When running the fixed source/synth/attack/effects audition with controller min/max and present-but-inaudible checks.
+---
+
 # Layer audition workflow (sound development)
 
 Use when a layered instrument (recorded samples + synthesis + attack + effects) does not sound the way its

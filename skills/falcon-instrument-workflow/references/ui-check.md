@@ -1,3 +1,7 @@
+---
+read_when: After building a performance UI, and before release.
+---
+
 # Performance UI checks
 
 Audio acceptance does not test the performance page. Before release, check the UI with the tools below and

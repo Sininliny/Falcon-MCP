@@ -1,3 +1,7 @@
+---
+read_when: When using the owned VST3 session (load/save/edit/render) or matching an uploaded/local reference recording.
+---
+
 # Native sessions and reference matching
 
 ## Native file operations without desktop control

@@ -1,3 +1,7 @@
+---
+read_when: When a `.uvip`, its Play scene and standalone/VST sound different (for example a quieter single preset).
+---
+
 # Render parity
 
 The baseline is Falcon standalone or the Falcon VST in a DAW. Owned-host renders must match it.

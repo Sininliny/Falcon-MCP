@@ -1,3 +1,7 @@
+---
+read_when: Before release, or when chords stutter or CPU is high.
+---
+
 # Realtime performance
 
 A successful offline render does not prove that an instrument is playable. Pedalboard renders in VST3

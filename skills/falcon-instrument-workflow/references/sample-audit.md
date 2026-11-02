@@ -1,3 +1,7 @@
+---
+read_when: Before tuning a sample-based instrument, or when it sounds thin, flat across velocity or cuts off.
+---
+
 # Sample audit
 
 Problems in the recorded source cannot be fixed by envelopes and filters, so check the source first.

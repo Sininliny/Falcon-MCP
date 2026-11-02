@@ -1,3 +1,7 @@
+---
+read_when: When testing legato, repeated notes, sustain pedal, dense chords or expression.
+---
+
 # Performance checks
 
 Single notes do not prove an instrument plays well. After the timbre is close, run the performance suite on

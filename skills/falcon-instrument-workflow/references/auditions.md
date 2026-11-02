@@ -1,3 +1,7 @@
+---
+read_when: When letting the user choose between versions (A/B/C), or carrying an offline layer mix into a preset.
+---
+
 # A/B/C auditions
 
 - Render every variant from the same timeline and controllers, at one sample rate. Then

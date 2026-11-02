@@ -1,3 +1,7 @@
+---
+read_when: When rendering another installed VST3 instrument (e.g. Noire) from the same MIDI or single notes and comparing it with Falcon.
+---
+
 # Plugin rack: compare Falcon with another installed instrument
 
 Use when the user wants Falcon compared with a third-party VST3 instrument (for example Noire in Kontakt)

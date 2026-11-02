@@ -1,3 +1,7 @@
+---
+read_when: When checking what a native write really kept, or balancing level by register, velocity and voice count instead of trusting a limiter.
+---
+
 # Native readback and gain calibration
 
 Two checks that move "the write worked" and "nothing clipped" closer to "the instrument is set the way I meant".
