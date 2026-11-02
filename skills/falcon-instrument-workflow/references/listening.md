@@ -1,3 +1,7 @@
+---
+read_when: When iterating on sound without audio input: render, listen, diff, match targets.
+---
+
 # Listening loop (text-only hearing)
 
 The listening tools turn a WAV into measurements, short descriptive phrases and compact ASCII views.
@@ -16,7 +20,9 @@ limits are in the [repository listening guide](https://github.com/Sininliny/Falc
 4. `falcon_audio_diff(before, after)`. Confirm that the intended feature moved by at least 1
    noticeable step in the intended direction, and look for side effects in `significant_changes`
    (not only in `summary`, which is capped at 8 rows). If `level_match_gain_db` is not close to 0,
-   account for the level change before you claim a timbre change.
+   account for the level change before you claim a timbre change. A time measured on one side only
+   (for example a longer release that no longer falls 40 dB inside the file) is listed under
+   `measured_on_one_side`, not compared: render longer before you report it.
 5. When there is a goal, use `falcon_match_target` with ranges, or with a target built from a
    reference (`reference_path` or `reference_id`, optionally limited by `features`). Apply `next_step` one parameter at a time. Stop when
    `passed` is true, when `distance` has not fallen for two renders, or when you reach the render
