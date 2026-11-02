@@ -1,3 +1,7 @@
+---
+read_when: When building a wavetable oscillator from a recording, or checking an existing table.
+---
+
 # Sample-to-wavetable
 
 Use `falcon_wavetable` (offline) to turn a pitched recording into a wavetable and a `.uvip`.

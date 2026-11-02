@@ -1,3 +1,7 @@
+---
+read_when: Before the first write to any parameter, or recording what a sweep taught you.
+---
+
 # Parameter knowledge: look up before you write
 
 Never infer a value encoding from a knob label. Before the first write to any parameter:

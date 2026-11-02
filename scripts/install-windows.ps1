@@ -10,7 +10,8 @@
       3. Runtime home <repo>\.runtime: FALCON_MCP_HOME user variable and "falcon_mcp prepare".
       4. Detect installed agents: Claude Desktop (profile folder), Claude Code (claude command,
          ~/.claude.json or ~/.claude), Codex (codex command or ~/.codex). Missing agents are skipped.
-      5. Agent skill skills\falcon-instrument-workflow: copied for each detected Claude Code / Codex, and
+      5. Agent skill skills\falcon-instrument-workflow: built with scripts\build_skill.py (generated
+         reference index) into .runtime\skill-build, copied for each detected Claude Code / Codex, and
          zipped to .runtime\falcon-instrument-workflow.zip for upload in Claude Desktop.
       6. MCP configuration for each detected agent (scripts\configure_clients.py).
     Every configuration file and replaced skill folder is backed up to .runtime\backups\<timestamp>
@@ -143,14 +144,14 @@ function Get-TreeHashes([string]$Path) {
     }) -join "`n"
 }
 
-function Install-Skill([string]$Root, [string]$Label) {
+function Install-Skill([string]$Root, [string]$Label, [string]$Built) {
     $target = Join-Path $Root $SkillName
-    if ((Get-TreeHashes $target) -eq (Get-TreeHashes $SkillSource)) { Write-Info "up to date: $target"; return }
+    if ((Get-TreeHashes $target) -eq (Get-TreeHashes $Built)) { Write-Info "up to date: $target"; return }
     Backup-Path $target "skill-$Label"
-    if ($DryRun) { Write-Plan "replace $target with $SkillSource"; return }
+    if ($DryRun) { Write-Plan "replace $target with the built skill"; return }
     New-Item -ItemType Directory -Force -Path $Root | Out-Null
     if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
-    Copy-Item -LiteralPath $SkillSource -Destination $target -Recurse -Force
+    Copy-Item -LiteralPath $Built -Destination $target -Recurse -Force
     Write-Info "installed: $target"
 }
 
@@ -258,17 +259,24 @@ Invoke-Step 'Detect installed agents' {
 if ($SkipSkill) { Skip-Step 'Agent skill' '-SkipSkill' } else {
     Invoke-Step 'Agent skill' {
         if (-not (Test-Path (Join-Path $SkillSource 'SKILL.md'))) { throw "missing $SkillSource\SKILL.md" }
+        if (-not ($HasClaudeCode -or $HasCodex -or $DesktopConfigs.Count)) { return 'no agent to install for' }
+        if (-not (Test-Path $VenvPython)) {
+            if ($DryRun) { Write-Plan 'build and install the skill once .venv exists'; return }
+            throw '.venv is missing; cannot build the skill'
+        }
+        # The tracked skill has no generated content; build_skill.py adds the reference index.
+        # A dry run builds into a temporary folder so it can still compare installed copies.
+        $buildRoot = if ($DryRun) { Join-Path ([IO.Path]::GetTempPath()) 'falcon-mcp-skill-build' } else { Join-Path $RuntimeHome 'skill-build' }
+        Invoke-Native $VenvPython @((Join-Path $Repo 'scripts\build_skill.py'), '--out', $buildRoot) -Always
+        $built = Join-Path $buildRoot $SkillName
         $done = @()
-        if ($HasClaudeCode) { Install-Skill (Join-Path $ClaudeRoot 'skills') 'claude-code'; $done += 'Claude Code' }
-        if ($HasCodex) { Install-Skill (Join-Path $env:USERPROFILE '.agents\skills') 'codex'; $done += 'Codex' }
+        if ($HasClaudeCode) { Install-Skill (Join-Path $ClaudeRoot 'skills') 'claude-code' $built; $done += 'Claude Code' }
+        if ($HasCodex) { Install-Skill (Join-Path $env:USERPROFILE '.agents\skills') 'codex' $built; $done += 'Codex' }
         if ($DesktopConfigs.Count -eq 0) { return "$($done -join ', ')" }
         $zip = Join-Path $RuntimeHome "$SkillName.zip"
         if ($DryRun) { Write-Plan "build $zip for Claude Desktop upload"; return }
-        if (-not (Test-Path $VenvPython)) { throw '.venv is missing; cannot build the skill ZIP' }
-        New-Item -ItemType Directory -Force -Path $RuntimeHome | Out-Null
-        if (Test-Path $zip) { Remove-Item -LiteralPath $zip -Force }
-        # Python's zipfile writes forward-slash entry names; Windows PowerShell 5.1 Compress-Archive does not.
-        Invoke-Native $VenvPython @('-m', 'zipfile', '-c', $zip, $SkillSource) -Always
+        # build_skill.py writes forward-slash entry names; Windows PowerShell 5.1 Compress-Archive does not.
+        Invoke-Native $VenvPython @((Join-Path $Repo 'scripts\build_skill.py'), '--out', $buildRoot, '--zip', $zip) -Always
         Write-Info "Claude Desktop: Customize > Skills > Add skill > Upload a skill, then pick $zip"
         (@($done) + @('ZIP for Claude Desktop')) -join ', '
     }

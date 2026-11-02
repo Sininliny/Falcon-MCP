@@ -1,3 +1,7 @@
+---
+read_when: When matching a reference instrument note by note from one MIDI file.
+---
+
 # Per-note comparison with a reference instrument
 
 Use when matching a reference instrument (for example a commercial piano) note by note, not by overall

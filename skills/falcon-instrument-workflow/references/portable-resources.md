@@ -1,3 +1,7 @@
+---
+read_when: When changing sample paths, moving or synchronizing a library, or checking a preset's resource references.
+---
+
 # Portable preset resources
 
 Read this when changing sample paths, moving or synchronizing a library, or

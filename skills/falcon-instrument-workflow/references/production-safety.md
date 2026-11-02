@@ -1,3 +1,7 @@
+---
+read_when: When editing modulation, building structures, accepting audio or publishing a revision.
+---
+
 # Guarded production and release
 
 Use these workflows when modifying modulation, constructing a native Program, accepting audio, or publishing a library revision. Runtime names, disk hashes, native state revisions and foreground windows are different identities.

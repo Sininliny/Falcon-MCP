@@ -1,3 +1,7 @@
+---
+read_when: When creating a new instrument, or the request is phrased in sound words.
+---
+
 # Sound design with recipes and measurable targets
 
 Use this when creating a new instrument or when a request is phrased in sound words ("warmer", "less

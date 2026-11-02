@@ -1,3 +1,7 @@
+---
+read_when: When adding filter/chorus/amp/tremolo/saturation inserts with velocity/keyfollow/modwheel modulation in the owned session.
+---
+
 # Guarded structural edits (`falcon_native_structure`)
 
 `falcon_native_edit` only changes values of attributes that already exist. `falcon_native_structure` adds
