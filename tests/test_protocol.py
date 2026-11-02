@@ -50,6 +50,7 @@ async def test_real_stdio_initialize_tools_resource_and_validation(config):
                 "falcon_rack_job"} <= names
         assert {"falcon_voice_trace_kit", "falcon_voice_trace_analyze"} <= names
         assert "falcon_delivery" in names
+        assert "falcon_instrument_spec" in names
         assert {"falcon_runtime_trace", "falcon_native_ui_accept", "falcon_render_parity"} <= names
         assert {"falcon_audition_create", "falcon_audition_choose", "falcon_audition_migration",
                 "falcon_audition_history"} <= names
