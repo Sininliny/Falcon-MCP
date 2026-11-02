@@ -53,7 +53,7 @@ Every result passes through `result_scope`, which states which context answered,
 2. Write the docstring for an agent: what it does, which context it uses, what it does not verify. Keep results compact text and numbers; text-only agents cannot listen.
 3. Register the module in `create_server()` **before** `install_result_scope`. Pass `native_host` from `register_native` when the tool needs the owned host.
 4. Declare the tool's scope profile with `result_scope.declare(...)` (see [declaring a new tool](result-scope.md#declaring-a-new-tool)). `tests/test_result_scope.py` fails for undeclared tools.
-5. Update the tool count and name set in `tests/test_protocol.py` (currently 112), the README tool table, the skill (`SKILL.md` and the matching file in `references/`) and the topic doc under `docs/`.
+5. Update the tool count and name set in `tests/test_protocol.py` (currently 113), the README tool table, the skill (`SKILL.md` and the matching file in `references/`) and the topic doc under `docs/`.
 6. Lua changes: edit `src/falcon_mcp/lua/*.lua`, add a `tests/test_lua.py` case (runs under `lupa`), and remember that the open instance only picks them up after a runtime deployment (`falcon_setup(verify_watch=true)` or `falcon_mcp setup --verify-reload`).
 7. Run the checks in [Tests and CI](#tests-and-ci), then the relevant live check.
 
@@ -75,7 +75,7 @@ Release steps:
 2. Run `python scripts/check_versions.py --strict`.
 3. Add `docs/changes-X.Y.Z.md` (new tools, behavior changes, limits). Historical change files keep their original wording.
 4. Run the full test suite and the live checks for the touched areas; record results in [validation records](validation.md) with their scope level (indexed, callable, minimally verified, production verified).
-5. Build artifacts: `python -m pip wheel . --no-deps -w dist` and the skill ZIP (the installer writes it to `.runtime/falcon-instrument-workflow.zip`).
+5. Build artifacts: `python -m pip wheel . --no-deps -w dist` and the skill ZIP (the installer writes it to `.runtime/falcon-instrument-workflow.zip`). The ZIP is not tracked in git (`skills/*.zip` is ignored) because a binary file conflicted on every merge that touched the skill; never commit one.
 6. Merge to `main` through a pull request with green CI.
 
 Semantic versioning: new tools or bridge protocol changes bump the minor version; fixes bump the patch.

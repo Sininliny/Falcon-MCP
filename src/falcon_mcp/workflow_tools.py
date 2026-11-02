@@ -18,6 +18,44 @@ from .revisions import RevisionStore
 Role = Literal["Lead", "Keys", "Bass", "Kit"]
 
 
+async def build_and_accept(config, audit, store: RevisionStore, project: str, xml: bytes, role: str,
+                           acknowledged: list[str], *, extra_files: dict[str, bytes] | None = None,
+                           export_gate=None) -> dict:
+    """Write a candidate .uvip, snapshot it, run isolated native acceptance and export when it passes.
+
+    export_gate(report, native_export_bytes) may return a reason string to withhold the export.
+    """
+    import shutil
+
+    from .revisions import sha256
+
+    folder = config.runtime.parent / "builds" / uuid.uuid4().hex
+    folder.mkdir(parents=True)
+    source = folder / "candidate.uvip"
+    source.write_bytes(xml)
+    for name, data in (extra_files or {}).items():
+        (folder / name).write_bytes(data)
+    receipt = store.snapshot(project, str(source))
+    report = await accept_revision(config, audit, store, project, receipt["revision_id"], role, 1, 1, acknowledged)
+    result = {"build_folder": str(folder), "revision": receipt, "acceptance": report, "exported": False}
+    native = Path(report["report"]).parent / "native-export.uvip"
+    native_bytes = native.read_bytes() if native.is_file() else None
+    withheld = export_gate(report, native_bytes) if export_gate else None
+    if withheld:
+        result["export_withheld"] = withheld
+    if report["passed"] and native_bytes is None:
+        raise OSError("Acceptance passed but wrote no native-export.uvip")
+    if report["passed"] and not withheld:
+        destination = config.runtime.parent / "presets" / ("built-" + uuid.uuid4().hex + ".uvip")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(native, destination)
+        if sha256(destination) != sha256(native):
+            destination.unlink()
+            raise OSError("Builder export hash mismatch")
+        result.update(exported=True, path=str(destination), sha256=sha256(destination))
+    return result
+
+
 def register_workflows(mcp, config, audit):
     store = RevisionStore(config)
 
@@ -94,27 +132,9 @@ def register_workflows(mcp, config, audit):
             return catalog()
         if project is None or name is None or layers is None:
             raise ValueError("build requires project, name and layers")
-        folder = config.runtime.parent / "builds" / uuid.uuid4().hex
-        folder.mkdir(parents=True)
-        source = folder / "candidate.uvip"
-        source.write_bytes(build_program(name, layers))
-        receipt = store.snapshot(project, str(source))
-        report = await accept_revision(config, audit, store, project, receipt["revision_id"], role, 1, 1,
-                                       acknowledged_findings or [])
-        result = {"template": catalog(), "revision": receipt, "acceptance": report, "exported": False}
-        if report["passed"]:
-            import shutil
-
-            destination = config.runtime.parent / "presets" / ("built-" + uuid.uuid4().hex + ".uvip")
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            native = Path(report["report"]).parent / "native-export.uvip"
-            shutil.copyfile(native, destination)
-            from .revisions import sha256
-
-            if sha256(destination) != sha256(native):
-                destination.unlink()
-                raise OSError("Builder export hash mismatch")
-            result.update(exported=True, path=str(destination), sha256=sha256(destination))
+        result = await build_and_accept(config, audit, store, project, build_program(name, layers), role,
+                                        acknowledged_findings or [])
+        result = {"template": catalog(), **result}
         audit.event("instrument_build", project=project, exported=result["exported"],
-                    revision_id=receipt["revision_id"])
+                    revision_id=result["revision"]["revision_id"])
         return result
