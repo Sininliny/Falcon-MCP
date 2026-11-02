@@ -1,0 +1,91 @@
+{
+  "id": "08-layer-audition",
+  "context": "owned_host",
+  "steps": [
+    {
+      "id": "build",
+      "tool": "falcon_build_instrument",
+      "excerpt": {
+        "exported": true
+      },
+      "result_scope": {
+        "env": "temporary_owned_host",
+        "checked": [
+          "offline_render",
+          "native_readback",
+          "file_hash"
+        ],
+        "not_checked": null
+      }
+    },
+    {
+      "id": "host",
+      "tool": "falcon_native_host",
+      "excerpt": {
+        "session_id": "2dae56cc511f4c249f089278b34b4e46"
+      },
+      "result_scope": {
+        "env": "owned_vst3_host",
+        "checked": null,
+        "not_checked": null
+      }
+    },
+    {
+      "id": "load",
+      "tool": "falcon_native_file",
+      "excerpt": {
+        "programs.0.name": "Example Layers"
+      },
+      "result_scope": {
+        "env": "owned_vst3_host",
+        "checked": [
+          "native_readback",
+          "file_hash"
+        ],
+        "not_checked": [
+          "resources_collected",
+          "open_instance"
+        ]
+      }
+    },
+    {
+      "id": "audition",
+      "tool": "falcon_layer_audition",
+      "excerpt": {
+        "status": "done",
+        "scope.restored": true,
+        "findings.[subject=Color].kind": "present_but_inaudible",
+        "findings": [
+          {
+            "kind": "present_but_inaudible",
+            "severity": "check",
+            "subject": "Color",
+            "text": "Color (synth) is enabled in the structure but changes almost nothing when removed in this performance; structure: Gain=0.003 (-50 dB)",
+            "next": "Listen to its audition solo; if it should be heard raise its level or fix its key/velocity range or trigger; otherwise remove it (it still costs voices and CPU)"
+          },
+          {
+            "kind": "low_gain_in_structure",
+            "severity": "info",
+            "subject": "Color",
+            "text": "Color has Gain=0.003 (-50 dB)"
+          }
+        ],
+        "table": "unit                role    struct  status       remove   solo\n--------------------------------------------------------------\nBody                synth   on      audible        50.2   -0.0\nColor               synth   low     inaudible      ...",
+        "units.[name=Body].role": "synth"
+      },
+      "result_scope": {
+        "env": "owned_vst3_host",
+        "checked": [
+          "offline_render",
+          "dsp_measured",
+          "native_readback"
+        ],
+        "not_checked": [
+          "realtime_cpu",
+          "open_instance",
+          "perceptual_quality"
+        ]
+      }
+    }
+  ]
+}

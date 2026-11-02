@@ -1,0 +1,195 @@
+{
+  "id": "07-build-render-listen",
+  "context": "owned_host",
+  "steps": [
+    {
+      "id": "build",
+      "tool": "falcon_build_instrument",
+      "excerpt": {
+        "acceptance.passed": true,
+        "exported": true,
+        "path": "${home}/presets/built-368f0923c77a4e0bb3ef9331e4338a31.uvip"
+      },
+      "result_scope": {
+        "env": "temporary_owned_host",
+        "checked": [
+          "offline_render",
+          "native_readback",
+          "file_hash"
+        ],
+        "not_checked": null
+      }
+    },
+    {
+      "id": "host",
+      "tool": "falcon_native_host",
+      "excerpt": {
+        "session_id": "49482e6520c9493883a1c1726290da7c"
+      },
+      "result_scope": {
+        "env": "owned_vst3_host",
+        "checked": null,
+        "not_checked": null
+      }
+    },
+    {
+      "id": "load",
+      "tool": "falcon_native_file",
+      "excerpt": {
+        "programs.0.name": "Example Keys"
+      },
+      "result_scope": {
+        "env": "owned_vst3_host",
+        "checked": [
+          "native_readback",
+          "file_hash"
+        ],
+        "not_checked": [
+          "resources_collected",
+          "open_instance"
+        ]
+      }
+    },
+    {
+      "id": "before",
+      "tool": "falcon_native_render",
+      "excerpt": {
+        "path": "${audio}/native-ed1df1fd1a4d4cb8a6f16f52c26bb8bf.wav",
+        "peak": 0.043,
+        "listening.description": [
+          "fast attack (11 ms)",
+          "sustains at -2.8 dB below peak",
+          "release falls 40 dB in 571 ms",
+          "dark (centroid 220 Hz = 1.0x f0)",
+          "near-sine, few harmonics (1 within 40 dB)",
+          "in tune (+0.0 cents)",
+          "..."
+        ]
+      },
+      "result_scope": {
+        "env": "owned_vst3_host",
+        "checked": [
+          "offline_render",
+          "dsp_measured"
+        ],
+        "not_checked": [
+          "realtime_cpu",
+          "cc_pedal_expression",
+          "open_instance",
+          "perceptual_quality"
+        ]
+      }
+    },
+    {
+      "id": "listen",
+      "tool": "falcon_listen",
+      "excerpt": {
+        "pitch.cents_error": 0.016,
+        "envelope.release_ms": 571.0,
+        "envelope.tail_truncated": false
+      },
+      "result_scope": {
+        "env": "audio_file_analysis",
+        "checked": [
+          "dsp_measured"
+        ],
+        "not_checked": [
+          "perceptual_quality"
+        ]
+      }
+    },
+    {
+      "id": "read",
+      "tool": "falcon_native_edit",
+      "excerpt": {
+        "attributes.ReleaseTime": "0.0500000007",
+        "revision": "953b723a8878be0b1eefaf62952ab59555a51f04c44bf6355a786e9676c81b68"
+      },
+      "result_scope": {
+        "env": "owned_vst3_host",
+        "checked": [
+          "native_readback"
+        ],
+        "not_checked": [
+          "audible_effect",
+          "saved_to_file",
+          "open_instance"
+        ]
+      }
+    },
+    {
+      "id": "units",
+      "tool": "falcon_param_value",
+      "excerpt": {
+        "engine_value": 0.6
+      },
+      "result_scope": {
+        "env": "offline_reference",
+        "checked": null,
+        "not_checked": null
+      }
+    },
+    {
+      "id": "edit",
+      "tool": "falcon_native_edit",
+      "excerpt": {
+        "verified": true,
+        "readback_report.status": "kept"
+      },
+      "result_scope": {
+        "env": "owned_vst3_host",
+        "checked": [
+          "native_readback"
+        ],
+        "not_checked": [
+          "audible_effect",
+          "saved_to_file",
+          "open_instance"
+        ]
+      }
+    },
+    {
+      "id": "after",
+      "tool": "falcon_native_render",
+      "excerpt": {
+        "path": "${audio}/native-5e6f54d3692a4ba9b8158685948cebf9.wav"
+      },
+      "result_scope": {
+        "env": "owned_vst3_host",
+        "checked": [
+          "offline_render",
+          "dsp_measured"
+        ],
+        "not_checked": [
+          "realtime_cpu",
+          "cc_pedal_expression",
+          "open_instance",
+          "perceptual_quality"
+        ]
+      }
+    },
+    {
+      "id": "diff",
+      "tool": "falcon_audio_diff",
+      "excerpt": {
+        "diff.summary": [
+          "longer decay: estimated_t60_seconds 0.8519 -> 11.1681",
+          "louder: rms_dbfs -36.7002 -> -34.9391",
+          "higher noise_floor_dbfs: noise_floor_dbfs -120.0 -> -42.0273",
+          "release_ms measured only before (571.0): not measurable in the after file, usually a tail that does not finish inside it; render longer to compare"
+        ],
+        "diff.measured_on_one_side.[feature=release_ms].unmeasured_in": "after",
+        "diff.significant_changes.0.feature": "estimated_t60_seconds"
+      },
+      "result_scope": {
+        "env": "audio_file_analysis",
+        "checked": [
+          "dsp_measured"
+        ],
+        "not_checked": [
+          "perceptual_quality"
+        ]
+      }
+    }
+  ]
+}

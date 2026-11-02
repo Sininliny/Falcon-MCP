@@ -153,6 +153,10 @@ to read values. Pass `ascii=false` to the tools (`include_ascii=False` in Python
   timbre, because a louder sound tends to be heard as better. The `summary` list keeps 8 rows and
   puts worded features (brighter/darker, louder, attack, release...) before raw band and harmonic
   rows; read `significant_changes` for the rest.
+- A time feature (`attack_ms`, `decay_ms`, `release_ms`, `estimated_t60_seconds`) measured in only one
+  file cannot be a delta row. It is listed under `measured_on_one_side` with `unmeasured_in` and gets its
+  own summary line; the usual cause is a tail that does not finish inside the file (a longer release),
+  so render longer before comparing it.
 - `falcon_match_target` takes `{feature: {"min", "max"}}` or `{feature: {"value", "tolerance",
   "weight"}}`. When the tolerance is left out, it defaults to the noticeable step. A feature that
   could not be measured is reported as `unmeasured` and fails the target. `distance` is the

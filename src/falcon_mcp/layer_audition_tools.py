@@ -482,7 +482,8 @@ def analyse(rate, windows, audio, units, states, controllers, layer_info, disabl
                                 "effect": effect, "effects_status": {k: v["status"] for k, v in effects_by_side.items()}})
 
     finding_units = [r for r in unit_rows if r["kind"] != "group"]
-    effects_found = bool(tree["effects"] or tree["sends"])
+    # Falcon recreates a Part send for every Master Aux at Gain 0: only an open, unbypassed send adds effects.
+    effects_found = bool(tree["effects"] or [n for n in tree["sends"] if _open_send(n["attributes"])])
     findings, lines = la.layer_findings(finding_units, controller_rows, base.get("effects"), effects_found)
     for item in disabled:
         findings.append({"kind": "disabled_in_structure", "severity": "info", "subject": item["name"],
@@ -563,3 +564,10 @@ def analyse(rate, windows, audio, units, states, controllers, layer_info, disabl
                       "how": "Same performance, matched to the full mix's ungated loudness with one shared peak "
                              "headroom; gain_db is how far each copy was moved. Offline copies, not the live preset."},
     }
+
+
+def _open_send(attributes: dict) -> bool:
+    try:
+        return float(attributes.get("Gain", 0)) > 0 and str(attributes.get("Bypass", "0")) != "1"
+    except (TypeError, ValueError):
+        return True

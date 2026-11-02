@@ -10,7 +10,7 @@
         "candidates": [
           {
             "label": "A",
-            "audition_path": "${audio}/auditions/aud-20261101-225759-aa8e25/A.wav",
+            "audition_path": "${audio}/auditions/aud-20261101-233228-58622a/A.wav",
             "gain_db": -12.26,
             "level": {
               "integrated_lufs": -11.86,
@@ -24,7 +24,7 @@
           },
           {
             "label": "B",
-            "audition_path": "${audio}/auditions/aud-20261101-225759-aa8e25/B.wav",
+            "audition_path": "${audio}/auditions/aud-20261101-233228-58622a/B.wav",
             "gain_db": 0.0,
             "level": {
               "integrated_lufs": -24.12,
@@ -38,7 +38,7 @@
           }
         ],
         "candidates.0.name": null,
-        "audition_id": "aud-20261101-225759-aa8e25"
+        "audition_id": "aud-20261101-233228-58622a"
       },
       "result_scope": {
         "env": "audio_file_analysis",
@@ -58,8 +58,8 @@
       "tool": "falcon_audition_choose",
       "excerpt": {
         "integration.status": "integrated",
-        "target_path": "${audio}/auditions/aud-20261101-225759-aa8e25/target.json",
-        "next": "Edit toward keep/avoid, render the same timeline and start the next round with falcon_audition_create(previous_audition_id='aud-20261101-225759-aa8e25')"
+        "target_path": "${audio}/auditions/aud-20261101-233228-58622a/target.json",
+        "next": "Edit toward keep/avoid, render the same timeline and start the next round with falcon_audition_create(previous_audition_id='aud-20261101-233228-58622a')"
       },
       "result_scope": {
         "env": "managed_files",

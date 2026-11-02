@@ -933,6 +933,9 @@ def normalized_delta(name: str, before, after) -> float | None:
     return (after - before) / rule
 
 
+ONE_SIDED_TIMES = ("attack_ms", "decay_ms", "release_ms", "estimated_t60_seconds")
+
+
 def diff_reports(before: dict, after: dict) -> dict:
     a, b = feature_vector(before), feature_vector(after)
     if a.get("silent") or b.get("silent"):
@@ -967,8 +970,20 @@ def diff_reports(before: dict, after: dict) -> dict:
     band_rows = [{"band": n, "range_hz": before_bands[n]["range_hz"],
                   "after_minus_before_db": round(after_bands[n]["db_re_total"] - before_bands[n]["db_re_total"], 1)}
                  for n in before_bands if n in after_bands]
+    # A time measured on one side only (e.g. the longer release never falls 40 dB inside the file) cannot be a
+    # delta row, but silently dropping it hides the change the edit was meant to make.
+    one_sided = []
+    for name in ONE_SIDED_TIMES:
+        x, y = a.get(name), b.get(name)
+        if (x is None) != (y is None):
+            side = "after" if y is None else "before"
+            one_sided.append({"feature": name, "before": x, "after": y, "unmeasured_in": side})
+            phrases.append(f"{name} measured only {'before' if side == 'after' else 'after'} ({x if y is None else y}): "
+                           f"not measurable in the {side} file, usually a tail that does not finish inside it; "
+                           "render longer to compare")
     return {"available": True, "summary": phrases or ["no change above the noticeable-step heuristics"],
-            "significant_changes": significant, "all_features": rows, "level_normalized_bands": band_rows,
+            "significant_changes": significant, "all_features": rows, "measured_on_one_side": one_sided,
+            "level_normalized_bands": band_rows,
             "definition": "noticeable_steps = change divided by a per-feature heuristic step; >=1 is worth listening for",
             "level_match_gain_db": round(a["rms_dbfs"] - b["rms_dbfs"], 2)}
 
