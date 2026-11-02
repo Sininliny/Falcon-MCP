@@ -21,8 +21,11 @@ do
     local okJson, json = pcall(require, "uvi.json")
     local ring, head, count, seq, dropped = {}, 0, 0, 0, 0
     local dirty, saving, saveError, flushing = false, false, nil, false
-    local contexts = setmetatable({}, {__mode="k"})
-    local mainCtx = {cb="script"}
+    -- UVIScript has no coroutine library, so the context of the running callback or task is one
+    -- variable: callbacks and spawned tasks set it on entry, and the wrapped wait*() calls restore the
+    -- task's own context when it resumes.
+    local current = {cb="script"}
+    local inApi = false      -- Falcon's playNote/releaseVoice call the global postEvent: record once
     local held = {}          -- channel*128+note -> FIFO of key ids (kid)
     local nextKid, nextVoice = 0, 0
     local voiceKeys, voiceKeyCount = {}, 0   -- tostring(native id) -> trace voice number
@@ -33,15 +36,8 @@ do
         if ok and type(t) == "number" then return t end
         return nil
     end
-    local function ctx()
-        local co = coroutine.running()
-        if co then return contexts[co] or mainCtx end
-        return mainCtx
-    end
-    local function setCtx(c)
-        local co = coroutine.running()
-        if co then contexts[co] = c else mainCtx = c end
-    end
+    local function ctx() return current end
+    local function setCtx(c) current = c end
     local function clean(value)
         local kind = type(value)
         if kind == "boolean" or kind == "string" and #value <= 200 then return value end
@@ -103,6 +99,7 @@ do
         raw.playNote, raw.postEvent, raw.releaseVoice = playNote, postEvent, releaseVoice
         raw.changeTune, raw.fade, raw.fadein, raw.fadeout = changeTune, fade, fadein, fadeout
         raw.spawn, raw.run, raw.wait = spawn, run, wait
+        raw.waitBeat, raw.waitForRelease = waitBeat, waitForRelease
 
         if type(raw.playNote) == "function" then
             playNote = function(...)
@@ -112,7 +109,10 @@ do
                     note = a1.note or a1[1]; vel = a1.vel or a1.velocity or a1[2]
                     dur = a1.duration or a1[3]; layer = a1.layer or a1[4]; ch = a1.channel or a1[5]
                 end
-                local id = raw.playNote(...)
+                inApi = true
+                local ok, id = pcall(raw.playNote, ...)
+                inApi = false
+                if not ok then error(id, 0) end
                 if id ~= nil then
                     record("voice_start", {v=remember(id), rid=tostring(id), via="playNote", note=note, vel=vel,
                         dur=dur == nil and -1 or dur, layer=layerText(layer), vch=ch, role=roleFor(layer)})
@@ -124,6 +124,7 @@ do
         end
         if type(raw.postEvent) == "function" then
             postEvent = function(e, ...)
+                if inApi then return raw.postEvent(e, ...) end
                 local c = ctx()
                 local kind = type(e) == "table" and e.type or nil
                 if kind == 128 then
@@ -147,7 +148,10 @@ do
         if type(raw.releaseVoice) == "function" then
             releaseVoice = function(id, ...)
                 local v = voiceKey(id)
-                local result = raw.releaseVoice(id, ...)
+                inApi = true
+                local ok, result = pcall(raw.releaseVoice, id, ...)
+                inApi = false
+                if not ok then error(result, 0) end
                 record("voice_release", {v=v, rid=tostring(id), via="releaseVoice", existed=result})
                 forget(id)
                 return result
@@ -174,7 +178,22 @@ do
                 _G[name] = function(fn, ...)
                     local parent = ctx()
                     local child = {cb=name, kid=parent.kid, note=parent.note, ch=parent.ch, t=now(), from=parent.cb}
-                    return original(function(...) setCtx(child); return fn(...) end, ...)
+                    -- spawn may defer the task (Falcon does) or run it until its first wait: either way the
+                    -- caller continues in its own context.
+                    local a, b = original(function(...) setCtx(child); return fn(...) end, ...)
+                    setCtx(parent)
+                    return a, b
+                end
+            end
+        end
+        for _, name in ipairs({"wait", "waitBeat", "waitForRelease"}) do
+            local original = raw[name]
+            if type(original) == "function" then
+                _G[name] = function(...)
+                    local mine = current
+                    local a, b = original(...)
+                    current = mine
+                    return a, b
                 end
             end
         end
@@ -194,7 +213,9 @@ do
         dirty = false; saving = true
         local ok, err = pcall(saveData, snapshot(), cfg.path, function(task)
             saving = false
-            if type(task) == "table" and task.success == false then saveError = "saveData failed" end
+            -- The task is userdata in Falcon (tostring on it raises); read the field defensively.
+            local okField, success = pcall(function() return task.success end)
+            if okField and success == false then saveError = "saveData failed" end
         end)
         if not ok then saving = false; saveError = tostring(err) end
         return ok

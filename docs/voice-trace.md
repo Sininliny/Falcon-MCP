@@ -24,8 +24,10 @@ works for code running inside the MCP bridge's own script, not inside a separate
 3. Play or render the phrase. The kit logs into an in-memory ring (default 4000 events) and a
    background task saves it with `saveData` every `flush_ms` of engine time. In offline renders, leave
    at least 0.5 s of audio after the last event so the final save happens.
-4. `falcon_voice_trace_analyze(trace_path, performance_path=...)` returns findings and one explanation
-   per key. The full report (all keys, all voices, pending windows) is saved under the report root.
+4. `falcon_voice_trace_analyze(trace_path, performance_path=..., segment="last_render")` returns
+   findings and one explanation per key. Use `segment="last_render"` for owned-host renders
+   (`falcon_native_perform`): each render restarts the engine clock, and the host's load path can send
+   one extra note (60, velocity 127, about 46 ms in) before the render, which `last_init` would include. The full report (all keys, all voices, pending windows) is saved under the report root.
 
 The kit only adds bookkeeping. Every wrapped call passes its arguments through and returns the
 original result. It does not use `pcall` around callbacks, because callbacks may call `wait()`.
@@ -99,6 +101,14 @@ The MIDI input trace in `falcon_native_perform` / `falcon_perform_analyze` (`inp
 marks `fast_reversal` and `ms_since_last_release` per note, so a reversal can be found in the MIDI
 before the script is instrumented.
 
+## Live validation
+
+Falcon 27.0.2, owned VST3 host, offline render, mono legato test script with an aux voice from
+`playNote(-1)` and a 40 ms pending window: the trace file is written (`dropped` 0), every release
+matches its voice, and the per-note answers agree with the audio. With the return to 60 at 20 ms into
+the window there is no new attack (legato "pending window", the window commits); at 150 ms there is a
+fresh attack. The aux voice is cut 50 ms into the legato note, which the RMS drop confirms.
+
 ## Limits
 
 - Only the script containing the kit is traced. Closed library scripts, other scripts in the chain,
@@ -108,7 +118,11 @@ before the script is instrumented.
   (`falcon_native_stems`, `falcon_midi_compare`).
 - Inferred legato/envelope answers follow two facts: a new voice starts its own envelopes, and a
   retuned existing voice does not. Crossfade transitions are inferred from a fade by the new key.
-- Native voice ids are matched by their string form. If the installed Falcon returns a fresh object
-  per call, releases appear under `unmatched_releases` instead of being guessed; verify this on the
-  first live run.
+- Native voice ids are matched by their string form (`userdata: 0x...`), which Falcon 27.0.2 keeps
+  stable from start to release. A release that still cannot be matched is listed under
+  `unmatched_releases` instead of being guessed.
+- UVIScript has no `coroutine`, `debug`, `io` or `os` library. The kit keeps one current context and
+  restores it in the wrapped `spawn`/`run`/`wait`/`waitBeat`/`waitForRelease`. Engine-internal tasks
+  (Falcon's own `-1` auto-release) are logged with a stale key; the analyzer applies the documented
+  owner-key rule at equal times.
 - Passing tracing checks does not mean the transition sounds good.
