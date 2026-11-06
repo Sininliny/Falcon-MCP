@@ -80,3 +80,31 @@ def test_readme_heading_does_not_pin_a_stale_version():
     heading = (ROOT / "README.md").read_text("utf-8").splitlines()[0]
     version = re.search(r"\d+\.\d+\.\d+", heading)
     assert version is None or version.group(0) == PYPROJECT["project"]["version"], heading
+
+
+def _pins(path: Path) -> dict[str, str]:
+    pins = {}
+    for line in path.read_text("utf-8").splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line:
+            name, _, version = line.partition("==")
+            assert version, f"{path.name}: '{line}' is not an exact pin"
+            pins[_normalize(name)] = version
+    return pins
+
+
+def test_tested_constraints_satisfy_pyproject_ranges():
+    from packaging.requirements import Requirement
+
+    project = PYPROJECT["project"]
+    specs = list(project["dependencies"]) + [s for extra in project["optional-dependencies"].values() for s in extra]
+    pins = {}
+    for path in sorted((ROOT / "constraints").glob("*.txt")):
+        pins.update(_pins(path))
+    for spec in specs:
+        requirement = Requirement(spec)
+        version = pins.get(_normalize(requirement.name))
+        if version is not None:
+            assert requirement.specifier.contains(version, prereleases=True), f"{spec} excludes tested {version}"
+    for name in ["mcp", "numpy", "scipy", "pydantic", "torch", "transformers"]:
+        assert name in pins, f"constraints should pin {name}"

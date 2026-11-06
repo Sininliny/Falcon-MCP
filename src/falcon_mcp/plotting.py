@@ -7,6 +7,15 @@ from pathlib import Path
 
 import numpy as np
 
+MISSING_HINT = "PNG/SVG plots need the optional [plot] extra: pip install -e \".[plot]\""
+
+
+def available() -> bool:
+    """True when Matplotlib (the optional [plot] extra) is installed."""
+    import importlib.util
+
+    return importlib.util.find_spec("matplotlib") is not None
+
 
 def figure(root: Path, title: str):
     os.environ.setdefault("MPLCONFIGDIR", str(root / ".matplotlib"))

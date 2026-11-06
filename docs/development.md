@@ -149,13 +149,13 @@ Separate evidence levels. A passing unit test is not a live result, and a live r
 ```powershell
 .\install-windows.cmd -DryRun                  # show every action and config diff, change nothing
 .\install-windows.cmd                          # install or update everything
-.\install-windows.cmd -Extras capture,host,feedback -SkipCodex   # -SkipClaudeDesktop / -SkipClaudeCode too
+.\install-windows.cmd -Extras capture,host,plot,feedback -SkipCodex   # -SkipClaudeDesktop / -SkipClaudeCode too
 ```
 
 | Step | What it does |
 |---|---|
 | Python | Finds Python 3.11+ (`py` launcher or `python`); installs Python 3.12 with winget only if none is found. |
-| Package | Creates `.venv` if missing, then `pip install -e ".[capture,host]"` (change with `-Extras`). Satisfied dependencies are not upgraded, so a running server's DLLs stay untouched. |
+| Package | Creates `.venv` if missing, then `pip install -e ".[capture,host,plot]"` (change with `-Extras`). On Python 3.12 it adds `-c constraints\windows-py312.txt`, the versions the live tests passed with on the Windows test machine; `-NoConstraints` uses the newest versions pyproject allows. `constraints\windows-py312-feedback.txt` records the tested `[feedback]` stack. Satisfied dependencies are not upgraded, so a running server's DLLs stay untouched. |
 | Runtime home | Sets the user variable `FALCON_MCP_HOME=<repo>\.runtime` (skip with `-NoUserEnv`) and runs `falcon_mcp prepare`. |
 | Detect agents | Claude Desktop: a profile folder under `%APPDATA%\Claude` or a Microsoft Store `Claude_*` package. Claude Code: the `claude` command, `%USERPROFILE%\.claude.json` or `%USERPROFILE%\.claude` (Claude Desktop's built-in Code mode uses these too). Codex: the `codex` command or `%USERPROFILE%\.codex`. Agents not found are skipped. |
 | Skill | Builds the skill with `scripts/build_skill.py` into `.runtime\skill-build`, then for each detected agent copies it to `%USERPROFILE%\.claude\skills` (Claude Code) or `%USERPROFILE%\.agents\skills` (Codex), and builds `.runtime\falcon-instrument-workflow.zip`. Claude Desktop account skills cannot be installed from disk: upload the ZIP under **Customize > Skills**. |

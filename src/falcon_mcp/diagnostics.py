@@ -200,6 +200,27 @@ def create_diagnostics(config: Config, path: Path, fundamental_hz: float | None 
     report.update(report_id=identifier, source=str(path), spectrum=psd, spectrogram=gram)
     destination = root / (identifier + ".audio.json")
     atomic_json(destination, report)
+    from . import plotting
+
+    files = {"json": str(destination)}
+    if plotting.available():
+        files.update(_write_plots(root, identifier, audio, rate, psd, gram, report))
+    else:
+        files["plots_skipped"] = plotting.MISSING_HINT
+    return {
+        "report_id": identifier,
+        "files": files,
+        "measurements": report["measurements"],
+        "loudness": report["loudness"],
+        "estimated_true_peak_dbfs": report["estimated_true_peak_dbfs"],
+        "stereo": report.get("stereo"),
+        "findings": report["findings"],
+        "bands": psd["bands"],
+        "note": "Full spectrum, spectrogram, envelope and optional harmonic data are in the JSON artifact.",
+    }
+
+
+def _write_plots(root, identifier, audio, rate, psd, gram, report) -> dict:
     from .plotting import line_plot, spectrogram_plot, stereo_plot
 
     plots = {
@@ -230,20 +251,10 @@ def create_diagnostics(config: Config, path: Path, fundamental_hz: float | None 
     plots["waveform"] = line_plot(
         root, "Falcon peak waveform overview", times, [peak], "Time (s)", "Peak amplitude"
     )
-    files = {"json": str(destination)}
+    files = {}
     for kind, fig in plots.items():
         for ext in ["svg", "png"]:
             p = root / (identifier + "." + kind + "." + ext)
             fig.savefig(p, format=ext, metadata={"Date": None} if ext == "svg" else None)
             files[kind if ext == "svg" else kind + "_png"] = str(p)
-    return {
-        "report_id": identifier,
-        "files": files,
-        "measurements": report["measurements"],
-        "loudness": report["loudness"],
-        "estimated_true_peak_dbfs": report["estimated_true_peak_dbfs"],
-        "stereo": report.get("stereo"),
-        "findings": report["findings"],
-        "bands": psd["bands"],
-        "note": "Full spectrum, spectrogram, envelope and optional harmonic data are in the JSON artifact.",
-    }
+    return files

@@ -51,6 +51,7 @@ def main():
         cfg.model_cache.mkdir(parents=True, exist_ok=True)
         path = snapshot_download(
             cfg.model_id,
+            revision=cfg.model_revision or None,
             cache_dir=str(cfg.model_cache),
             allow_patterns=[
                 "*.json",
@@ -64,7 +65,7 @@ def main():
                 "LICENSE*",
             ],
         )
-        print(json.dumps({"downloaded": path, "model_loaded": False}, ensure_ascii=False))
+        print(json.dumps({"downloaded": path, "revision": cfg.model_revision or "main", "model_loaded": False}, ensure_ascii=False))
     elif args.command == "describe":
         from .audio import FeedbackRunner
 

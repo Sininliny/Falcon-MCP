@@ -20,6 +20,9 @@ Choose a permanent absolute `FALCON_MCP_HOME`. The generated launcher embeds thi
 Optional components:
 
 ```powershell
+# PNG/SVG plots for diagnostics and diagrams (Matplotlib).
+.venv\Scripts\python.exe -m pip install -e ".[plot]"
+
 # Windows WASAPI output capture.
 .venv\Scripts\python.exe -m pip install -e ".[capture]"
 
@@ -31,7 +34,7 @@ Optional components:
 .venv\Scripts\python.exe -m falcon_mcp download-model
 ```
 
-Feedback is optional for control, project parsing, UML, and signal diagnostics. `download-model` downloads weights without loading them. Inference defaults to offline CPU execution and runs in a worker that exits after each call. To reuse a separate PyTorch/CUDA environment, install the project and feedback dependencies there, set `FALCON_AUDIO_PYTHON` to its absolute Python path, and download weights with that interpreter and the same cache settings.
+Feedback is optional for control, project parsing, UML, and signal diagnostics. `download-model` downloads weights without loading them, at the pinned default commit `8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a` (`FALCON_MODEL_REVISION` overrides it). Inference defaults to offline CPU execution and runs in a worker that exits after each call. To reuse a separate PyTorch/CUDA environment, install the project and feedback dependencies there, set `FALCON_AUDIO_PYTHON` to its absolute Python path, and download weights with that interpreter and the same cache settings.
 
 ## 2. Install the Master launcher once
 

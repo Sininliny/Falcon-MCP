@@ -343,9 +343,14 @@ class ProjectInspector:
             path = report_path(self.config, export_id, suffix)
             path.write_text(content, encoding="utf8")
             outputs[suffix[1:]] = str(path)
-        png = report_path(self.config, export_id, ".png")
-        render_graph_png(nodes, edges, png, self.config.report_root)
-        outputs["png"] = str(png)
+        from . import plotting
+
+        if plotting.available():
+            png = report_path(self.config, export_id, ".png")
+            render_graph_png(nodes, edges, png, self.config.report_root)
+            outputs["png"] = str(png)
+        else:
+            outputs["png_skipped"] = plotting.MISSING_HINT
         return {
             "report_id": identifier,
             "export_id": export_id,

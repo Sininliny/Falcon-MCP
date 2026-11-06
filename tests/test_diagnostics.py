@@ -78,3 +78,19 @@ def test_exported_figures_and_data(config):
         assert Path(result["files"][kind + "_png"]).stat().st_size > 1000
     data = json.loads(Path(result["files"]["json"]).read_text(encoding="utf8"))
     assert data["spectrogram"]["psd_dbfs_per_hz"]
+
+
+def test_diagnostics_without_plot_extra_keeps_json(config, monkeypatch):
+    from pathlib import Path
+
+    from falcon_mcp import plotting
+
+    monkeypatch.setattr(plotting, "available", lambda: False)
+    config.audio_root.mkdir()
+    path = config.audio_root / "tone.wav"
+    audio, rate = tone()
+    sf.write(path, audio, rate)
+    result = create_diagnostics(config, path)
+    assert "[plot]" in result["files"]["plots_skipped"]
+    assert "spectrum" not in result["files"]
+    assert json.loads(Path(result["files"]["json"]).read_text(encoding="utf8"))["spectrogram"]
