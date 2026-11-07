@@ -460,7 +460,7 @@ def _explain(row: dict) -> str:
     for voice in row["previous_voices"][:4]:
         if voice["taken_over_by_this_key"]:
             parts.append(f"Took over the {voice['role']} voice of key {voice['owner_note']} (retuned, no new "
-                         f"attack); that voice is {MODE_TEXT[voice['mode']]}.")
+                         f"attack); its release rule: {MODE_TEXT[voice['mode']]}.")
         elif voice["released_after_on_ms"] is None:
             parts.append(f"Old {voice['role']} voice of key {voice['owner_note']} was never released.")
         else:
