@@ -136,6 +136,7 @@ class FeedbackRunner:
             "worker_pid": self.process.pid if active else None,
             "lifecycle": "one process per call; always exit after inference",
             "model_id": self.config.model_id,
+            "model_revision": self.config.model_revision or "main",
             "device": self.config.device,
             "offline": self.config.local_files_only,
             "cache": str(self.config.model_cache),
@@ -156,6 +157,7 @@ class FeedbackRunner:
             payload = {
                 "path": str(path),
                 "model_id": self.config.model_id,
+                "revision": self.config.model_revision or None,
                 "cache": str(self.config.model_cache),
                 "device": self.config.device,
                 "offline": self.config.local_files_only,

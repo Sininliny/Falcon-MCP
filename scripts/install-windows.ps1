@@ -20,12 +20,14 @@
 .EXAMPLE
     .\install-windows.cmd -DryRun
 .EXAMPLE
-    .\install-windows.cmd -SkipCodex -Extras capture,host,feedback
+    .\install-windows.cmd -SkipCodex -Extras capture,host,plot,feedback
+.EXAMPLE
+    .\install-windows.cmd -NoConstraints   # use the newest versions pyproject allows
 #>
 [CmdletBinding()]
 param(
     [switch]$DryRun,
-    [string[]]$Extras = @('capture', 'host'),
+    [string[]]$Extras = @('capture', 'host', 'plot'),
     [string]$RuntimeHome,
     [switch]$SkipPython,
     [switch]$SkipClaudeDesktop,
@@ -34,7 +36,8 @@ param(
     [switch]$SkipSkill,
     [switch]$SkipConfig,
     [switch]$NoWinget,
-    [switch]$NoUserEnv
+    [switch]$NoUserEnv,
+    [switch]$NoConstraints
 )
 
 Set-StrictMode -Version 2.0
@@ -205,7 +208,15 @@ if ($SkipPython) { Skip-Step 'Python and falcon-mcp package' '-SkipPython' } els
         Invoke-Native $VenvPython @('-m', 'pip', 'install', '--upgrade', 'pip')
         $spec = if ($Extras.Count -gt 0) { "$Repo[$($Extras -join ',')]" } else { $Repo }
         # Without --upgrade, pip keeps satisfied dependencies, so DLLs loaded by a running server stay untouched.
-        Invoke-Native $VenvPython @('-m', 'pip', 'install', '-e', $spec)
+        $pipArgs = @('-m', 'pip', 'install', '-e', $spec)
+        # Pin to the versions the live tests passed with (constraints\windows-py312.txt) on Python 3.12.
+        $constraints = Join-Path $Repo 'constraints\windows-py312.txt'
+        $venvVersion = if ($DryRun -and -not (Test-Path $VenvPython)) { $script:Python.Version } else {
+            Get-NativeText $VenvPython @('-c', 'import sys; print(*sys.version_info[:2], sep=chr(46))') }
+        if (-not $NoConstraints -and (Test-Path $constraints) -and $venvVersion -eq '3.12') {
+            $pipArgs += @('-c', $constraints)
+        } elseif (-not $NoConstraints) { Write-Info "no tested constraints for Python $venvVersion; using pyproject ranges" }
+        Invoke-Native $VenvPython $pipArgs
         if (-not $DryRun) { "falcon-mcp $(Get-NativeText $VenvPython @('-c', 'import falcon_mcp; print(falcon_mcp.__version__)'))" }
     }
 }

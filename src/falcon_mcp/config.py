@@ -5,6 +5,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+DEFAULT_MODEL_ID = "laion/clap-htsat-unfused"
+DEFAULT_MODEL_REVISION = "8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a"
+
 
 @dataclass(frozen=True)
 class Config:
@@ -14,6 +17,8 @@ class Config:
     audio_python: str = sys.executable
     device: str = "cpu"
     model_id: str = "laion/clap-htsat-unfused"
+    # Hub commit of the default model that the Windows test machine runs; empty means the latest "main".
+    model_revision: str = DEFAULT_MODEL_REVISION
     local_files_only: bool = True
     bridge_timeout: float = 15.0
     model_timeout: float = 180.0
@@ -41,13 +46,17 @@ class Config:
     @classmethod
     def from_env(cls) -> Config:
         base = Path(os.environ.get("FALCON_MCP_HOME", Path.home() / ".falcon-mcp")).resolve()
+        model_id = os.environ.get("FALCON_MODEL_ID", DEFAULT_MODEL_ID)
+        # A custom model has no known tested commit, so it follows "main" unless a revision is given.
+        revision = os.environ.get("FALCON_MODEL_REVISION", DEFAULT_MODEL_REVISION if model_id == DEFAULT_MODEL_ID else "")
         return cls(
             runtime=base / "bridge",
             audio_root=Path(os.environ.get("FALCON_AUDIO_ROOT", base / "audio")).resolve(),
             model_cache=Path(os.environ.get("FALCON_MODEL_CACHE", base / "models")).resolve(),
             audio_python=os.environ.get("FALCON_AUDIO_PYTHON", sys.executable),
             device=os.environ.get("FALCON_MODEL_DEVICE", "cpu"),
-            model_id=os.environ.get("FALCON_MODEL_ID", "laion/clap-htsat-unfused"),
+            model_id=model_id,
+            model_revision=revision,
             local_files_only=os.environ.get("FALCON_MODEL_OFFLINE", "1") != "0",
             bridge_timeout=float(os.environ.get("FALCON_BRIDGE_TIMEOUT", "15")),
             model_timeout=float(os.environ.get("FALCON_MODEL_TIMEOUT", "180")),

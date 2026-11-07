@@ -23,7 +23,7 @@ $env:FALCON_MCP_HOME = (Join-Path $PWD '.runtime')
 
 Load the generated `falcon_bridge.lua` into **one Master Script Processor**, save a recovery Multi and the default Multi, then follow the guide's restart test. The persistent launcher deploys runtime updates without Watch or repeated mouse operation. Reconnect an existing Codex MCP service after upgrading its Python package.
 
-Optional extras: `[capture]` for Windows WASAPI loopback; `[feedback]` for PyTorch/Transformers. Neither is required for engine control, project parsing, UML, or file-based diagnostics.
+Optional extras: `[plot]` for PNG/SVG plots (Matplotlib; without it, reports keep their JSON and skip the images); `[capture]` for Windows WASAPI loopback; `[feedback]` for PyTorch/Transformers. None is required for engine control, project parsing, UML, or file-based diagnostics.
 
 For file operations without desktop automation, install `[host]` and call `falcon_native_host(action="start")`. This uses a separate licensed Falcon VST3 instance; no Master bridge installation is needed for that context. It cannot extract unsaved state from the already-open standalone. See [native hosting and reference-audio workflow](docs/native-and-reference.md).
 
@@ -192,7 +192,7 @@ Native extensions run inside Falcon's Lua sandbox. The stable launcher reads tru
 
 CLAP matches audio against English text descriptors; it is not a generative audio-question-answering model or an objective quality score. Pick the descriptor bank that fits the instrument: `synth` (default), `keys` (concert grand, upright, felt and honky-tonk piano, Rhodes, Wurlitzer; hammer, mechanics, perspective, pedal, tremolo), `all`, or `custom`. Your own facets can be passed inline as `custom_descriptors` or as a `.json` file `descriptor_file` (under the audio root or assets, layout `[{"facet": ..., "items": [{"label": ..., "text": ...}]}]`). Similar instruments often share top labels, so `falcon_compare_audio` and `falcon_compare_reference` also list the largest per-descriptor score changes. Compare identical notes, velocities, gains, targets, and capture conditions. Feedback does not infer Falcon parameter values or change patches automatically.
 
-The server does not import the model runtime during startup/control. Each non-silent feedback call starts a worker, loads weights, returns results, and exits; timeout/cancellation terminates and reaps it. RAM/VRAM is released; cached weights remain on disk. The default model is Apache-2.0-licensed `laion/clap-htsat-unfused`; inference defaults to offline CPU execution.
+The server does not import the model runtime during startup/control. Each non-silent feedback call starts a worker, loads weights, returns results, and exits; timeout/cancellation terminates and reaps it. RAM/VRAM is released; cached weights remain on disk. The default model is Apache-2.0-licensed `laion/clap-htsat-unfused`, pinned to Hub commit `8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a` (the snapshot used on the Windows test machine; override with `FALCON_MODEL_REVISION`, empty for latest). A custom `FALCON_MODEL_ID` follows `main` unless `FALCON_MODEL_REVISION` is set. Inference defaults to offline CPU execution.
 
 Capture accepts Windows WASAPI output loopback, never a microphone fallback. For file analysis, place WAV/FLAC/AIFF/OGG files under `FALCON_AUDIO_ROOT` (default: `<home>/audio`).
 
@@ -212,7 +212,7 @@ Audit JSONL records include UTC timestamps, trace/session IDs, arguments/results
 
 See [0.3 validation and usage](docs/native-and-reference.md), [0.2.4 regression results](docs/changes-0.2.4.md), and [historical standalone acceptance](docs/validation.md). Automated tests, signature coverage and native compatibility remain separate evidence.
 
-License: [Apache-2.0](LICENSE).
+License: [GPL-3.0-or-later](LICENSE). The optional `[host]` extra uses pedalboard, which is GPLv3.
 
 ## Development
 

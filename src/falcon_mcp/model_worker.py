@@ -25,7 +25,8 @@ def infer(request: dict) -> dict:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     if device not in {"cpu", "cuda"}:
         raise ValueError("FALCON_MODEL_DEVICE must be cpu, cuda or auto")
-    model_options = {"cache_dir": request["cache"], "local_files_only": request["offline"]}
+    model_options = {"cache_dir": request["cache"], "local_files_only": request["offline"],
+                     "revision": request.get("revision") or None}
     processor = ClapProcessor.from_pretrained(request["model_id"], **model_options)
     # The upstream LAION checkpoint uses pytorch_model.bin; Torch >=2.6 uses
     # weights_only loading. Prefer safetensors automatically when supplied locally.
@@ -99,6 +100,7 @@ def infer(request: dict) -> dict:
         "description": summary + ".",
         "method": "CLAP audio/text descriptor retrieval",
         "model_id": request["model_id"],
+        "model_revision": request.get("revision") or "main",
         "device": device,
         "descriptor_bank": request.get("bank", "synth"),
         "facets": facets,

@@ -1,0 +1,9 @@
+# [feedback] versions in the Windows test machine's separate .audio-venv (Python 3.12.9, a conda-based
+# environment; FALCON_AUDIO_PYTHON points to it). Recorded 2026-11-06. torch there is the CUDA 12.8 build
+# 2.7.0+cu128 from the PyTorch index; "torch==2.7.0" also accepts that local build. Use with
+# pip install -e ".[feedback]" -c constraints/windows-py312-feedback.txt
+torch==2.7.0
+transformers==4.49.0
+huggingface_hub==0.29.2
+tokenizers==0.21.0
+safetensors==0.5.3
